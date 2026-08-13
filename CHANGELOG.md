@@ -16,5 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DXNKeyword`, `DXNList`, `DXNTuple`, `DXNOrderedMap`,
   `DXNSortedSet`, `DXNStruct`, `DXNDecimal`, `DXNRational`, `DXNChar`,
   `DXNDate`, `DXNTime`, `DXNTimestamp`, `DXNDateTime`, `DXNDuration`,
-  `DXNUUID`, `DXNURI`, `DXNBytes`, `DXNRegex`, `DXNCustomTag`), plus a
-  shared value equality/ordering kernel.
+  `DXNUUID`, `DXNURI`, `DXNBytes`, `DXNRegex`, `DXNCustomTag`), each
+  with documented two-way conversion helpers to/from its closest
+  native JS counterpart where one genuinely exists.
+- Shared structural equality/ordering kernel (`src/values/equality.js`,
+  `dxnEquals`/`dxnCompare`/`canonicalKey`/`kindOf`) backing every
+  value shape, native and wrapped alike.
+- `require('dextrin')`/`import 'dextrin'` entry point
+  (`src/dextrin.{cjs,js}`) currently re-exporting the value model and
+  package version; `decode`/`encode`/`decodeBinary`/`encodeBinary`
+  land in later phases.
