@@ -212,7 +212,8 @@ npx dextrin validate data.dxn [--schema schema.dxns --as Name]
 npm install dextrin
 ```
 
-(Not yet published — still finishing the port before the first release.)
+(Not yet published to npm — the port itself is finished; see
+`CHANGELOG.md`.)
 
 ## Development
 
@@ -224,6 +225,9 @@ npm run precommit
 `npm run precommit` runs `tsc --checkJs --noEmit` (type-checking the
 JSDoc annotations) followed by the full Mocha test suite — the check
 this project expects to pass before every commit.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
+[CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
