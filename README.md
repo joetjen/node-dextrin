@@ -7,10 +7,11 @@ human-writable text format (`.dxn`), a compact binary format
 sharing one in-memory value representation and one extension
 mechanism.
 
-**Status: early port, in progress.** The value model, the `.dxn` text
-codec, the `.dxnb` binary codec, and the `.dxns` schema system are all
-implemented. Remaining: polish (ported guides, an optional CLI) and
-publishing to npm. See `CHANGELOG.md` for exactly what's landed.
+**Status: feature-complete port, not yet published.** The value model,
+the `.dxn` text codec, the `.dxnb` binary codec, the `.dxns` schema
+system, the `dextrin` CLI, and the guides are all implemented.
+Remaining: publishing to npm. See `CHANGELOG.md` for exactly what's
+landed.
 
 ## Why a port, and why this value model
 
@@ -181,6 +182,29 @@ const registry = Schema.compile(decode('%{ Age: PositiveInteger }'), withStd);
 
 const fileBackedRegistry = new Registry().putResolver(FileResolver.forPaths(['./schemas']));
 ```
+
+## CLI
+
+```sh
+npx dextrin decode data.dxnb                                       # -> pretty-printed .dxn text
+npx dextrin encode data.dxn --out data.dxnb                         # -> .dxnb binary
+npx dextrin format data.dxn --mode pretty|condense [--in-place]
+npx dextrin validate data.dxn [--schema schema.dxns --as Name]
+```
+
+## Guides
+
+- [Tutorial](guides/TUTORIAL.md) — a walkthrough of the JS API, every
+  snippet verified to actually run.
+- [Examples](guides/EXAMPLES.md) — worked scenarios (config files,
+  schema-backed API payloads, cross-file schemas, third-party schema
+  providers, ...).
+- [Cheatsheet](guides/CHEATSHEET.md) — quick API/type/CLI lookups.
+- [DXN reference](guides/dxn/DXN.md) — the full, implementation
+  -independent format specification, plus its own
+  [tutorial](guides/dxn/TUTORIAL.md),
+  [examples](guides/dxn/DXN_EXAMPLES.md), and
+  [cheatsheet](guides/dxn/DXN_CHEATSHEET.md) for the format itself.
 
 ## Installation
 

@@ -14,9 +14,13 @@
       "default": "./src/dextrin.cjs"
     }
   },
+  "bin": {
+    "dextrin": "./bin/dextrin.js"
+  },
   "files": [
     "src",
-    "priv"
+    "priv",
+    "bin"
   ],
   "license": "MIT",
   "directories": {

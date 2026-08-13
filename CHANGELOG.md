@@ -83,6 +83,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a plain, duck-typed object shape (no Elixir-style `@behaviour`/
   `Code.ensure_loaded?` ceremony needed; see that module's own doc for
   why those don't translate to Node the same way).
+- `dextrin` CLI (`bin/dextrin.js`, wired via `package.json`'s `bin`
+  field): `decode`/`encode`/`format`/`validate` subcommands, the
+  Node-idiomatic analog of `dextrin`'s per-`mix dextrin.*`-task
+  layout. No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.
+  unicode` (see the CLI's own file-level doc for why), and `encode`
+  has no `--share` flag yet (`.dxnb` encoding doesn't produce
+  value-sharing output, see the binary codec notes above).
+- Guides: `guides/dxn/{DXN.md,TUTORIAL.md,DXN_EXAMPLES.md,
+  DXN_CHEATSHEET.md}` (the implementation-independent format spec,
+  ported with light JS-facing link/reference edits) and this
+  project's own `guides/{TUTORIAL.md,EXAMPLES.md,CHEATSHEET.md}`
+  (JS-API-level, every code sample verified to actually run).
 
 ### Notes
 
