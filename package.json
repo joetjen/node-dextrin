@@ -15,7 +15,8 @@
     }
   },
   "files": [
-    "src"
+    "src",
+    "priv"
   ],
   "license": "MIT",
   "directories": {

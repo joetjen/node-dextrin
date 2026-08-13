@@ -8,10 +8,9 @@ sharing one in-memory value representation and one extension
 mechanism.
 
 **Status: early port, in progress.** The value model, the `.dxn` text
-codec (`decode`/`encode`), and the `.dxnb` binary codec
-(`decodeBinary`/`encodeBinary`) are implemented; `.dxns` schema
-support lands in a later phase. See `CHANGELOG.md` for exactly what's
-landed.
+codec, the `.dxnb` binary codec, and the `.dxns` schema system are all
+implemented. Remaining: polish (ported guides, an optional CLI) and
+publishing to npm. See `CHANGELOG.md` for exactly what's landed.
 
 ## Why a port, and why this value model
 
@@ -94,10 +93,10 @@ see `src/error.cjs` for why that's a deliberate divergence from
 `Dextrin`'s own `{:ok, _} | {:error, _}` tuples (an API-shape choice,
 not a value-representation one).
 
-No schema/registry support yet — every `struct` decodes as an opaque
+With no `registry:` option, every `struct` decodes as an opaque
 `DXNStruct`, and every tag name other than the built-ins (`@uuid`,
-`@duration`, `@ordered`, ...) decodes as `DXNCustomTag`. `.dxns` lands
-in a later phase.
+`@duration`, `@ordered`, ...) decodes as `DXNCustomTag` — see
+`.dxns` schemas below for schema-backed decoding.
 
 ## `.dxnb` binary
 
@@ -118,14 +117,78 @@ though `encodeBinary` doesn't produce them yet — accepting is
 spec-mandatory, producing is optional, and that asymmetry is
 deliberate for now.
 
+## `.dxns` schemas
+
+```js
+const { decode, encode, Schema, Registry } = require('dextrin');
+
+const schemaDoc = decode(`
+  %{
+    Point: %schema{
+      fields: @ordered %{ x: :float, y: :float }
+    }
+  }
+`);
+const registry = Schema.compile(schemaDoc, new Registry());
+
+decode('%Point{x: 1.0, y: 2.0}', { registry });
+// => { x: 1, y: 2 } -- schema-validated, decode-time enforcement
+
+encode({ x: 1.0, y: 2.0 }, { registry, schema: 'Point' });
+// => '%Point{x:1.0,y:2.0}'
+```
+
+A `struct`/tag with no matching registry entry still falls back to an
+opaque `DXNStruct`/`DXNCustomTag` — a registry only ever *adds*
+capability, never turns an otherwise-valid document into an error.
+
+`encode`/`encodeBinary` automatically validate every registered
+struct anywhere in a value by default (`validate: false` to skip),
+and a `schema:` option additionally validates — and, for a nameless
+plain value, *names* — the top-level value itself against one named
+schema.
+
+**Schema-driven coercion on encode** (`coerce:`, default `true`, no
+Elixir `dextrin` equivalent) lets a field whose value doesn't already
+match its declared type be coerced toward it first, reusing the same
+`DXN*.fromX()` conversion helpers documented above — a plain `number`
+becomes a `DXNRational` for a `:rational` field, a native `Date`
+becomes a `DXNDate` for a `:date` field, and so on, recursively
+through `list-of`/`set-of`/`tuple-of`/`nilable`/`one-of` too. Pass
+`coerce: false` for strict validation with no silent conversion (see
+`src/schema/coercion.cjs`).
+
+```js
+encode({ x: 1, y: 2 }, { registry, schema: 'Point' });
+// x/y are plain numbers already matching :float -- no coercion needed here,
+// but a :rational/:decimal/:uuid/:date/... field would accept the
+// closest native JS shape the same way.
+```
+
+Also included, each mirroring its `Dextrin.Schema.*` counterpart:
+`Schema.registerProvider` (let a class's own library ship its schema
+without depending on `dextrin`, see `src/schema/provider.cjs`),
+`Std.registry()`'s standard library of common named types
+(`PositiveInteger`, `NonEmptyString`, ...), and
+`FileResolver.forPaths([...])`'s `Namespace/Name` → `.dxns`-file
+resolver for `Registry#putResolver`:
+
+```js
+const { decode, Schema, Registry, Std, FileResolver } = require('dextrin');
+
+const withStd = Std.registry(); // PositiveInteger, NonEmptyString, ...
+const registry = Schema.compile(decode('%{ Age: PositiveInteger }'), withStd);
+
+const fileBackedRegistry = new Registry().putResolver(FileResolver.forPaths(['./schemas']));
+```
+
 ## Installation
 
 ```sh
 npm install dextrin
 ```
 
-(Not yet published — the API isn't stable until the text/binary
-codecs land.)
+(Not yet published — still finishing the port before the first release.)
 
 ## Development
 

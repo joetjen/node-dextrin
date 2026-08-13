@@ -8,10 +8,13 @@
  * `Ichor.Actions` implementation into one pass, appropriate for a
  * hand-rolled port with no grammar-compiler step.
  *
- * No schema/registry support yet (`Dextrin.Schema`/`Dextrin.Registry`
- * land in a later phase): every `struct` decodes as an opaque
- * `DXNStruct` and every unrecognized tag as a `DXNCustomTag`, matching
- * `Dextrin.Text.Actions`'s own "no registry" fallback paths exactly.
+ * A `struct` decodes against a compiled schema when `opts.registry`
+ * has one for that name (`Validator.materialize`, same as the binary
+ * decoder); with no registry, or no schema registered for that name,
+ * it falls back to an opaque `DXNStruct` — never a hard failure,
+ * mirroring `Dextrin.Text.Actions`'s own "no registry" fallback
+ * exactly. Same story for a non-built-in tag against `registry.tags`,
+ * falling back to `DXNCustomTag`.
  */
 
 const { tokenize, LexError } = require('./lexer.cjs');
@@ -33,6 +36,8 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
+const Validator = require('../schema/validator.cjs');
+const Validated = require('../schema/validated.cjs');
 
 const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'datetime', 'duration']);
 
@@ -51,12 +56,13 @@ class ParseError extends Error {
 class Parser {
   /**
    * @param {import('./lexer.cjs').Token[]} tokens
-   * @param {{trusted?: boolean}} opts
+   * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
    */
   constructor(tokens, opts) {
     this.tokens = tokens;
     this.pos = 0;
     this.trusted = opts.trusted ?? true;
+    this.registry = opts.registry ?? null;
   }
 
   peek() {
@@ -255,7 +261,7 @@ class Parser {
 
   /**
    * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct).
-   * @returns {Map<unknown, unknown> | DXNStruct}
+   * @returns {Map<unknown, unknown> | DXNStruct | Validated}
    */
   parsePercent() {
     this.next('PERCENT');
@@ -266,14 +272,35 @@ class Parser {
     if (this.at('LBRACE')) {
       /** @type {Array<[string, unknown]>} */
       const pairs = this.parseEntries().map(([key, value]) => [structFieldName(key), value]);
-      return DXNStruct.keyed(name, pairs);
+      return this.materializeStruct(name, { type: 'keyed', pairs });
     }
     this.next('LBRACKET');
     /** @type {unknown[]} */
     const values = [];
     while (!this.at('RBRACKET')) values.push(this.parseValue());
     this.next('RBRACKET');
-    return DXNStruct.positional(name, values);
+    return this.materializeStruct(name, { type: 'positional', values });
+  }
+
+  /**
+   * @param {string} name
+   * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
+   * @returns {DXNStruct | Validated}
+   */
+  materializeStruct(name, fields) {
+    const found = this.registry?.fetchStructSchema(name);
+    if (!found) {
+      return fields.type === 'keyed' ? DXNStruct.keyed(name, fields.pairs) : DXNStruct.positional(name, fields.values);
+    }
+    this.registry = found.registry;
+    const materializer = this.registry.fetchMaterializer(name) ?? null;
+    try {
+      // Fail-fast, decode-time enforcement — a schema violation is an
+      // ordinary parse error, same channel as bad syntax.
+      return Validator.materialize(found.compiled, fields, materializer, this.registry);
+    } catch (err) {
+      throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
+    }
   }
 
   /** `{ map_entry* }`, ordered pairs — used by both `map_lit` and `struct_keyed`. */
@@ -314,6 +341,14 @@ class Parser {
    */
   dispatchTag(name, offset) {
     if (!BUILT_IN_TAGS.has(name)) {
+      const decoder = this.registry?.fetchTag(name);
+      if (decoder) {
+        try {
+          return decoder(this.parseValue());
+        } catch (err) {
+          throw new ParseError(`tag ${JSON.stringify(name)} decoder failed: ${errorMessage(err)}`, offset);
+        }
+      }
       return new DXNCustomTag(name, this.parseValue());
     }
 
@@ -388,13 +423,18 @@ function flagsStringToObject(flags) {
 
 /**
  * @param {string} text
- * @param {{trusted?: boolean}} [opts]
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function parse(text, opts = {}) {
   const tokens = tokenize(text);
   const parser = new Parser(tokens, opts);
-  return parser.parseDocument();
+  return Validated.strip(parser.parseDocument());
+}
+
+/** @param {unknown} err @returns {string} */
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
 }
 
 module.exports = { parse, ParseError, LexError };

@@ -28,7 +28,7 @@ const DEFAULT_INDENT = 2;
 
 /**
  * @param {unknown} value
- * @param {{indent?: number, [k: string]: unknown}} [opts]
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} [opts]
  * @returns {string}
  */
 function pretty(value, opts = {}) {
@@ -38,7 +38,7 @@ function pretty(value, opts = {}) {
 /**
  * @param {unknown} value
  * @param {number} depth
- * @param {{indent?: number, [k: string]: unknown}} opts
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  * @returns {string}
  */
 function render(value, depth, opts) {
@@ -70,6 +70,20 @@ function render(value, depth, opts) {
     return `%${value.name}${bracketed('[', value.fields.values, ']', depth, opts)}`;
   }
 
+  // A registered application class instance — rebuilt as the
+  // equivalent keyed DXNStruct and re-rendered through the clause
+  // above, so it gets the same multi-line treatment as an opaque
+  // DXNStruct with the same shape, rather than inconsistently
+  // squashing to single-line just because a schema happens to be
+  // registered for this one name. No match at all falls through to
+  // the scalar/Printer.print path below unchanged.
+  const registry = opts.registry;
+  if (registry && value !== null && typeof value === 'object' && !(value instanceof DXNStruct)) {
+    const name = registry.fetchSchemaNameForModule(value.constructor);
+    const found = name && registry.fetchStructSchema(name);
+    if (found) return render(DXNStruct.keyed(name, found.compiled.fieldValues(value)), depth, opts);
+  }
+
   // Every scalar, every empty collection, and any struct-shaped
   // extension type the printer already handles directly (Regex, Date,
   // Decimal, DXNUUID, ...) needs no multi-line treatment.
@@ -86,7 +100,7 @@ function indentUnit(opts) {
  * @param {unknown[]} items
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, [k: string]: unknown}} opts
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  */
 function bracketed(open, items, close, depth, opts) {
   const innerDepth = depth + 1;
@@ -102,7 +116,7 @@ function bracketed(open, items, close, depth, opts) {
  * @param {Array<[unknown, unknown]>} pairs
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, [k: string]: unknown}} opts
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  */
 function bracketedEntries(open, pairs, close, depth, opts) {
   const innerDepth = depth + 1;
@@ -120,7 +134,7 @@ function bracketedEntries(open, pairs, close, depth, opts) {
  * @param {unknown} key
  * @param {unknown} value
  * @param {number} depth
- * @param {{indent?: number, [k: string]: unknown}} opts
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  */
 function renderEntry(key, value, depth, opts) {
   const name = typeof key === 'string' ? key : Printer.keywordEntryName(key);

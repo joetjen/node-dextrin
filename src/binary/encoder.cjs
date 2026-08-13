@@ -120,6 +120,41 @@ function encodeItem(value, opts) {
     return tag(Tags.T_CUSTOM, arrayOf([textItem(value.name), encodeItem(value.value, opts)]));
   }
 
+  return encodeViaRegistry(value, opts);
+}
+
+/**
+ * Reached only for a value none of the clauses above recognized —
+ * i.e. a genuine application class instance. Two independent
+ * extension points, checked in order: a schema-registered class is
+ * rebuilt as the equivalent positional `DXNStruct` (`.dxnb` structs
+ * are always positional, `DXN.md` §2.1) and re-encoded through
+ * `encodeStruct`, reusing its recursive field encoding; only if no
+ * schema class matches does this fall through to a registered tag
+ * encoder.
+ * @param {unknown} value
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @returns {Buffer}
+ */
+function encodeViaRegistry(value, opts) {
+  const registry = opts.registry;
+  if (registry && value !== null && typeof value === 'object') {
+    const name = registry.fetchSchemaNameForModule(value.constructor);
+    if (name) {
+      const found = registry.fetchStructSchema(name);
+      if (found) {
+        const values = found.compiled.fieldValues(/** @type {object} */ (value)).map(([, v]) => v);
+        return encodeStruct(DXNStruct.positional(name, values), opts);
+      }
+    }
+
+    const tagEncoder = registry.fetchTagEncoder(value.constructor);
+    if (tagEncoder) {
+      const [tagName, encoder] = tagEncoder;
+      return tag(Tags.T_CUSTOM, arrayOf([textItem(tagName), encodeItem(encoder(value), opts)]));
+    }
+  }
+
   throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
 }
 

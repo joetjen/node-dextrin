@@ -42,9 +42,10 @@ const REGEX_FLAG_ORDER = /** @type {const} */ (['i', 'm', 's', 'u', 'x', 'f', 'r
 
 /**
  * @param {unknown} value
- * @param {{[k: string]: unknown}} [opts] reserved for future options
- * (`registry:`, once the schema system lands) — accepted but unused
- * today, matching `Dextrin.Text.Printer.print/2`'s own `opts` param.
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} [opts]
+ * `registry:` lets a genuine application class instance (registered
+ * via `schema.compile`/`Registry#putStructModule` or
+ * `Registry#putTagEncoder`) be printed directly, see `printViaRegistry`.
  * @returns {string}
  */
 function print(value, opts = {}) {
@@ -90,6 +91,38 @@ function print(value, opts = {}) {
   if (value instanceof DXNRegex) return `~r/${value.pattern}/${printRegexFlags(value.flags)}`;
 
   if (value instanceof DXNCustomTag) return tagForm(value.name, print(value.value, opts), opts);
+
+  return printViaRegistry(value, opts);
+}
+
+/**
+ * Reached only for a value none of the clauses above recognized —
+ * i.e. a genuine application class instance. Two independent
+ * extension points, checked in order: a schema-registered class is
+ * rebuilt as the equivalent keyed `DXNStruct` and re-printed through
+ * that existing clause (reusing its recursive field printing rather
+ * than duplicating it); only if no schema class matches does this
+ * fall through to a registered tag encoder, the custom-tag-style
+ * escape hatch for anything without real field structure.
+ * @param {unknown} value
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @returns {string}
+ */
+function printViaRegistry(value, opts) {
+  const registry = opts.registry;
+  if (registry && value !== null && typeof value === 'object') {
+    const name = registry.fetchSchemaNameForModule(value.constructor);
+    if (name) {
+      const found = registry.fetchStructSchema(name);
+      if (found) return printStruct(DXNStruct.keyed(name, found.compiled.fieldValues(/** @type {any} */ (value))), opts);
+    }
+
+    const tagEncoder = registry.fetchTagEncoder(value.constructor);
+    if (tagEncoder) {
+      const [tagName, encoder] = tagEncoder;
+      return tagForm(tagName, print(encoder(value), opts), opts);
+    }
+  }
 
   throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
 }
