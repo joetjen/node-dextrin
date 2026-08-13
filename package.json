@@ -22,6 +22,7 @@
     "src": "./src"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "auto-changelog": "^2.6.0",
     "chai": "^6.2.2",
     "fast-check": "^3.23.0",
