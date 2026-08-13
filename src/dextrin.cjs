@@ -2,9 +2,9 @@
 
 /**
  * @fileoverview Public entry point. Exports the DXN value model
- * (`src/values/`), the `.dxn` text codec (`decode`/`encode`), and
- * `DXNError`. `decodeBinary`/`encodeBinary` (`.dxnb`) land in a later
- * phase.
+ * (`src/values/`), the `.dxn` text codec (`decode`/`encode`), the
+ * `.dxnb` binary codec (`decodeBinary`/`encodeBinary`), and
+ * `DXNError`.
  */
 
 const version = require('./version.cjs');
@@ -13,6 +13,8 @@ const DXNError = require('./error.cjs');
 const parser = require('./text/parser.cjs');
 const printer = require('./text/printer.cjs');
 const formatter = require('./text/formatter.cjs');
+const binaryEncoder = require('./binary/encoder.cjs');
+const binaryDecoder = require('./binary/decoder.cjs');
 
 /**
  * Decodes `.dxn` text into a value — every DXN type maps to a native
@@ -64,4 +66,38 @@ function encode(value, opts = {}) {
   }
 }
 
-module.exports = { version, decode, encode, DXNError, ...values };
+/**
+ * Decodes a `.dxnb` binary into a value. Same `trusted:` opt as
+ * `decode`, same effect. Throws `DXNError` on malformed input,
+ * including a missing/invalid envelope (`DX` magic + version byte).
+ *
+ * @param {Uint8Array} bytes
+ * @param {{trusted?: boolean}} [opts]
+ * @returns {unknown}
+ */
+function decodeBinary(bytes, opts = {}) {
+  try {
+    return binaryDecoder.decode(bytes, opts);
+  } catch (err) {
+    throw DXNError.wrap(err, 'binary');
+  }
+}
+
+/**
+ * Encodes a value to `.dxnb` binary, returning a `Buffer`. Throws
+ * `DXNError` for a value with no DXN representation at all. No
+ * schema validation yet, same as `encode`.
+ *
+ * @param {unknown} value
+ * @param {{[k: string]: unknown}} [opts]
+ * @returns {Buffer}
+ */
+function encodeBinary(value, opts = {}) {
+  try {
+    return binaryEncoder.encode(value, opts);
+  } catch (err) {
+    throw DXNError.wrap(err, 'binary');
+  }
+}
+
+module.exports = { version, decode, encode, decodeBinary, encodeBinary, DXNError, ...values };
