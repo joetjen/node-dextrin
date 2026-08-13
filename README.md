@@ -7,11 +7,10 @@ human-writable text format (`.dxn`), a compact binary format
 sharing one in-memory value representation and one extension
 mechanism.
 
-**Status: early port, in progress.** The `.dxn`/`.dxnb`/`.dxns`
-pipelines aren't implemented yet — this repo currently has the core
-value model only (see below). Follow-on work adds the text codec,
-binary codec, and schema system in that order; see `CHANGELOG.md` for
-what's landed.
+**Status: early port, in progress.** The value model and the `.dxn`
+text codec (`decode`/`encode`) are implemented; `.dxnb` binary and
+`.dxns` schema support land in later phases. See `CHANGELOG.md` for
+exactly what's landed.
 
 ## Why a port, and why this value model
 
@@ -69,6 +68,35 @@ DXNRational.fromNumber(0.5); // => DXNRational { numerator: 1n, denominator: 2n 
 const id = DXNUUID.fromString('550e8400-e29b-41d4-a716-446655440000');
 id.toString(); // => '550e8400-e29b-41d4-a716-446655440000'
 ```
+
+## `.dxn` text
+
+```js
+const { decode, encode } = require('dextrin');
+
+const value = decode('%{x: 1, y: 2}');
+// => Map(2) { Symbol(x) => 1n, Symbol(y) => 2n }
+
+encode(value);
+// => '%{x:1,y:2}'
+
+encode(value, { pretty: true });
+// => '%{\n  x: 1\n  y: 2\n}'
+```
+
+`keyword` (`:name`) decodes as a real, global `Symbol.for(name)` by
+default (`trusted: true`) — the closest native analog to a BEAM atom.
+Pass `trusted: false` for any source you don't fully control; it then
+decodes as `DXNKeyword` instead, the same way `Dextrin.Keyword` exists
+on the Elixir side. `decode`/`encode` throw `DXNError` on failure —
+see `src/error.cjs` for why that's a deliberate divergence from
+`Dextrin`'s own `{:ok, _} | {:error, _}` tuples (an API-shape choice,
+not a value-representation one).
+
+No schema/registry support yet — every `struct` decodes as an opaque
+`DXNStruct`, and every tag name other than the built-ins (`@uuid`,
+`@duration`, `@ordered`, ...) decodes as `DXNCustomTag`. `.dxns` lands
+in a later phase.
 
 ## Installation
 
