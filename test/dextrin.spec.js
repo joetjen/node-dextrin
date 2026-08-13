@@ -40,6 +40,34 @@ describe('dextrin (top-level API)', () => {
     });
   });
 
+  describe('decodeBinary/encodeBinary', () => {
+    it('encodeBinary/decodeBinary round-trip a value', () => {
+      const value = esm.decode('%{x: 1, y: [1 2 3]}');
+      const bin = esm.encodeBinary(value);
+      expect(esm.encode(esm.decodeBinary(bin))).to.equal(esm.encode(value));
+    });
+
+    it('encodeBinary returns a Buffer with the DX envelope', () => {
+      const bin = esm.encodeBinary(42n);
+      expect(Buffer.isBuffer(bin)).to.equal(true);
+      expect(bin.subarray(0, 3)).to.deep.equal(Buffer.from([0x44, 0x58, 0x01]));
+    });
+
+    it('decodeBinary throws DXNError on a malformed envelope', () => {
+      expect(() => esm.decodeBinary(Buffer.from([0, 0, 0]))).to.throw(esm.DXNError);
+    });
+
+    it('encodeBinary throws DXNError for a value with no DXN representation', () => {
+      expect(() => esm.encodeBinary(() => {})).to.throw(esm.DXNError);
+    });
+
+    it('text and binary decode agree on the same source', () => {
+      const value = esm.decode('%{a: 1, b: [1 2 3], c: :ok, d: @uuid "550e8400-e29b-41d4-a716-446655440000"}');
+      const viaBinary = esm.decodeBinary(esm.encodeBinary(value));
+      expect(esm.encode(viaBinary)).to.equal(esm.encode(value));
+    });
+  });
+
   describe('dual entry-point parity', () => {
     it('exports the same set of names from both the CJS and ESM entry points', () => {
       const esmKeys = Object.keys(esm).filter((k) => k !== 'default').sort();
@@ -50,6 +78,12 @@ describe('dextrin (top-level API)', () => {
     it('decode/encode behave identically through both entry points', () => {
       const text = '%{a: 1, b: [1 2 3], c: :ok}';
       expect(esm.encode(esm.decode(text))).to.equal(cjs.encode(cjs.decode(text)));
+    });
+
+    it('decodeBinary/encodeBinary behave identically through both entry points', () => {
+      const text = '%{a: 1, b: [1 2 3], c: :ok}';
+      const value = esm.decode(text);
+      expect(esm.encode(esm.decodeBinary(esm.encodeBinary(value)))).to.equal(cjs.encode(cjs.decodeBinary(cjs.encodeBinary(value))));
     });
   });
 });

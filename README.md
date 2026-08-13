@@ -7,10 +7,11 @@ human-writable text format (`.dxn`), a compact binary format
 sharing one in-memory value representation and one extension
 mechanism.
 
-**Status: early port, in progress.** The value model and the `.dxn`
-text codec (`decode`/`encode`) are implemented; `.dxnb` binary and
-`.dxns` schema support land in later phases. See `CHANGELOG.md` for
-exactly what's landed.
+**Status: early port, in progress.** The value model, the `.dxn` text
+codec (`decode`/`encode`), and the `.dxnb` binary codec
+(`decodeBinary`/`encodeBinary`) are implemented; `.dxns` schema
+support lands in a later phase. See `CHANGELOG.md` for exactly what's
+landed.
 
 ## Why a port, and why this value model
 
@@ -97,6 +98,25 @@ No schema/registry support yet — every `struct` decodes as an opaque
 `DXNStruct`, and every tag name other than the built-ins (`@uuid`,
 `@duration`, `@ordered`, ...) decodes as `DXNCustomTag`. `.dxns` lands
 in a later phase.
+
+## `.dxnb` binary
+
+```js
+const { decode, decodeBinary, encodeBinary } = require('dextrin');
+
+const value = decode('%{x: 1, y: 2}');
+const bin = encodeBinary(value); // => Buffer, "DX" + version + CBOR
+decodeBinary(bin); // => the same value back
+```
+
+Hand-rolled CBOR over `Buffer` (not built on a generic CBOR library —
+bignum precision, timestamp integer-only encoding, and the private
+tag block aren't things a generic library gets right by default; see
+`src/binary/encoder.cjs`'s own doc). `decodeBinary` accepts documents
+using the spec's value-sharing extensions (`DXN.md` §2.4/§2.5) even
+though `encodeBinary` doesn't produce them yet — accepting is
+spec-mandatory, producing is optional, and that asymmetry is
+deliberate for now.
 
 ## Installation
 

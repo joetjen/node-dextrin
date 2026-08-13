@@ -38,6 +38,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version, `decode`/`encode`, and `DXNError`; `decodeBinary`/
   `encodeBinary` (`.dxnb`) land in a later phase.
 
+- `.dxnb` binary codec: `decodeBinary`/`encodeBinary` (`src/binary/`),
+  a hand-rolled CBOR encoder/decoder over `Buffer` — major types 0–7,
+  the registered tags (1 timestamp, 2/3 bignum, 4 decimal, 30
+  rational, 32 uri, 37 uuid), and the private tag block (200–214,
+  `src/binary/tags.cjs`). Verified against `DXN.md` §3's own worked
+  example, a by-type round-trip suite, and `fast-check` property
+  tests. A 500-iteration fuzz test (random bytes after a valid
+  envelope) confirms malformed input always fails as a clean
+  `BinaryError`, never an uncaught crash.
+- Value sharing (`DXN.md` §2.5, tags 28/29) and string-reference
+  sharing (§2.4, tags 256/25) are decode-side only for now — spec-
+  mandatory to *accept*, optional to *produce* ("not required for a
+  conforming encoder to produce"). A tag-29 reference resolves to a
+  deep-cloned independent copy, not a shared object reference, per
+  §2.5's "no decoder-visible aliasing" requirement — genuinely needed
+  in JS, where (unlike Erlang terms) compound values are mutable.
+  Producing shared references on encode is deferred, not forgotten.
+
 ### Notes
 
 - No schema/registry support yet: every `struct` decodes as an opaque

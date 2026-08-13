@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { decode, encode } from '../../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary } from '../../src/dextrin.js';
 import DXNUUID from '../../src/values/uuid.js';
 import DXNDecimal from '../../src/values/decimal.js';
 import DXNTimestamp from '../../src/values/timestamp.js';
@@ -76,5 +76,10 @@ describe('DXN.md §3 worked example', () => {
   it('round-trips through pretty encoding too', () => {
     const pretty = encode(value, { pretty: true });
     expect(encode(decode(pretty))).to.equal(encode(value));
+  });
+
+  it('round-trips through the .dxnb binary codec too', () => {
+    const viaBinary = decodeBinary(encodeBinary(value));
+    expect(encode(viaBinary)).to.equal(encode(value));
   });
 });
