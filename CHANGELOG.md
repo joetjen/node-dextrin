@@ -56,9 +56,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in JS, where (unlike Erlang terms) compound values are mutable.
   Producing shared references on encode is deferred, not forgotten.
 
+- `.dxns` schema system: `Registry` (`src/registry.cjs`, plain
+  immutable-update-style data, mirroring `Dextrin.Registry`), the
+  `schema/` compiler/validator/type-expr matcher (all 12 `type_expr`
+  forms, all 26 primitives), `Schema.compile`/`validate`/
+  `validateEncode`/`validateEncodeTree`/`registerProvider`
+  (`schema.cjs`, mirroring `Dextrin.Schema`), `Std.registry()` (ported
+  `priv/schema/std.dxns` standard named-type library), and
+  `FileResolver.forPaths()` (`Namespace/Name` → `.dxns`-file
+  resolution for `Registry#putResolver`). Wired into `decode`/
+  `encode`/`decodeBinary`/`encodeBinary` as `registry:`/`validate:`/
+  `schema:` options — a `struct`/tag with no matching registry entry
+  still falls back to an opaque `DXNStruct`/`DXNCustomTag`, never a
+  hard failure.
+- **Schema-driven type coercion on encode** (`coerce:`, default
+  `true`) — no Elixir `dextrin` equivalent: when a field's value
+  doesn't already match its declared type, `schema/coercion.cjs`
+  tries every `DXN*` class's own `fromX()` conversion helper before
+  treating it as a genuine mismatch (a plain `number` becomes a
+  `DXNRational` for a `:rational` field, a native `Date` becomes a
+  `DXNDate` for a `:date` field, recursively through `list-of`/
+  `set-of`/`tuple-of`/`nilable`/`one-of` too). `coerce: false` for
+  strict validation with no silent conversion.
+- `schema/provider.cjs`'s `DXNSchemaProvider`: lets a class's own
+  library ship its DXN schema without depending on `dextrin` at all —
+  a plain, duck-typed object shape (no Elixir-style `@behaviour`/
+  `Code.ensure_loaded?` ceremony needed; see that module's own doc for
+  why those don't translate to Node the same way).
+
 ### Notes
 
-- No schema/registry support yet: every `struct` decodes as an opaque
-  `DXNStruct`, and every non-built-in tag decodes as `DXNCustomTag`.
-  `.dxns` and the coercion-on-encode feature land together in a later
-  phase.
+- Encode-time schema checking can *return a transformed value*, not
+  just validate — a deliberate divergence from `Dextrin.Schema.
+  Validator`'s own check-only contract, required for coercion's
+  result to actually reach the printer/binary encoder (see
+  `schema/validator.cjs`'s own doc).

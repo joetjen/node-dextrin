@@ -46,6 +46,8 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
+const Validator = require('../schema/validator.cjs');
+const Validated = require('../schema/validated.cjs');
 
 const MAGIC = 'DX';
 const VERSION = 1;
@@ -54,7 +56,7 @@ const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
 /**
  * @param {Uint8Array} bytes
- * @param {{trusted?: boolean}} [opts]
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function decode(bytes, opts = {}) {
@@ -67,19 +69,20 @@ function decode(bytes, opts = {}) {
   if (decoder.pos !== buf.length) {
     throw new BinaryError(`trailing bytes after top-level value (${buf.length - decoder.pos} left over)`, decoder.pos);
   }
-  return value;
+  return Validated.strip(value);
 }
 
 class Decoder {
   /**
    * @param {Buffer} buf
    * @param {number} pos
-   * @param {{trusted?: boolean}} opts
+   * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
    */
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
     this.trusted = opts.trusted ?? true;
+    this.registry = opts.registry ?? null;
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];
     /** @type {Array<Map<number, string>>} innermost scope last. */
@@ -218,7 +221,7 @@ class Decoder {
     if (tagNumber === Tags.T_STRINGREF_NAMESPACE) return this.decodeStringrefNamespace();
     if (tagNumber === Tags.T_STRINGREF) return this.decodeStringref();
     const payload = this.decodeItem();
-    return buildTagged(tagNumber, payload, this.trusted);
+    return buildTagged(tagNumber, payload, this.trusted, this.registry);
   }
 
   // ---- value sharing (DXN.md §2.5) ---------------------------------------
@@ -296,9 +299,10 @@ class Decoder {
  * @param {number} tag
  * @param {unknown} value the already-decoded payload.
  * @param {boolean} trusted
+ * @param {import('../registry.cjs') | null} registry
  * @returns {unknown}
  */
-function buildTagged(tag, value, trusted) {
+function buildTagged(tag, value, trusted, registry) {
   switch (tag) {
     case Tags.T_BIGNUM_POS:
       return buildBignum(value, tag, (n) => n);
@@ -331,7 +335,7 @@ function buildTagged(tag, value, trusted) {
     case Tags.T_SORTED_SET:
       return buildFromList(value, tag, 'sorted-set', (items) => DXNSortedSet.fromArray(items));
     case Tags.T_STRUCT:
-      return buildStruct(value);
+      return buildStruct(value, registry);
     case Tags.T_DATE:
       return buildDate(value);
     case Tags.T_TIME:
@@ -343,7 +347,7 @@ function buildTagged(tag, value, trusted) {
     case Tags.T_REGEX:
       return buildRegex(value);
     case Tags.T_CUSTOM:
-      return buildCustom(value);
+      return buildCustom(value, registry);
     default:
       throw new BinaryError(`unrecognized CBOR tag ${tag}`);
   }
@@ -433,12 +437,28 @@ function buildOrdered(value) {
   return new DXNOrderedMap(Array.from(value.entries()));
 }
 
-/** @param {unknown} value */
-function buildStruct(value) {
+/**
+ * `.dxnb` structs are always positional (`DXN.md` §2.1). Decoded
+ * against a compiled schema when `registry` has one for `name` — same
+ * as the text parser's `Parser#materializeStruct` — falling back to
+ * an opaque `DXNStruct` when it doesn't.
+ * @param {unknown} value
+ * @param {import('../registry.cjs') | null} registry
+ */
+function buildStruct(value, registry) {
   if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
   const [name, ...fields] = value.items;
   if (typeof name !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
-  return DXNStruct.positional(name, fields);
+
+  const found = registry?.fetchStructSchema(name);
+  if (!found) return DXNStruct.positional(name, fields);
+
+  const materializer = found.registry.fetchMaterializer(name) ?? null;
+  try {
+    return Validator.materialize(found.compiled, { type: 'positional', values: fields }, materializer, found.registry);
+  } catch (err) {
+    throw new BinaryError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`);
+  }
 }
 
 /** @param {unknown} value */
@@ -504,12 +524,22 @@ function buildRegex(value) {
   return new DXNRegex(pattern, Tags.regexByteToFlags(Number(flagsByte)));
 }
 
-/** @param {unknown} value */
-function buildCustom(value) {
+/**
+ * @param {unknown} value
+ * @param {import('../registry.cjs') | null} registry
+ */
+function buildCustom(value, registry) {
   if (!(value instanceof DXNList) || value.items.length !== 2) throw new BinaryError(`malformed custom tag (tag ${Tags.T_CUSTOM}) payload`);
   const [name, inner] = value.items;
   if (typeof name !== 'string') throw new BinaryError(`malformed custom tag (tag ${Tags.T_CUSTOM}) payload`);
-  return new DXNCustomTag(name, inner);
+
+  const decoder = registry?.fetchTag(name);
+  if (!decoder) return new DXNCustomTag(name, inner);
+  try {
+    return decoder(inner);
+  } catch (err) {
+    throw new BinaryError(`tag ${JSON.stringify(name)} decoder failed: ${errorMessage(err)}`);
+  }
 }
 
 /**
@@ -533,6 +563,11 @@ function deepClone(value) {
     clone[key] = deepClone(/** @type {any} */ (value)[key]);
   }
   return clone;
+}
+
+/** @param {unknown} err @returns {string} */
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
 }
 
 module.exports = { decode, BinaryError };
