@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dextrin.svg)](https://www.npmjs.com/package/dextrin)
+[![Docs](https://img.shields.io/badge/docs-typedoc-blue.svg)](https://joetjen.github.io/node-dextrin/)
 
 A Node.js port of [`dextrin`](https://github.com/joetjen/dextrin), an
 Elixir implementation of DXN (Data eXchange Notation): a
