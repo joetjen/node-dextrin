@@ -8,7 +8,7 @@
  *
  * **API-shape divergence from Elixir, deliberate**: `Dextrin`'s own
  * functions return `{:ok, _} | {:error, %Dextrin.Error{}}` tuples,
- * idiomatic in an Elixir/`with`-based codebase. `dextrin_js` throws
+ * idiomatic in an Elixir/`with`-based codebase. `node-dextrin` throws
  * `DXNError` instead — idiomatic JS/Node (same convention
  * `JSON.parse`, most YAML/TOML parsers, etc. already use), not a
  * value-representation choice the "mirror Elixir's shape" goal this

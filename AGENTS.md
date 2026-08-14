@@ -2,7 +2,7 @@
 
 Instructions for AI agents working in this Node.js codebase.
 
-`dextrin_js` is a JavaScript port of [`dextrin`](https://github.com/joetjen/dextrin),
+`node-dextrin` is a JavaScript port of [`dextrin`](https://github.com/joetjen/dextrin),
 an Elixir implementation of DXN (Data eXchange Notation). `DXN.md`
 (vendored under `guides/dxn/DXN.md` once ported) is the normative,
 implementation-independent format spec — this codebase only needs to

@@ -4,7 +4,7 @@
   "private": false,
   "author": "Jan Oetjen <oetjenj@gmail.com> (http://phexter.net)",
   "description": "DXN (Data eXchange Notation) for Node.js -- .dxn text, .dxnb binary, and .dxns schema documents.",
-  "homepage": "https://github.com/joetjen/dextrin_js",
+  "homepage": "https://github.com/joetjen/node-dextrin",
   "type": "module",
   "main": "./src/dextrin.cjs",
   "exports": {
@@ -47,10 +47,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/joetjen/dextrin_js.git"
+    "url": "git://github.com/joetjen/node-dextrin.git"
   },
   "bugs": {
-    "url": "https://github.com/joetjen/dextrin_js/issues",
+    "url": "https://github.com/joetjen/node-dextrin/issues",
     "email": "oetjenj@gmail.com"
   },
   "keywords": [

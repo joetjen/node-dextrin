@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @fileoverview `dextrin_js`'s standard library of named types
+ * @fileoverview `node-dextrin`'s standard library of named types
  * (`priv/schema/std.dxns`, ported verbatim from `dextrin`'s own) —
  * common refinements like `PositiveInteger`/`NonEmptyString`, so a
  * schema author doesn't redefine them by hand. Built the same way any

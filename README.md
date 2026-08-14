@@ -1,4 +1,4 @@
-# dextrin_js
+# node-dextrin
 
 A Node.js port of [`dextrin`](https://github.com/joetjen/dextrin), an
 Elixir implementation of DXN (Data eXchange Notation): a
