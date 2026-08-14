@@ -1,4 +1,4 @@
-# dextrin_js's standard library of named types — common refinements of
+# node-dextrin's standard library of named types — common refinements of
 # the built-in primitives, so a schema author doesn't redefine "a
 # positive integer" or "a non-empty string" by hand. Every entry here
 # is built purely from the fixed type_expr vocabulary (refine's
