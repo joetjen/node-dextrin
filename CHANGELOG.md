@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `src/dextrin.cjs`'s own `@fileoverview` now names its reference
+  implementation and sibling port (`dextrin` on Hex.pm, `php-dextrin`
+  on Packagist), alongside the existing README "Other language
+  implementations" section.
 - Project scaffold: `package.json`, dual CJS/ESM entry-point
   convention, Mocha/Chai test setup, `tsc --checkJs` type-checking.
 - Core DXN value model (`src/values/`): wrapper classes for every DXN

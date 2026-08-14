@@ -5,6 +5,11 @@
  * (`src/values/`), the `.dxn` text codec (`decode`/`encode`), the
  * `.dxnb` binary codec (`decodeBinary`/`encodeBinary`), the schema
  * system (`schema.cjs`, `Registry`), and `DXNError`.
+ *
+ * This is a port of `dextrin` (Elixir, on Hex.pm), the reference
+ * implementation. A sibling of `php-dextrin` (PHP, on Packagist) reads
+ * and writes the exact same `.dxn`/`.dxnb`/`.dxns` documents — see the
+ * README's own "Other language implementations" section.
  */
 
 const version = require('./version.cjs');
