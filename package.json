@@ -33,7 +33,7 @@
     "fast-check": "^3.23.0",
     "mocha": "^11.7.6",
     "typedoc": "^0.28.20",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=18.18.0",
