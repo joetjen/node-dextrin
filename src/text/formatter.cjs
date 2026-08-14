@@ -64,7 +64,7 @@ function render(value, depth, opts) {
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
   if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length > 0) {
-    return `%${value.name}${bracketedEntries('{', value.fields.pairs, '}', depth, opts)}`;
+    return `%${value.name}${bracketedKeywordEntries('{', value.fields.pairs, '}', depth, opts)}`;
   }
   if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length > 0) {
     return `%${value.name}${bracketed('[', value.fields.values, ']', depth, opts)}`;
@@ -128,20 +128,47 @@ function bracketedEntries(open, pairs, close, depth, opts) {
 }
 
 /**
- * Same colon-shorthand-vs-arrow-form rule as
- * `Printer`'s own entry printing — the shorthand only exists for a
- * bare identifier; any other name has no colon form at all.
+ * @param {string} open
+ * @param {Array<[string, unknown]>} pairs
+ * @param {string} close
+ * @param {number} depth
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ */
+function bracketedKeywordEntries(open, pairs, close, depth, opts) {
+  const innerDepth = depth + 1;
+  const unit = indentUnit(opts);
+  const innerIndent = unit.repeat(innerDepth);
+  const outerIndent = unit.repeat(depth);
+  const body = pairs.map(([name, value]) => innerIndent + renderKeywordEntry(name, value, innerDepth, opts)).join('\n');
+  return `${open}\n${body}\n${outerIndent}${close}`;
+}
+
+/**
+ * Same colon-shorthand-vs-arrow-form rule as `Printer`'s own entry
+ * printing — the shorthand only exists for a bare identifier; any
+ * other name has no colon form at all. Used both for a struct's field
+ * names (unambiguously keyword-shaped by construction) and, via
+ * `renderEntry` below, for a `Map`/`DXNOrderedMap` entry whose key is
+ * already confirmed keyword-shaped.
+ * @param {string} name
+ * @param {unknown} value
+ * @param {number} depth
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ */
+function renderKeywordEntry(name, value, depth, opts) {
+  if (Printer.isBareIdentifier(name)) return `${name}: ${render(value, depth, opts)}`;
+  return `:${Printer.quoteString(name)} => ${render(value, depth, opts)}`;
+}
+
+/**
  * @param {unknown} key
  * @param {unknown} value
  * @param {number} depth
  * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  */
 function renderEntry(key, value, depth, opts) {
-  const name = typeof key === 'string' ? key : Printer.keywordEntryName(key);
-  if (name !== null) {
-    if (Printer.isBareIdentifier(name)) return `${name}: ${render(value, depth, opts)}`;
-    return `:${Printer.quoteString(name)} => ${render(value, depth, opts)}`;
-  }
+  const name = Printer.keywordEntryName(key);
+  if (name !== null) return renderKeywordEntry(name, value, depth, opts);
   return `${Printer.print(key, opts)} => ${render(value, depth, opts)}`;
 }
 

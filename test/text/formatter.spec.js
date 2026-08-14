@@ -54,4 +54,21 @@ describe('text/formatter', () => {
     const val = parse('%{:"has space" => 1}', { trusted: false });
     expect(pretty(val)).to.equal('%{\n  :"has space" => 1\n}');
   });
+
+  it('renders a genuine string map key as a quoted arrow entry, not keyword shorthand', () => {
+    // Regression: renderEntry() used to treat *any* plain string key as
+    // keyword-shaped (`typeof key === 'string' ? key : ...`), which
+    // only holds for a DXNStruct's own field-name pairs -- a Map entry
+    // whose key happens to be a plain string (e.g. a schema-typed
+    // struct materialized with no custom materializer) is a genuine
+    // `string` key and must stay distinguishable from a same-text
+    // `keyword` key, matching printer.cjs's own keywordEntryName rule.
+    const val = new Map([['id', 1n]]);
+    expect(pretty(val)).to.equal('%{\n  "id" => 1\n}');
+    expect(print(parse(pretty(val)))).to.equal(print(val));
+  });
+
+  it('still renders a DXNStruct field name with colon shorthand, unaffected by the string-key fix', () => {
+    expect(pretty(parse('%Point{id: 1}'))).to.equal('%Point{\n  id: 1\n}');
+  });
 });
