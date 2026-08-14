@@ -4,7 +4,7 @@ import { tag, arrayOf, textItem, integerItem } from '../../src/binary/writer.cjs
 import { T_SYMBOL } from '../../src/binary/tags.cjs';
 
 /**
- * `dextrin_js`'s own encoder doesn't produce tags 28/29 (shareable/
+ * `node-dextrin`'s own encoder doesn't produce tags 28/29 (shareable/
  * shared-ref) or 256/25 (stringref) yet — see `binary/encoder.cjs`'s
  * own note on why that's a deliberate, documented scope cut. Decoding
  * them is spec-mandatory regardless ("a conforming decoder MUST

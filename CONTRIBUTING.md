@@ -1,4 +1,4 @@
-# Contributing to dextrin_js
+# Contributing to node-dextrin
 
 Thanks for considering a contribution. This document covers what you
 need to know before opening an issue or a pull request.
@@ -7,7 +7,7 @@ need to know before opening an issue or a pull request.
 
 ```sh
 git clone <this repository>
-cd dextrin_js
+cd node-dextrin
 npm install
 npm test
 ```
