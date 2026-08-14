@@ -32,6 +32,7 @@
     "chai": "^6.2.2",
     "fast-check": "^3.23.0",
     "mocha": "^11.7.6",
+    "typedoc": "^0.28.20",
     "typescript": "^5.7.0"
   },
   "engines": {
@@ -43,6 +44,7 @@
     "autotest": "npx mocha --recursive --watch test/",
     "typecheck": "npx tsc --checkJs --noEmit",
     "precommit": "npm run typecheck && npm test",
+    "docs": "npx typedoc",
     "version": "npx auto-changelog --package --template keepachangelog && git add CHANGELOG.md"
   },
   "repository": {

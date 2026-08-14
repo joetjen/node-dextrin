@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Generated API documentation ([TypeDoc](https://typedoc.org/), driven
+  by the existing `tsconfig.json`'s `allowJs`/`checkJs` JSDoc setup —
+  no source changes needed), published to GitHub Pages via
+  `.github/workflows/docs.yml` on every push to `main`, mirroring
+  `dextrin`'s own ExDoc/Hex Docs setup. `npm run docs` builds it
+  locally into `doc/` (gitignored).
 - `src/dextrin.cjs`'s own `@fileoverview` now names its reference
   implementation and sibling port (`dextrin` on Hex.pm, `php-dextrin`
   on Packagist), alongside the existing README "Other language
