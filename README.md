@@ -1,17 +1,20 @@
 # node-dextrin
 
+[![CI](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dextrin.svg)](https://www.npmjs.com/package/dextrin)
+
 A Node.js port of [`dextrin`](https://github.com/joetjen/dextrin), an
 Elixir implementation of DXN (Data eXchange Notation): a
 human-writable text format (`.dxn`), a compact binary format
 (`.dxnb`) built on CBOR, and a schema format (`.dxns`) — all three
 sharing one in-memory value representation and one extension
-mechanism.
+mechanism. A sibling of [`php-dextrin`](https://github.com/joetjen/php-dextrin),
+the PHP port of the same library.
 
-**Status: feature-complete port, not yet published.** The value model,
+**Status: feature-complete port, published to npm.** The value model,
 the `.dxn` text codec, the `.dxnb` binary codec, the `.dxns` schema
-system, the `dextrin` CLI, and the guides are all implemented.
-Remaining: publishing to npm. See `CHANGELOG.md` for exactly what's
-landed.
+system, the `dextrin` CLI, and the guides are all implemented. See
+`CHANGELOG.md` for exactly what's landed.
 
 ## Why a port, and why this value model
 
@@ -212,8 +215,19 @@ npx dextrin validate data.dxn [--schema schema.dxns --as Name]
 npm install dextrin
 ```
 
-(Not yet published to npm — the port itself is finished; see
-`CHANGELOG.md`.)
+## Other language implementations
+
+DXN's format spec ([`dxn/DXN.md`](guides/dxn/DXN.md), ported from the
+Elixir project's own `guides/dxn/DXN.md`) is implementation-independent
+— this library, `dextrin` (Elixir), and `php-dextrin` all satisfy the
+same document, and stay close to `dextrin`'s own in-memory
+shape-per-type choices wherever their host language allows.
+
+| Language | Package | Source |
+| --- | --- | --- |
+| Elixir | [`dextrin` on Hex.pm](https://hex.pm/packages/dextrin) | [joetjen/dextrin](https://github.com/joetjen/dextrin) |
+| Node.js (this project) | [`dextrin` on npm](https://www.npmjs.com/package/dextrin) | [joetjen/node-dextrin](https://github.com/joetjen/node-dextrin) |
+| PHP | [`joetjen/dextrin` on Packagist](https://packagist.org/packages/joetjen/dextrin) | [joetjen/php-dextrin](https://github.com/joetjen/php-dextrin) |
 
 ## Development
 
