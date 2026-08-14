@@ -96,6 +96,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project's own `guides/{TUTORIAL.md,EXAMPLES.md,CHEATSHEET.md}`
   (JS-API-level, every code sample verified to actually run).
 
+### Fixed
+
+- `src/text/formatter.cjs`'s `renderEntry()` used to treat *any*
+  plain string map key as keyword-shaped (`typeof key === 'string' ?
+  key : Printer.keywordEntryName(key)`) — correct only for a
+  `DXNStruct`'s own field-name pairs (always keyword-shaped by
+  construction), but wrong for a `Map`/`DXNOrderedMap` entry whose key
+  is a genuine `string`: it silently rendered `id: 1` instead of the
+  correct `"id" => 1`, disagreeing with `src/text/printer.cjs`'s own
+  (correct) single-line rendering of the identical value, and with
+  `src/binary/encoder.cjs`'s own map-key encoding — the same class of
+  keyword/string map-key inconsistency independently found and fixed
+  in this project's `dextrin`/`php-dextrin` sibling ports, here
+  surfacing specifically in the pretty-printer. Fixed by giving struct
+  field names their own dedicated `renderKeywordEntry()`/
+  `bracketedKeywordEntries()` path (mirroring `printer.cjs`'s existing
+  `printKeywordEntry()`/`printStruct()` split), so the shared `Map`/
+  `DXNOrderedMap` entry path only ever treats an actual `symbol`/
+  `DXNKeyword` key as keyword-shaped. Found via a cross-language
+  round-trip check against `dextrin`/`php-dextrin`.
+
 ### Notes
 
 - Encode-time schema checking can *return a transformed value*, not
