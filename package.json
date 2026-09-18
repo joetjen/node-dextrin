@@ -30,7 +30,7 @@
     "@types/node": "^26.2.0",
     "auto-changelog": "^2.6.0",
     "chai": "^6.2.2",
-    "fast-check": "^3.23.0",
+    "fast-check": "^4.10.1",
     "mocha": "^11.7.6",
     "typedoc": "^0.28.20",
     "typescript": "^5.7.0"
