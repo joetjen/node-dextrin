@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +125,44 @@ describe('bin/dextrin.js CLI', () => {
     it('encode with no --out writes binary bytes to stdout', () => {
       const result = execFileSync(process.execPath, [CLI, 'encode', 'sample.dxn'], { cwd: dir });
       expect(result.subarray(0, 3)).to.deep.equal(Buffer.from([0x44, 0x58, 0x01]));
+    });
+  });
+
+  describe('compat', () => {
+    /** @param {string} name @param {{[file: string]: string}} files */
+    const schemas = (name, files) => {
+      const path = join(dir, name);
+      mkdirSync(path);
+      for (const [file, source] of Object.entries(files)) writeFileSync(join(path, file), source);
+      return path;
+    };
+
+    it('passes, listing what the materializer has to upgrade', () => {
+      const old = schemas('old', { 'user.dxns': '%{User: %schema{name: :string}}' });
+      const now = schemas('new', {
+        'user.dxns': '%{User: %schema{name: :string}}',
+        'user-2.dxns': '%{User: %schema(2){name: :string, email?: :string}}',
+      });
+      const result = run(['compat', old, now]);
+      expect(result.status).to.equal(0);
+      expect(result.stdout).to.include('User 1 -> 2: added email');
+      expect(result.stdout).to.include('OK: no version discipline problems');
+    });
+
+    it('fails on a version whose content changed without a new version', () => {
+      const old = schemas('old', { 'user.dxns': '%{User: %schema{name: :string}}' });
+      const now = schemas('new', { 'user.dxns': '%{User: %schema{name: :integer}}' });
+      const result = run(['compat', old, now]);
+      expect(result.status).to.equal(1);
+      expect(result.stderr).to.include('User version 1 changed without a new version');
+    });
+
+    it('takes a single file as well as a directory', () => {
+      writeFileSync(join(dir, 'old.dxns'), '%{User: %schema(2){name: :string}}');
+      writeFileSync(join(dir, 'new.dxns'), '%{User: %schema{name: :string}}');
+      const result = run(['compat', join(dir, 'old.dxns'), join(dir, 'new.dxns')]);
+      expect(result.status).to.equal(1);
+      expect(result.stderr).to.include('User went down from version 2 to 1');
     });
   });
 });

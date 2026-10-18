@@ -190,6 +190,7 @@ npx dextrin decode data.dxnb                                       # -> pretty-p
 npx dextrin encode data.dxn --out data.dxnb                         # -> .dxnb binary
 npx dextrin format data.dxn --mode pretty|condense [--in-place]
 npx dextrin validate data.dxn [--schema schema.dxns --as Name]
+npx dextrin compat old-schemas/ schemas/                            # changed schemas need new versions
 ```
 
 ## Guides

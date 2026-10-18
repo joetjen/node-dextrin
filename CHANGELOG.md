@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Schema.compat(oldRegistry, newRegistry)` and `dextrin compat OLD NEW`
+  -- the version discipline check (`DXN.md` §4.8), for CI against the
+  previous release's schema files: a version whose content changed
+  without a new version, or a version that went down, fails; what the
+  latest version's materializer has to upgrade is listed either way.
 - `canonical(value)` -- the canonical form of a value (`DXN.md` §1.5):
   one rendering fixed down to the byte, with maps and sets in canonical
   order (by code point, not UTF-16 order), floats by one exact algorithm

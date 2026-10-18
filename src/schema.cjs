@@ -25,6 +25,7 @@ const Validator = require('./schema/validator.cjs');
 const Reader = require('./schema/reader.cjs');
 const Validated = require('./schema/validated.cjs');
 const Provider = require('./schema/provider.cjs');
+const Compat = require('./schema/compat.cjs');
 
 /**
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
@@ -117,4 +118,17 @@ function describe(value) {
   }
 }
 
-module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider };
+/**
+ * The version discipline check (`schema/compat.cjs`, DXN.md §4.8):
+ * `oldRegistry`'s schemas against `newRegistry`'s, as the problems -- a
+ * version whose content changed without a new version, a version that
+ * went down -- and what the latest versions' materializers have to
+ * upgrade.
+ * @param {import('./registry.cjs')} oldRegistry
+ * @param {import('./registry.cjs')} newRegistry
+ */
+function compat(oldRegistry, newRegistry) {
+  return Compat.check(oldRegistry, newRegistry);
+}
+
+module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider, compat };
