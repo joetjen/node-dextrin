@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { parse } from '../../src/text/parser.cjs';
 import { compile } from '../../src/schema/compiler.cjs';
+import { SchemaValidationError } from '../../src/schema/validator.cjs';
 import Registry from '../../src/registry.js';
 import { encode } from '../../src/binary/encoder.cjs';
 import { decode } from '../../src/binary/decoder.cjs';
@@ -25,10 +26,12 @@ describe('.dxnb binary codec with a registry', () => {
     expect(value).to.be.instanceOf(DXNStruct);
   });
 
-  it('decoder throws BinaryError with the schema violation reason', () => {
+  it('decoder throws the schema violation with its own category, not as a binary error', () => {
     const registry = compile(schemaDoc, new Registry());
     const bin = encode(DXNStruct.positional('Point', [1.0])); // missing y
-    expect(() => decode(bin, { registry })).to.throw(BinaryError, /violates its schema/);
+    expect(() => decode(bin, { registry }))
+      .to.throw(SchemaValidationError, /positional field/)
+      .with.property('category', 'schema/field-count');
   });
 
   it('decoder uses a registered custom-tag decoder instead of DXNCustomTag', () => {

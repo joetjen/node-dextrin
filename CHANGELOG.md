@@ -96,6 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every schema violation carries its `DXN.md` §5 category**:
+  `schema/field-count`, `schema/missing-field`, `schema/type-mismatch`
+  and `schema/shadowed-field`, decoding text or binary and encoding
+  alike. They came back as `syntax` from text, `binary` from binary,
+  and with no category from an encode. `SchemaValidationError` gains a
+  `category`.
+- `dextrin conformance` loads a case's `schemas` and honours `strict`.
+
 - **A map key must be one of the eight types of `DXN.md` §1.6**
   (`string`, keyword, integer, uuid, date, bytes, symbol, char). Any other
   key -- a float, `null`, a boolean, a time, a collection, ... -- is

@@ -53,7 +53,7 @@ function compile(schemaDoc, baseRegistry) {
  */
 function validate(value, registry, schemaName) {
   if (!(value instanceof DXNStruct) || value.name !== schemaName) {
-    throw new Validator.SchemaValidationError(`expected a DXNStruct named ${JSON.stringify(schemaName)}, got ${describe(value)}`);
+    throw new Validator.SchemaValidationError(`expected a DXNStruct named ${JSON.stringify(schemaName)}, got ${describe(value)}`, 'schema/type-mismatch');
   }
   // Read exactly as a decode would read it, version and materializer
   // included (schema/reader.cjs).

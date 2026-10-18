@@ -39,6 +39,7 @@ const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Reader = require('../schema/reader.cjs');
+const { SchemaValidationError } = require('../schema/validator.cjs');
 const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
@@ -367,7 +368,9 @@ class Parser {
       this.registry = read.registry;
       return /** @type {Validated} */ (read.value);
     } catch (err) {
-      if (err instanceof DXNError) throw err;
+      // A schema violation keeps its own category (DXN.md §5); it is not
+      // a syntax error for having been found while parsing.
+      if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
       throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
     }
   }

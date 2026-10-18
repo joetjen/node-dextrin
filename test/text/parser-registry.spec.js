@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { parse, ParseError } from '../../src/text/parser.cjs';
 import { compile } from '../../src/schema/compiler.cjs';
+import { SchemaValidationError } from '../../src/schema/validator.cjs';
 import Registry from '../../src/registry.js';
 import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
@@ -28,9 +29,11 @@ describe('text/parser with a registry', () => {
     expect(value.name).to.equal('Other');
   });
 
-  it('throws ParseError with the schema violation reason for a bad struct', () => {
+  it('throws the schema violation with its own category, not as a syntax error', () => {
     const registry = compile(schemaDoc, new Registry());
-    expect(() => parse('%Point{x: 1.0}', { registry })).to.throw(ParseError, /missing required field "y"/);
+    expect(() => parse('%Point{x: 1.0}', { registry }))
+      .to.throw(SchemaValidationError, /missing required field "y"/)
+      .with.property('category', 'schema/missing-field');
   });
 
   it('uses a registered custom-tag decoder instead of DXNCustomTag', () => {

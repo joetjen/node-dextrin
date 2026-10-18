@@ -35,10 +35,15 @@ const DXNKeyword = require('../values/keyword.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
 
 class SchemaValidationError extends Error {
-  /** @param {string} message */
-  constructor(message) {
+  /**
+   * @param {string} message
+   * @param {string | null} [category] the violation's `DXN.md` §5 category.
+   */
+  constructor(message, category = null) {
     super(message);
     this.name = 'SchemaValidationError';
+    /** Which violation this is (`schema/missing-field`, ...), passed on unchanged by every channel. */
+    this.category = category;
   }
 }
 
@@ -77,7 +82,7 @@ function toNameMap(compiled, fields) {
   if (fields.type === 'keyed') return Object.fromEntries(fields.pairs);
   const names = compiled.fieldNames();
   if (names.length !== fields.values.length) {
-    throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`);
+    throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`, 'schema/field-count');
   }
   return Object.fromEntries(names.map((name, i) => [name, fields.values[i]]));
 }
@@ -113,7 +118,7 @@ function resolveField(field, given, registry, opts) {
     return checkType(field.name, given[field.name], field.type, registry, opts);
   }
   if (field.default !== Field.NO_DEFAULT) return field.default;
-  if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`);
+  if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`, 'schema/missing-field');
   return ABSENT;
 }
 
@@ -134,7 +139,7 @@ function checkType(name, value, type, registry, opts) {
     return Validated.strip(value);
   }
 
-  throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`);
+  throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`, 'schema/type-mismatch');
 }
 
 // ---- encode-time validation -------------------------------------------------
@@ -194,7 +199,7 @@ function checkCompiled(compiled, value, registry, opts) {
   if (value instanceof DXNStruct) {
     const declared = new Set(compiled.fieldNames());
     const shadowing = value.extra.find(([key]) => typeof key === 'string' && declared.has(key));
-    if (shadowing) throw new SchemaValidationError(`extra field ${JSON.stringify(shadowing[0])} shadows a declared field`);
+    if (shadowing) throw new SchemaValidationError(`extra field ${JSON.stringify(shadowing[0])} shadows a declared field`, 'schema/shadowed-field');
   }
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
@@ -252,7 +257,7 @@ function toNameMapForEncode(compiled, value) {
     if (fields.type === 'keyed') return Object.fromEntries(fields.pairs);
     const names = compiled.fieldNames();
     if (names.length !== fields.values.length) {
-      throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`);
+      throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`, 'schema/field-count');
     }
     return Object.fromEntries(names.map((name, i) => [name, fields.values[i]]));
   }
@@ -260,7 +265,7 @@ function toNameMapForEncode(compiled, value) {
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value));
   }
-  throw new SchemaValidationError(`expected a map/struct/object to validate against a schema, got ${String(value)}`);
+  throw new SchemaValidationError(`expected a map/struct/object to validate against a schema, got ${String(value)}`, 'schema/type-mismatch');
 }
 
 /**
@@ -298,7 +303,10 @@ function wrapAndCheck(value, registry, opts) {
     try {
       return checkCompiled(found.compiled, value, registry, opts);
     } catch (err) {
-      throw new SchemaValidationError(`struct ${JSON.stringify(found.name)} violates its schema: ${errorMessage(err)}`);
+      throw new SchemaValidationError(
+        `struct ${JSON.stringify(found.name)} violates its schema: ${errorMessage(err)}`,
+        err instanceof SchemaValidationError ? err.category : null,
+      );
     }
   }
   return wrapChildren(value, registry, opts);

@@ -26,6 +26,32 @@ describe('error categories', () => {
 });
 
 describe('conformance adapter', () => {
+  const USER = '%{User: %schema(2){name: :string}}';
+
+  it("loads a case's schemas before it runs", () => {
+    expect(answered([{ id: 'a', operation: 'decode', text: '%User{name: "x"}', schemas: [USER] }])).to.deep.equal([
+      { id: 'a', canonical: '%User(2){name: "x"}' },
+    ]);
+  });
+
+  it('and answers a schema violation with its category', () => {
+    expect(answered([{ id: 'a', operation: 'decode', text: '%User{name: 1}', schemas: [USER] }])).to.deep.equal([
+      { id: 'a', error: 'schema/type-mismatch' },
+    ]);
+  });
+
+  it('decodes a strict case strictly', () => {
+    expect(answered([{ id: 'a', operation: 'decode', text: '%User{name: "x", nick: "y"}', schemas: [USER], strict: true }])).to.deep.equal([
+      { id: 'a', error: 'schema/undeclared-field' },
+    ]);
+  });
+
+  it('answers a schema that does not compile with its category', () => {
+    expect(answered([{ id: 'a', operation: 'decode', text: '1', schemas: ['%{User: 1}'] }])).to.deep.equal([
+      { id: 'a', error: 'schema/compile' },
+    ]);
+  });
+
   it('answers a decode with the canonical form', () => {
     expect(answered([{ id: 'a', operation: 'decode', text: '%{b: 2, a: 1}' }])).to.deep.equal([
       { id: 'a', canonical: '%{a: 1 b: 2}' }
