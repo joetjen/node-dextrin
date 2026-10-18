@@ -73,7 +73,9 @@ const payload = `
 `;
 
 decode(payload, { registry });
-//=> { id: DXNUUID {...}, email: 'ada@example.com', role: Symbol(admin), created: DXNTimestamp {...}, note: null }
+//=> DXNStruct { name: 'User', version: 1, fields: { type: 'keyed', pairs: [
+//     ['id', DXNUUID {...}], ['email', 'ada@example.com'], ['role', Symbol(admin)], ['created', DXNTimestamp {...}]
+//   ] } }
 ```
 
 An optional field with no value supplied (`note?:`) materializes as
@@ -117,14 +119,20 @@ const schemaSource = `
 
 const doc = decode(schemaSource);
 let registry = Schema.compile(doc, new Registry());
-registry = registry.putStructMaterializer('Money', ({ amount, currency }) => ({
+registry = registry.putStructMaterializer('Money', (_name, _version, { amount, currency }) => ({
   amount,
-  currency: currency.description,
+  currency,
 }));
 
 decode('%Money{amount: 19.99M, currency: :usd}', { registry });
-//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: 'usd' }
+//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: Symbol(usd) }
 ```
+
+What a materializer answers is checked against the latest schema, so it
+has to stay a value of the schema's own shape: answering
+`currency: currency.description` (the string `'usd'`) would be refused
+(`schema/materializer`), because the schema declares
+`{:enum :usd :eur :gbp}`, not a string.
 
 `currency` decodes as a trusted `keyword` (`Symbol.for('usd')`) —
 `.description` reads the interned name back out, the native-`Symbol`
@@ -194,7 +202,7 @@ const LatLngProvider = {
   `,
   dxnSchemaName: () => 'LatLng',
   dxnClass: () => LatLng,
-  dxnMaterialize: ({ lat, lng }) => new LatLng(lat, lng),
+  dxnMaterialize: (_name, _version, { lat, lng }) => new LatLng(lat, lng),
 };
 
 module.exports = { LatLng, LatLngProvider };
@@ -252,7 +260,9 @@ const resolver = FileResolver.forPaths(['schemas']);
 const registry = Schema.compile(doc, new Registry().putResolver(resolver));
 
 decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', { registry });
-//=> { name: 'Ada', home: { street: '1 Main St' } }
+//=> DXNStruct { name: 'Person', version: 1, fields: { type: 'keyed', pairs: [
+//     ['name', 'Ada'], ['home', DXNStruct { name: 'Address', version: 1, ... }]
+//   ] } }
 ```
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with

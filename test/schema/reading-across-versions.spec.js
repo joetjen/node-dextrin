@@ -11,7 +11,8 @@ const V3 = '%{User: %schema(3){name: :string, email?: :string, nick?: :string}}'
 const loaded = (...sources) =>
   sources.reduce((registry, source) => Schema.compile(decode(source), registry), new Registry());
 
-const upgrading = (registry) => registry.putStructMaterializer('User', (fields) => ({ upgraded: fields }));
+const upgrading = (registry) =>
+  registry.putStructMaterializer('User', (_name, version, fields) => ({ ...fields, upgradedFrom: version }));
 
 const categoryOf = (fn) => {
   try {
@@ -28,11 +29,9 @@ const binary = (struct) => encodeBinary(struct);
 describe('reading across versions', () => {
   describe("the writer's version is the latest loaded", () => {
     it('is read with exactly that schema', () => {
-      expect(decode('%User(3){name: "a"}', { registry: loaded(V2, V3) })).to.deep.equal({
-        name: 'a',
-        email: null,
-        nick: null
-      });
+      expect(decode('%User(3){name: "a"}', { registry: loaded(V2, V3) })).to.deep.equal(
+        DXNStruct.keyed('User', [['name', 'a']], 3)
+      );
     });
 
     it('and its item count is exact', () => {
@@ -43,7 +42,8 @@ describe('reading across versions', () => {
   describe("the writer's version is older than the latest loaded", () => {
     it('goes to the materializer, with the fields its own schema names', () => {
       expect(decode('%User(2){name: "a"}', { registry: upgrading(loaded(V2, V3)) })).to.deep.equal({
-        upgraded: { name: 'a', email: null }
+        name: 'a',
+        upgradedFrom: 2
       });
     });
 
@@ -68,10 +68,9 @@ describe('reading across versions', () => {
 
   describe("the writer's version is newer than anything loaded", () => {
     it('is read against the latest loaded, matching text by name', () => {
-      expect(decode('%User(3){nick: "n", name: "a"}', { registry: loaded(V1, V2) })).to.deep.equal({
-        name: 'a',
-        email: null
-      });
+      expect(decode('%User(3){nick: "n", name: "a"}', { registry: loaded(V1, V2) })).to.deep.equal(
+        DXNStruct.keyed('User', [['name', 'a']], 2)
+      );
     });
 
     it('and a field the latest requires must still be there', () => {
@@ -80,19 +79,23 @@ describe('reading across versions', () => {
 
     it('and binary assumes positions are unchanged, dropping the items beyond its own', () => {
       const bytes = binary(DXNStruct.positional('User', ['a', 'e', 'n'], 3));
-      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal({ name: 'a', email: 'e' });
+      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal(
+        DXNStruct.keyed('User', [['name', 'a'], ['email', 'e']], 2)
+      );
     });
 
     it('and fewer items leave the optional fields absent', () => {
       const bytes = binary(DXNStruct.positional('User', ['a'], 3));
-      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal({ name: 'a', email: null });
+      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal(DXNStruct.keyed('User', [['name', 'a']], 2));
     });
 
     // The documented risk: a newer version that reordered its fields is
     // read into the wrong ones, without an error, whenever the types agree.
     it('and a reordering is misread without an error when the types agree', () => {
       const bytes = binary(DXNStruct.positional('User', ['e', 'a'], 3));
-      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal({ name: 'e', email: 'a' });
+      expect(decodeBinary(bytes, { registry: loaded(V1, V2) })).to.deep.equal(
+        DXNStruct.keyed('User', [['name', 'e'], ['email', 'a']], 2)
+      );
     });
   });
 });

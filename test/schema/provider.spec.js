@@ -3,6 +3,7 @@ import Schema from '../../src/schema.cjs';
 import Registry from '../../src/registry.js';
 import { decode, encode } from '../../src/dextrin.js';
 import DXNDecimal from '../../src/values/decimal.js';
+import { fieldsOf } from '../support/decoded-fields.js';
 
 class Money {
   /** @param {unknown} amount @param {unknown} currency */
@@ -18,7 +19,7 @@ const moneyProvider = {
     '%{ Money: %schema{ amount: :decimal, currency: {:enum :usd :eur :gbp} } }',
   dxnSchemaName: () => 'Money',
   dxnClass: () => Money,
-  dxnMaterialize: (fields) => new Money(fields.amount, fields.currency)
+  dxnMaterialize: (_name, _version, fields) => new Money(fields.amount, fields.currency)
 };
 
 describe('schema/provider', () => {
@@ -53,7 +54,7 @@ describe('schema/provider', () => {
     expect(registry.fetchTypeAlias('Currency')).to.not.equal(undefined);
   });
 
-  it('works with no materializer at all, falling back to a plain object', () => {
+  it('works with no materializer at all, falling back to the generic struct', () => {
     /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
     const provider = {
       dxnSchema: () => '%{ Point: %schema{ x: :integer } }',
@@ -62,7 +63,7 @@ describe('schema/provider', () => {
     };
     const registry = Schema.registerProvider(new Registry(), provider);
     const value = decode('%Point{x: 1}', { registry });
-    expect(value).to.deep.equal({ x: 1n });
+    expect(fieldsOf(value)).to.deep.equal({ x: 1n });
   });
 
   it('throws a specific error when dxnSchemaName() names an entry the document does not define', () => {

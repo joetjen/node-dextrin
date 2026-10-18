@@ -135,7 +135,8 @@ const schemaDoc = decode(`
 const registry = Schema.compile(schemaDoc, new Registry());
 
 decode('%Point{x: 1.0, y: 2.0}', { registry });
-// => { x: 1, y: 2 } -- schema-validated, decode-time enforcement
+// => DXNStruct { name: 'Point', version: 1, fields: { type: 'keyed', pairs: [['x', 1], ['y', 2]] } }
+//    -- schema-validated, decode-time enforcement; a materializer can build your own class instead
 
 encode({ x: 1.0, y: 2.0 }, { registry, schema: 'Point' });
 // => '%Point(1){x:1.0,y:2.0}'

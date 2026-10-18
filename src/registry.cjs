@@ -33,7 +33,7 @@ class Registry {
     this.tagEncoders = new Map();
     /** @type {Map<string, Map<number, import('./schema/compiled.cjs')>>} struct name -> version -> compiled schema. */
     this.structs = new Map();
-    /** @type {Map<string, (fields: {[k: string]: unknown}) => unknown>} struct name -> materializer. */
+    /** @type {Map<string, (name: string, version: number, fields: {[k: string]: unknown}) => unknown>} struct name -> materializer. */
     this.materializers = new Map();
     /** @type {((name: string) => import('./schema/compiled.cjs') | undefined) | null} */
     this.resolver = null;
@@ -180,7 +180,12 @@ class Registry {
 
   /**
    * @param {string} name
-   * @param {(fields: {[k: string]: unknown}) => unknown} materializer
+   * The schema's materializer (`DXN.md` §4.8): called for every decoded
+   * struct of `name`, whatever the version, with the schema's name, the
+   * version the fields were read with and the fields keyed by string; it
+   * answers the application's latest-version value, which is checked
+   * against the latest schema, or throws.
+   * @param {(name: string, version: number, fields: {[k: string]: unknown}) => unknown} materializer
    * @returns {Registry}
    */
   putStructMaterializer(name, materializer) {
@@ -240,7 +245,7 @@ class Registry {
     return found ? new DXNStruct(struct.name, struct.fields, found.compiled.version) : struct;
   }
 
-  /** @param {string} name @returns {((fields: {[k: string]: unknown}) => unknown) | undefined} */
+  /** @param {string} name @returns {((name: string, version: number, fields: {[k: string]: unknown}) => unknown) | undefined} */
   fetchMaterializer(name) {
     return this.materializers.get(name);
   }

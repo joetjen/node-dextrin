@@ -36,7 +36,7 @@
  *   dxnSchema: () => string,
  *   dxnSchemaName: () => string,
  *   dxnClass: () => Function,
- *   dxnMaterialize?: (resolved: {[k: string]: unknown}) => unknown
+ *   dxnMaterialize?: (name: string, version: number, fields: {[k: string]: unknown}) => unknown
  * }} DXNSchemaProvider
  */
 
@@ -58,9 +58,11 @@ const parser = require('../text/parser.cjs');
  *      (`Registry#putStructModule`) — what lets `encode`/`encodeBinary`
  *      serialize instances of it directly and lets `{form:
  *      'reference', name}` checks recognize it.
- *   4. If `provider.dxnMaterialize` exists, registers it
- *      (`Registry#putStructMaterializer`). If not, decoding this
- *      schema falls back to the default plain field object.
+ *   4. If `provider.dxnMaterialize` exists, registers it as the
+ *      schema's materializer (`Registry#putStructMaterializer`), called
+ *      with the schema's name, the version and the fields, for every
+ *      version. If not, decoding this schema falls back to the generic
+ *      `DXNStruct`.
  *
  * @param {import('../registry.cjs')} registry
  * @param {DXNSchemaProvider} provider

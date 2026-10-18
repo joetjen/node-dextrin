@@ -4,6 +4,7 @@ import { compile } from '../../src/schema/compiler.cjs';
 import Registry from '../../src/registry.js';
 import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
+import { fieldsOf } from '../support/decoded-fields.js';
 
 describe('text/parser with a registry', () => {
   const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
@@ -11,13 +12,13 @@ describe('text/parser with a registry', () => {
   it('materializes a registered struct instead of an opaque DXNStruct', () => {
     const registry = compile(schemaDoc, new Registry());
     const value = parse('%Point{x: 1.0, y: 2.0}', { registry });
-    expect(value).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('materializes a positional struct the same way', () => {
     const registry = compile(schemaDoc, new Registry());
     const value = parse('%Point[1.0, 2.0]', { registry });
-    expect(value).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('falls back to an opaque DXNStruct for an unregistered name, registry or not', () => {
@@ -64,6 +65,6 @@ describe('text/parser with a registry', () => {
     `);
     const registry = compile(doc, new Registry());
     const value = parse('%Person{name: "Ada", address: %Address{city: "London"}}', { registry });
-    expect(value).to.deep.equal({ name: 'Ada', address: { city: 'London' } });
+    expect(fieldsOf(value)).to.deep.equal({ name: 'Ada', address: { city: 'London' } });
   });
 });

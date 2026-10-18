@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
 import * as esm from '../src/dextrin.js';
+import { fieldsOf } from './support/decoded-fields.js';
 
 const require = createRequire(import.meta.url);
 const cjs = require('../src/dextrin.cjs');
@@ -74,7 +75,7 @@ describe('dextrin (top-level API)', () => {
 
     it('decode materializes a registered struct via the registry', () => {
       const value = esm.decode('%Point{x: 1.0, y: 2.0}', { registry });
-      expect(value).to.deep.equal({ x: 1, y: 2 });
+      expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
     });
 
     it('decode throws DXNError with the schema violation reason for a bad struct', () => {
@@ -117,7 +118,7 @@ describe('dextrin (top-level API)', () => {
 
     it('decodeBinary/encodeBinary accept the same registry/validate/coerce options', () => {
       const value = esm.decodeBinary(esm.encodeBinary(esm.DXNStruct.positional('Point', [1.0, 2.0]), { registry }), { registry });
-      expect(value).to.deep.equal({ x: 1, y: 2 });
+      expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
     });
 
     it('a full decode -> encode round trip through a schema-backed struct is stable', () => {

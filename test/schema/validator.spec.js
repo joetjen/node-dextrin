@@ -31,48 +31,41 @@ function fieldValue(struct, name) {
 }
 
 describe('schema/validator', () => {
-  describe('materialize (decode-side)', () => {
-    it('materializes keyed fields into a plain object by default (no materializer)', () => {
+  describe('resolve (decode-side)', () => {
+    it('answers the checked fields as name/value pairs, in the schema\'s order', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
-      const result = Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] }, null, registry);
-      expect(result).to.be.instanceOf(Validated);
-      expect(result.name).to.equal('P');
-      expect(Validated.strip(result)).to.deep.equal({ x: 1n, y: 2n });
+      expect(Validator.resolve(compiled, { type: 'keyed', pairs: [['y', 2n], ['x', 1n]] }, registry)).to.deep.equal([
+        ['x', 1n],
+        ['y', 2n]
+      ]);
     });
 
-    it('materializes positional fields by schema field order', () => {
+    it('reads positional fields by schema field order', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
-      const result = Validator.materialize(compiled, { type: 'positional', values: [1n, 2n] }, null, registry);
-      expect(Validated.strip(result)).to.deep.equal({ x: 1n, y: 2n });
+      expect(Validator.resolve(compiled, { type: 'positional', values: [1n, 2n] }, registry)).to.deep.equal([
+        ['x', 1n],
+        ['y', 2n]
+      ]);
     });
 
     it('rejects a positional field count mismatch', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
-      expect(() => Validator.materialize(compiled, { type: 'positional', values: [1n] }, null, registry)).to.throw(/positional/);
-    });
-
-    it('uses a custom materializer when given', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer } }', 'P');
-      const materializer = (fields) => ({ doubled: fields.x * 2n });
-      const result = Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 5n]] }, materializer, registry);
-      expect(Validated.strip(result)).to.deep.equal({ doubled: 10n });
+      expect(() => Validator.resolve(compiled, { type: 'positional', values: [1n] }, registry)).to.throw(/positional/);
     });
 
     it('fills an absent field with its default', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ x?: %field{type: :integer, default: 99} } }', 'P');
-      const result = Validator.materialize(compiled, { type: 'keyed', pairs: [] }, null, registry);
-      expect(Validated.strip(result)).to.deep.equal({ x: 99n });
+      expect(Validator.resolve(compiled, { type: 'keyed', pairs: [] }, registry)).to.deep.equal([['x', 99n]]);
     });
 
-    it('fills an absent optional field with null when there is no default', () => {
+    it('leaves an absent optional field with no default absent', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ x?: :integer } }', 'P');
-      const result = Validator.materialize(compiled, { type: 'keyed', pairs: [] }, null, registry);
-      expect(Validated.strip(result)).to.deep.equal({ x: null });
+      expect(Validator.resolve(compiled, { type: 'keyed', pairs: [] }, registry)).to.deep.equal([]);
     });
 
     it('never coerces on decode, even for a value that would coerce cleanly on encode', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
-      expect(() => Validator.materialize(compiled, { type: 'keyed', pairs: [['amount', 0.5]] }, null, registry)).to.throw(/does not match/);
+      expect(() => Validator.resolve(compiled, { type: 'keyed', pairs: [['amount', 0.5]] }, registry)).to.throw(/does not match/);
     });
   });
 

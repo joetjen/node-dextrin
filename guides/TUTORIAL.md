@@ -204,8 +204,12 @@ const schemaDoc = decode(`
 const registry = Schema.compile(schemaDoc, new Registry());
 
 decode('%Point{x: 1, y: 2}', { registry });
-//=> { x: 1n, y: 2n }
+//=> DXNStruct { name: 'Point', version: 1, fields: { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] } }
 ```
+
+With no materializer registered, a checked struct comes back as a
+generic `DXNStruct` at its schema's latest version, its fields in the
+schema's order — which encodes back to exactly the text it came from.
 
 Field enforcement (required/optional fields, refinements) happens
 automatically at decode time, in both `decode`
@@ -251,7 +255,10 @@ class Point {
   }
 }
 
-const registry2 = registry.putStructMaterializer('Point', ({ x, y }) => new Point(x, y));
+// One materializer per schema, called for every decoded struct of it,
+// with the schema's name, the version the struct was written with and
+// its fields; what it answers is checked against the latest schema.
+const registry2 = registry.putStructMaterializer('Point', (_name, _version, { x, y }) => new Point(x, y));
 
 decode('%Point{x: 1, y: 2}', { registry: registry2 });
 //=> Point { x: 1n, y: 2n }
@@ -348,7 +355,7 @@ const PointProvider = {
   dxnSchema: () => '%{ Point: %schema{ x: :integer, y: :integer } }',
   dxnSchemaName: () => 'Point',
   dxnClass: () => LibPoint,
-  dxnMaterialize: ({ x, y }) => new LibPoint(x, y),
+  dxnMaterialize: (_name, _version, { x, y }) => new LibPoint(x, y),
 };
 ```
 
@@ -365,7 +372,7 @@ encode(new LibPoint(1n, 2n), { registry: registry5 });
 ```
 
 `dxnMaterialize` is optional — without it, decoding falls back to the
-same plain field object any other schema with no materializer
+same generic `DXNStruct` any other schema with no materializer
 produces.
 
 ## 10. Putting it together: a small config loader
@@ -411,11 +418,11 @@ directly, not something the caller has to separately check for.
 
 ```js
 load('config.dxn');
-//=> {
-//     host: 'localhost',
-//     port: 4000n,
-//     tags: DXNList { items: [ DXNSymbol { name: 'dev' }, DXNSymbol { name: 'local' } ] }
-//   }
+//=> DXNStruct { name: 'Server', version: 1, fields: { type: 'keyed', pairs: [
+//     ['host', 'localhost'],
+//     ['port', 4000n],
+//     ['tags', DXNList { items: [ DXNSymbol { name: 'dev' }, DXNSymbol { name: 'local' } ] }]
+//   ] } }
 ```
 
 `tags` decodes as a `DXNList`, not a native `Array` — DXN's `list`

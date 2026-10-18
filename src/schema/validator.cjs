@@ -49,24 +49,31 @@ class SchemaValidationError extends Error {
   }
 }
 
+/** What `resolveField` answers for an optional field that was not given and has no default. */
+const ABSENT = Symbol('absent');
+
 /**
- * Validates and materializes `fields` against `compiled`, using
- * `materializer` if given. On success, the result is wrapped in a
- * `Validated` (name: `compiled.name`) — internal bookkeeping so an
- * *outer* schema's `{form: 'reference', name}` field can verify this
- * value's origin even after materialization; callers that aren't
- * another schema check must call `Validated.strip` on the final result.
+ * `fields` checked against `compiled`: every declared field, in the
+ * schema's own order, as `[name, value]` pairs. A required field that is
+ * missing, or a value that does not match its declared type, is an
+ * error; an optional field that is missing takes its default, or stays
+ * absent when it has none — DXN tells an absent field from one written
+ * `nil`. What is built from the result is `schema/reader.cjs`'s job.
+ * Never coerces.
  * @param {import('./compiled.cjs')} compiled
  * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
- * @param {((resolved: {[k: string]: unknown}) => unknown) | null} materializer
  * @param {import('../registry.cjs')} registry
- * @returns {Validated}
+ * @returns {Array<[string, unknown]>}
  */
-function materialize(compiled, fields, materializer, registry) {
+function resolve(compiled, fields, registry) {
   const given = toNameMap(compiled, fields);
-  const resolved = resolveFields(compiled, given, registry, { coerce: false });
-  const result = materializer ? materializer(resolved) : Object.fromEntries(Object.entries(resolved));
-  return new Validated(/** @type {string} */ (compiled.name), result);
+  /** @type {Array<[string, unknown]>} */
+  const pairs = [];
+  for (const field of compiled.fields) {
+    const value = resolveField(field, given, registry, { coerce: false });
+    if (value !== ABSENT) pairs.push([field.name, value]);
+  }
+  return pairs;
 }
 
 /**
@@ -94,7 +101,10 @@ function resolveFields(compiled, given, registry, opts) {
   /** @type {{[k: string]: unknown}} */
   const resolved = {};
   for (const field of compiled.fields) {
-    resolved[field.name] = resolveField(field, given, registry, opts);
+    // An absent optional field still holds its position when a value
+    // goes out, as null.
+    const value = resolveField(field, given, registry, opts);
+    resolved[field.name] = value === ABSENT ? null : value;
   }
   return resolved;
 }
@@ -104,7 +114,7 @@ function resolveFields(compiled, given, registry, opts) {
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
  * @param {{coerce: boolean}} opts
- * @returns {unknown}
+ * @returns {unknown} the checked value, or `ABSENT`.
  */
 function resolveField(field, given, registry, opts) {
   if (Object.prototype.hasOwnProperty.call(given, field.name)) {
@@ -112,7 +122,7 @@ function resolveField(field, given, registry, opts) {
   }
   if (field.default !== Field.NO_DEFAULT) return field.default;
   if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`);
-  return null;
+  return ABSENT;
 }
 
 /**
@@ -394,4 +404,4 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { materialize, validateForEncode, validateTreeForEncode, SchemaValidationError };
+module.exports = { resolve, validateForEncode, validateTreeForEncode, SchemaValidationError };

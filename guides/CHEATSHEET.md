@@ -110,7 +110,7 @@ const registry = Schema.compile(schemaDoc, baseRegistry = new Registry());
 registry
   .addStructSchema(name, compiled)      // a new version; throws schema/duplicate-version if loaded
   .replaceStructSchema(name, compiled)  // hot-swap a loaded version; throws schema/not-loaded otherwise
-  .putStructMaterializer(name, (fieldMap) => term)
+  .putStructMaterializer(name, (name, version, fields) => term)   // every version; result checked against the latest
   .putStructModule(name, klass)          // for {form: 'reference', name} checks on hand-built instances
   .putResolver((name) => compiled | undefined);   // lazy/on-demand schema loading
 ```
@@ -133,7 +133,7 @@ const registry = Schema.registerProvider(registry, someLibMoneyProvider, Schema.
 
 `someLibMoneyProvider` implements the `DXNSchemaProvider` shape
 (`dxnSchema()`, `dxnSchemaName()`, `dxnClass()`, and optionally
-`dxnMaterialize()`) — a plain, duck-typed object, not a formal
+`dxnMaterialize(name, version, fields)`) — a plain, duck-typed object, not a formal
 interface, since Node has no ahead-of-time-compilation concern to
 guard against the way Mix does.
 

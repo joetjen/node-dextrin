@@ -22,6 +22,7 @@
 const DXNStruct = require('./values/struct.cjs');
 const Compiler = require('./schema/compiler.cjs');
 const Validator = require('./schema/validator.cjs');
+const Reader = require('./schema/reader.cjs');
 const Validated = require('./schema/validated.cjs');
 const Provider = require('./schema/provider.cjs');
 
@@ -53,10 +54,10 @@ function validate(value, registry, schemaName) {
   if (!(value instanceof DXNStruct) || value.name !== schemaName) {
     throw new Validator.SchemaValidationError(`expected a DXNStruct named ${JSON.stringify(schemaName)}, got ${describe(value)}`);
   }
-  const found = registry.fetchStructSchema(schemaName);
-  if (!found) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
-  const materializer = registry.fetchMaterializer(schemaName) ?? null;
-  Validator.materialize(found.compiled, value.fields, materializer, registry);
+  // Read exactly as a decode would read it, version and materializer
+  // included (schema/reader.cjs).
+  const read = Reader.read(registry, schemaName, value.version, value.fields);
+  if (!read) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
   return true;
 }
 

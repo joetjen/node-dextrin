@@ -74,7 +74,9 @@ describe('versions in documents', () => {
   it('an untagged struct is read as the latest version', () => {
     const registry = loaded(V1, '%{Point: %schema(2){x: :integer, y: :integer}}');
     expect(() => decode('%Point{x: 1}', { registry })).to.throw(DXNError);
-    expect(decode('%Point{x: 1, y: 2}', { registry }).x).to.equal(1n);
+    expect(decode('%Point{x: 1, y: 2}', { registry })).to.deep.equal(
+      DXNStruct.keyed('Point', [['x', 1n], ['y', 2n]], 2)
+    );
   });
 
   it('a struct reference names no version: User(2) in a type expression is a syntax error', () => {
