@@ -252,10 +252,10 @@ function printStruct(struct, opts) {
     const entries = struct.fields.pairs
       .map(([name, value]) => printKeywordEntry(name, value, opts))
       .join(',');
-    return `%${struct.name}{${entries}}`;
+    return `${DXNStruct.head(struct.name, struct.version)}{${entries}}`;
   }
   const items = struct.fields.values.map((v) => print(v, opts)).join(',');
-  return `%${struct.name}[${items}]`;
+  return `${DXNStruct.head(struct.name, struct.version)}[${items}]`;
 }
 
 /** @param {unknown} value */

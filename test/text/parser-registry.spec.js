@@ -6,7 +6,7 @@ import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
 
 describe('text/parser with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('materializes a registered struct instead of an opaque DXNStruct', () => {
     const registry = compile(schemaDoc, new Registry());
@@ -58,8 +58,8 @@ describe('text/parser with a registry', () => {
   it('a nested struct field resolves against the same registry, enabling {reference} checks', () => {
     const doc = parse(`
       %{
-        Address: %schema{ fields: @ordered %{ city: :string } }
-        Person: %schema{ fields: @ordered %{ name: :string, address: Address } }
+        Address: %schema{ city: :string }
+        Person: %schema{ name: :string, address: Address }
       }
     `);
     const registry = compile(doc, new Registry());

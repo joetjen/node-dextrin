@@ -2,7 +2,7 @@
 
 /**
  * @fileoverview Checks a value's fields against a `Compiled` schema
- * (required/closed/forbidden/refine) — shared by decode (`materialize`,
+ * (required fields and their types) — shared by decode (`materialize`,
  * which also produces a materialized result) and encode-time
  * validation (`validateForEncode`/`validateTreeForEncode`), mirroring
  * `Dextrin.Schema.Validator`. Both directions reuse the exact same
@@ -64,10 +64,7 @@ class SchemaValidationError extends Error {
  */
 function materialize(compiled, fields, materializer, registry) {
   const given = toNameMap(compiled, fields);
-  checkForbidden(compiled, given);
-  checkClosed(compiled, given);
   const resolved = resolveFields(compiled, given, registry, { coerce: false });
-  runRefineFn(compiled, resolved);
   const result = materializer ? materializer(resolved) : Object.fromEntries(Object.entries(resolved));
   return new Validated(/** @type {string} */ (compiled.name), result);
 }
@@ -84,20 +81,6 @@ function toNameMap(compiled, fields) {
     throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`);
   }
   return Object.fromEntries(names.map((name, i) => [name, fields.values[i]]));
-}
-
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} given */
-function checkForbidden(compiled, given) {
-  const hit = compiled.forbidden.find((name) => Object.prototype.hasOwnProperty.call(given, name));
-  if (hit) throw new SchemaValidationError(`field ${JSON.stringify(hit)} is forbidden`);
-}
-
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} given */
-function checkClosed(compiled, given) {
-  if (!compiled.closed) return;
-  const allowed = new Set(compiled.fieldNames());
-  const extra = Object.keys(given).find((name) => !allowed.has(name));
-  if (extra) throw new SchemaValidationError(`unknown field ${JSON.stringify(extra)} (schema is closed)`);
 }
 
 /**
@@ -159,13 +142,6 @@ function checkType(name, value, type, registry, opts) {
   throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`);
 }
 
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} resolved */
-function runRefineFn(compiled, resolved) {
-  if (!compiled.refineFn) return;
-  const result = compiled.refineFn(resolved);
-  if (result !== true) throw new SchemaValidationError(typeof result === 'string' ? result : 'refine-fn rejected this value');
-}
-
 // ---- encode-time validation -------------------------------------------------
 //
 // The mirror image of `materialize`, for data on its way *out*:
@@ -223,10 +199,7 @@ function validateTreeForEncode(value, registry, opts = {}) {
 function checkCompiled(compiled, value, registry, opts) {
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
-  checkForbidden(compiled, wrappedGiven);
-  checkClosed(compiled, wrappedGiven);
   const resolved = resolveFields(compiled, wrappedGiven, registry, opts);
-  runRefineFn(compiled, resolved);
   return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved));
 }
 
@@ -256,9 +229,9 @@ function checkCompiled(compiled, value, registry, opts) {
 function rebuildChecked(value, compiled, resolved) {
   if (value instanceof DXNStruct) {
     if (value.fields.type === 'keyed') {
-      return DXNStruct.keyed(value.name, value.fields.pairs.map(([k]) => [k, resolved[k]]));
+      return value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k]) => [k, resolved[k]]) });
     }
-    return DXNStruct.positional(value.name, compiled.fieldNames().map((name) => resolved[name]));
+    return value.withFields({ type: 'positional', values: compiled.fieldNames().map((name) => resolved[name]) });
   }
   if (value !== null && typeof value === 'object' && !(value instanceof Map) && value.constructor && value.constructor !== Object) {
     const rebuilt = Object.create(Object.getPrototypeOf(value));
@@ -378,8 +351,8 @@ function wrapChildren(value, registry, opts) {
   if (value instanceof DXNSortedSet) return DXNSortedSet.fromArray(value.items.map((v) => wrapAndCheck(v, registry, opts)));
   if (value instanceof DXNStruct) {
     return value.fields.type === 'keyed'
-      ? DXNStruct.keyed(value.name, value.fields.pairs.map(([k, v]) => [k, wrapAndCheck(v, registry, opts)]))
-      : DXNStruct.positional(value.name, value.fields.values.map((v) => wrapAndCheck(v, registry, opts)));
+      ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, wrapAndCheck(v, registry, opts)]) })
+      : value.withFields({ type: 'positional', values: value.fields.values.map((v) => wrapAndCheck(v, registry, opts)) });
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, wrapAndCheck(value.value, registry, opts));
   if (value instanceof Map) {

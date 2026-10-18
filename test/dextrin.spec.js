@@ -69,7 +69,7 @@ describe('dextrin (top-level API)', () => {
   });
 
   describe('schema-backed decode/encode (registry:, validate:, coerce:, schema:)', () => {
-    const schemaDoc = esm.decode('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+    const schemaDoc = esm.decode('%{ Point: %schema{ x: :float, y: :float } }');
     const registry = esm.Schema.compile(schemaDoc, new esm.Registry());
 
     it('decode materializes a registered struct via the registry', () => {
@@ -94,13 +94,13 @@ describe('dextrin (top-level API)', () => {
     });
 
     it('encode coerces mismatched fields by default (coerce: true)', () => {
-      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }'), new esm.Registry());
+      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ amount: :rational } }'), new esm.Registry());
       const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
       expect(esm.encode(struct, { registry: rationalRegistry })).to.equal('%P{amount:1/2}');
     });
 
     it('encode with coerce: false rejects the same mismatched field', () => {
-      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }'), new esm.Registry());
+      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ amount: :rational } }'), new esm.Registry());
       const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
       expect(() => esm.encode(struct, { registry: rationalRegistry, coerce: false })).to.throw(esm.DXNError, /does not match/);
     });

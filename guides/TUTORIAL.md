@@ -197,9 +197,7 @@ const { Schema } = require('dextrin');
 
 const schemaDoc = decode(`
 %{
-  Point: %schema{
-    fields: @ordered %{ x: :integer, y: :integer }
-  }
+  Point: %schema{ x: :integer, y: :integer }
 }
 `);
 
@@ -209,8 +207,8 @@ decode('%Point{x: 1, y: 2}', { registry });
 //=> { x: 1n, y: 2n }
 ```
 
-Field enforcement (required/optional, closed/forbidden fields,
-refinements) happens automatically at decode time, in both `decode`
+Field enforcement (required/optional fields, refinements) happens
+automatically at decode time, in both `decode`
 and `decodeBinary` — a violation comes back as an ordinary thrown
 `DXNError`, indistinguishable by shape from a syntax error:
 
@@ -290,7 +288,7 @@ type instead — purely data, composing the fixed type_expr vocabulary:
 const doc = decode(`
 %{
   PositiveInt: {:refine :integer %{min: 1}}
-  Point: %schema{ fields: @ordered %{ x: PositiveInt, y: :integer } }
+  Point: %schema{ x: PositiveInt, y: :integer }
 }
 `);
 ```
@@ -326,7 +324,7 @@ class LibPoint {
 }
 
 const PointProvider = {
-  dxnSchema: () => '%{ Point: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }',
+  dxnSchema: () => '%{ Point: %schema{ x: :integer, y: :integer } }',
   dxnSchemaName: () => 'Point',
   dxnClass: () => LibPoint,
   dxnMaterialize: ({ x, y }) => new LibPoint(x, y),
@@ -357,11 +355,9 @@ const fs = require('node:fs');
 const schemaSource = `
 %{
   Server: %schema{
-    fields: @ordered %{
-      host:  NonEmptyString
-      port:  {:refine :integer %{min: 1, max: 65535}}
-      tags?: {:list-of :symbol}
-    }
+    host:  NonEmptyString
+    port:  {:refine :integer %{min: 1, max: 65535}}
+    tags?: {:list-of :symbol}
   }
 }
 `;

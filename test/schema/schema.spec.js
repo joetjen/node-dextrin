@@ -5,7 +5,7 @@ import { parse } from '../../src/text/parser.cjs';
 import DXNStruct from '../../src/values/struct.js';
 
 describe('schema.cjs (top-level API)', () => {
-  const doc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer } } }');
+  const doc = parse('%{ P: %schema{ x: :integer } }');
 
   describe('compile', () => {
     it('is the same as schema/compiler.cjs\'s compile', () => {
@@ -48,7 +48,7 @@ describe('schema.cjs (top-level API)', () => {
     });
 
     it('coerces by default', () => {
-      const rationalDoc = parse('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }');
+      const rationalDoc = parse('%{ P: %schema{ amount: :rational } }');
       const registry = Schema.compile(rationalDoc, new Registry());
       const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
       const result = Schema.validateEncode(struct, registry, 'P');
@@ -77,7 +77,7 @@ describe('schema.cjs (top-level API)', () => {
     it('is the same as schema/provider.cjs\'s registerProvider', () => {
       class Point {}
       const registry = Schema.registerProvider(new Registry(), {
-        dxnSchema: () => '%{ Point: %schema{ fields: @ordered %{ x: :integer } } }',
+        dxnSchema: () => '%{ Point: %schema{ x: :integer } }',
         dxnSchemaName: () => 'Point',
         dxnClass: () => Point
       });

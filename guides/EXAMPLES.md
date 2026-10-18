@@ -51,14 +51,11 @@ const { decode, Schema, Std } = require('dextrin');
 const schemaSource = `
 %{
   User: %schema{
-    closed: true
-    fields: @ordered %{
-      id:       :uuid
-      email:    NonEmptyString
-      role:     {:enum :admin :member :guest}
-      created:  :timestamp
-      note?:    :string
-    }
+    id:       :uuid
+    email:    NonEmptyString
+    role:     {:enum :admin :member :guest}
+    created:  :timestamp
+    note?:    :string
   }
 }
 `;
@@ -77,17 +74,6 @@ const payload = `
 
 decode(payload, { registry });
 //=> { id: DXNUUID {...}, email: 'ada@example.com', role: Symbol(admin), created: DXNTimestamp {...}, note: null }
-```
-
-A response body accidentally including a legacy field is rejected
-loudly, not silently dropped:
-
-```js
-decode(
-  '%User{id: @uuid "550e8400-e29b-41d4-a716-446655440000", email: "a@b.co", role: :admin, created: ~U[2024-01-01 00:00:00Z], legacy_id: 1}',
-  { registry },
-);
-//=> throws DXNError: struct "User" violates its schema: unknown field "legacy_id" (schema is closed)
 ```
 
 An optional field with no value supplied (`note?:`) materializes as
@@ -123,10 +109,8 @@ const { decode, Schema, Registry } = require('dextrin');
 const schemaSource = `
 %{
   Money: %schema{
-    fields: @ordered %{
-      amount:   :decimal
-      currency: {:enum :usd :eur :gbp}
-    }
+    amount:   :decimal
+    currency: {:enum :usd :eur :gbp}
   }
 }
 `;
@@ -146,37 +130,36 @@ decode('%Money{amount: 19.99M, currency: :usd}', { registry });
 `.description` reads the interned name back out, the native-`Symbol`
 equivalent of Elixir's `Atom.to_string/1`.
 
-## Cross-field validation with `refine-fn`
+## A schema, version by version
 
-A `type_expr` can only describe shape, not "field A implies field B" —
-`refine-fn:` names a predicate resolved from a `predicates` object
-passed to `compile`. A predicate returns `true` on success or a
-`string` error message on failure — JS's analog of Elixir's `:ok |
-{:error, reason}`:
+Each `.dxns` document describes one version of a schema, in its
+header; the body is the fields, in order. Without a header it is
+version 1:
 
 ```js
 const { decode, Schema, Registry } = require('dextrin');
 
-const schemaSource = `
-%{
-  DateRange: %schema{
-    refine-fn: date-range/valid
-    fields: @ordered %{ starts: :date, ends: :date }
-  }
-}
-`;
+let registry = Schema.compile(decode('%{ User: %schema{ name: :string } }'), new Registry());
+registry = Schema.compile(decode('%{ User: %schema(2){ name: :string, email?: :string } }'), registry);
 
-const predicates = {
-  'date-range/valid': ({ starts, ends }) =>
-    starts.compare(ends) <= 0 ? true : 'starts must not be after ends',
-};
+registry.fetchStructSchema('User').compiled.version;      //=> 2, the latest
+registry.fetchStructSchema('User', 1).compiled.fieldNames(); //=> ['name']
 
-const doc = decode(schemaSource);
-const registry = Schema.compile(doc, new Registry(), predicates);
-
-decode('%DateRange{starts: ~D[2024-06-01], ends: ~D[2024-01-01]}', { registry });
-//=> throws DXNError: struct "DateRange" violates its schema: starts must not be after ends
+Schema.compile(decode('%{ User: %schema(2){ name: :string } }'), registry);
+//=> throws DXNError, category 'schema/duplicate-version'
 ```
+
+Loading the same version twice is a mistake rather than an update;
+`registry.replaceStructSchema(name, compiled)` swaps a loaded version
+on purpose. A struct can say which version it was written with, and is
+written back with it:
+
+```js
+decode('%User(2){name: "Ada"}').version;   //=> 2
+encode(decode('%User(2){name: "Ada"}'));   //=> '%User(2){name:"Ada"}'
+```
+
+A version must be a positive integer: `%User(0){...}` is a syntax error.
 
 ## A third-party class provider, end to end
 
@@ -206,9 +189,7 @@ const LatLngProvider = {
   dxnSchema: () => `
     %{
       Degrees: {:refine :float %{min: -180.0, max: 180.0}}
-      LatLng: %schema{
-        fields: @ordered %{ lat: Degrees, lng: Degrees }
-      }
+      LatLng: %schema{ lat: Degrees, lng: Degrees }
     }
   `,
   dxnSchemaName: () => 'LatLng',
@@ -253,16 +234,12 @@ Given `schemas/Address.dxns` and `schemas/Person.dxns` on disk:
 ```
 # schemas/Address.dxns
 %{
-  Address: %schema{
-    fields: @ordered %{ street: :string }
-  }
+  Address: %schema{ street: :string }
 }
 
 # schemas/Person.dxns
 %{
-  Person: %schema{
-    fields: @ordered %{ name: :string, home: Address }
-  }
+  Person: %schema{ name: :string, home: Address }
 }
 ```
 

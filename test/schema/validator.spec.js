@@ -33,7 +33,7 @@ function fieldValue(struct, name) {
 describe('schema/validator', () => {
   describe('materialize (decode-side)', () => {
     it('materializes keyed fields into a plain object by default (no materializer)', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
       const result = Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] }, null, registry);
       expect(result).to.be.instanceOf(Validated);
       expect(result.name).to.equal('P');
@@ -41,76 +41,57 @@ describe('schema/validator', () => {
     });
 
     it('materializes positional fields by schema field order', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
       const result = Validator.materialize(compiled, { type: 'positional', values: [1n, 2n] }, null, registry);
       expect(Validated.strip(result)).to.deep.equal({ x: 1n, y: 2n });
     });
 
     it('rejects a positional field count mismatch', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer, y: :integer } }', 'P');
       expect(() => Validator.materialize(compiled, { type: 'positional', values: [1n] }, null, registry)).to.throw(/positional/);
     });
 
     it('uses a custom materializer when given', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer } }', 'P');
       const materializer = (fields) => ({ doubled: fields.x * 2n });
       const result = Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 5n]] }, materializer, registry);
       expect(Validated.strip(result)).to.deep.equal({ doubled: 10n });
     });
 
     it('fills an absent field with its default', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x?: %field{type: :integer, default: 99} } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x?: %field{type: :integer, default: 99} } }', 'P');
       const result = Validator.materialize(compiled, { type: 'keyed', pairs: [] }, null, registry);
       expect(Validated.strip(result)).to.deep.equal({ x: 99n });
     });
 
     it('fills an absent optional field with null when there is no default', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x?: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x?: :integer } }', 'P');
       const result = Validator.materialize(compiled, { type: 'keyed', pairs: [] }, null, registry);
       expect(Validated.strip(result)).to.deep.equal({ x: null });
     });
 
     it('never coerces on decode, even for a value that would coerce cleanly on encode', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
       expect(() => Validator.materialize(compiled, { type: 'keyed', pairs: [['amount', 0.5]] }, null, registry)).to.throw(/does not match/);
-    });
-
-    it('runs refine-fn against the fully resolved fields', () => {
-      const doc = parse('%{ P: %schema{ refine-fn: check, fields: @ordered %{ x: :integer } } }');
-      const predicate = (resolved) => (resolved.x > 0n ? true : 'x must be positive');
-      const registry = compile(doc, new Registry(), { check: predicate });
-      const found = registry.fetchStructSchema('P');
-      expect(() => Validator.materialize(found.compiled, { type: 'keyed', pairs: [['x', -1n]] }, null, found.registry)).to.throw('x must be positive');
-      expect(Validated.strip(Validator.materialize(found.compiled, { type: 'keyed', pairs: [['x', 1n]] }, null, found.registry))).to.deep.equal({ x: 1n });
-    });
-
-    it('rejects a forbidden field even on an open schema', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ forbidden: [:legacy], fields: @ordered %{ x: :integer } } }', 'P');
-      expect(() => Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 1n], ['legacy', true]] }, null, registry)).to.throw(/forbidden/);
-    });
-
-    it('rejects an unknown field on a closed schema', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ closed: true, fields: @ordered %{ x: :integer } } }', 'P');
-      expect(() => Validator.materialize(compiled, { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] }, null, registry)).to.throw(/closed/);
     });
   });
 
   describe('validateForEncode / validateTreeForEncode (encode-side)', () => {
     it('checks a DXNStruct and returns it in the same shape, unchanged, when already conforming', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer } }', 'P');
       const struct = DXNStruct.keyed('P', [['x', 1n]]);
       const result = Validator.validateForEncode(compiled, struct, registry);
       expect(Validated.strip(result)).to.deep.equal(struct);
     });
 
     it('rejects a value with no DXN representation as a name map', () => {
-      const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ x: :integer } } }', 'P');
+      const { compiled, registry } = schemaFor('%{ P: %schema{ x: :integer } }', 'P');
       expect(() => Validator.validateForEncode(compiled, 42n, registry)).to.throw(/expected a map/);
     });
 
     describe('coercion (coerce: true, the default)', () => {
       it('coerces a plain number to DXNRational for a :rational field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
         const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
         const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
         const amount = fieldValue(result, 'amount');
@@ -119,21 +100,21 @@ describe('schema/validator', () => {
       });
 
       it('coerces a plain number to DXNDecimal for a :decimal field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ amount: :decimal } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :decimal } }', 'P');
         const struct = DXNStruct.keyed('P', [['amount', 19.99]]);
         const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
         expect(fieldValue(result, 'amount')).to.be.instanceOf(DXNDecimal);
       });
 
       it('coerces a string to DXNUUID for a :uuid field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ id: :uuid } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ id: :uuid } }', 'P');
         const struct = DXNStruct.keyed('P', [['id', '550e8400-e29b-41d4-a716-446655440000']]);
         const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
         expect(fieldValue(result, 'id')).to.be.instanceOf(DXNUUID);
       });
 
       it('coerces a native Date to DXNDate for a :date field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ d: :date } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ d: :date } }', 'P');
         const struct = DXNStruct.keyed('P', [['d', new Date(Date.UTC(2024, 2, 15))]]);
         const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
         const d = fieldValue(result, 'd');
@@ -143,7 +124,7 @@ describe('schema/validator', () => {
 
       it('coerces element-wise inside a list-of field', () => {
         const registry0 = compile(parse('%{ Amount: :rational }'), new Registry());
-        const doc = parse('%{ P: %schema{ fields: @ordered %{ amounts: {:list-of :rational} } } }');
+        const doc = parse('%{ P: %schema{ amounts: {:list-of :rational} } }');
         const registry = compile(doc, registry0);
         const found = registry.fetchStructSchema('P');
         const struct = DXNStruct.keyed('P', [['amounts', [0.5, 0.25]]]);
@@ -153,7 +134,7 @@ describe('schema/validator', () => {
       });
 
       it('does not coerce when a value cannot be coerced (an invalid UUID string still fails cleanly)', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ id: :uuid } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ id: :uuid } }', 'P');
         const struct = DXNStruct.keyed('P', [['id', 'not-a-uuid']]);
         expect(() => Validator.validateForEncode(compiled, struct, registry, { coerce: true })).to.throw(/does not match/);
       });
@@ -161,7 +142,7 @@ describe('schema/validator', () => {
 
     describe('coerce: false (strict)', () => {
       it('rejects a plain number for a :rational field with no coercion', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }', 'P');
+        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
         const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
         expect(() => Validator.validateForEncode(compiled, struct, registry, { coerce: false })).to.throw(/does not match/);
       });
@@ -171,8 +152,8 @@ describe('schema/validator', () => {
       it('finds and checks a struct nested inside a plain field value', () => {
         const doc = parse(`
           %{
-            Address: %schema{ fields: @ordered %{ city: :string } }
-            Person: %schema{ fields: @ordered %{ name: :string, address: Address } }
+            Address: %schema{ city: :string }
+            Person: %schema{ name: :string, address: Address }
           }
         `);
         const registry = compile(doc, new Registry());
@@ -186,8 +167,8 @@ describe('schema/validator', () => {
       it('rejects a nested reference field pointing at the wrong struct name', () => {
         const doc = parse(`
           %{
-            Address: %schema{ fields: @ordered %{ city: :string } }
-            Person: %schema{ fields: @ordered %{ address: Address } }
+            Address: %schema{ city: :string }
+            Person: %schema{ address: Address }
           }
         `);
         const registry = compile(doc, new Registry());
@@ -196,7 +177,7 @@ describe('schema/validator', () => {
       });
 
       it('finds a registered struct nested inside a DXNList', () => {
-        const doc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer } } }');
+        const doc = parse('%{ P: %schema{ x: :integer } }');
         const registry = compile(doc, new Registry());
         const tree = new DXNList([DXNStruct.keyed('P', [['x', 1n]])]);
         const result = Validator.validateTreeForEncode(tree, registry);

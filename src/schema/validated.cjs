@@ -51,8 +51,8 @@ function strip(value) {
   if (value instanceof DXNSortedSet) return DXNSortedSet.fromArray(value.items.map(strip));
   if (value instanceof DXNStruct) {
     return value.fields.type === 'keyed'
-      ? DXNStruct.keyed(value.name, value.fields.pairs.map(([k, v]) => [k, strip(v)]))
-      : DXNStruct.positional(value.name, value.fields.values.map(strip));
+      ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, strip(v)]) })
+      : value.withFields({ type: 'positional', values: value.fields.values.map(strip) });
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, strip(value.value));
   return value;

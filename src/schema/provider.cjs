@@ -2,8 +2,8 @@
 
 /**
  * @fileoverview Lets a class's *own* library ship a DXN schema for it
- * — field names, types, required/optional, closed/forbidden,
- * refinements, a materializer — without that library ever taking a
+ * — field names, types, required/optional, refinements, a
+ * materializer — without that library ever taking a
  * runtime dependency on `dextrin`. The `struct` (schema-backed)
  * counterpart to what `Registry#putTagEncoder` already does for
  * simple scalar-wrapping `custom-tag` values: an extension point

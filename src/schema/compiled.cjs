@@ -1,34 +1,28 @@
 'use strict';
 
 /**
- * @fileoverview The result of compiling one `%schema{}` entry from a
+ * @fileoverview The result of compiling one `%schema(N){}` entry from a
  * `.dxns` document (`schema/compiler.cjs`) — enough to both validate
  * a decoded value and convert it both directions between `.dxnb`'s
  * always-positional wire shape and a named field map. Mirrors
  * `Dextrin.Schema.Compiled`.
  *
  * `fields` is ordered — that order is the canonical position <-> name
- * mapping `.dxnb`'s positional struct encoding needs, which is
- * exactly why a schema's own `fields:` has to be an `@ordered %{...}`
- * in the source document, not a plain `map` (`.dxn`'s `map` type
- * makes no ordering guarantee, but field order here is semantically
- * load-bearing, not incidental).
+ * mapping `.dxnb`'s positional struct encoding needs, and it is the
+ * order the fields are written in the `%schema(N){...}` body.
  *
- * @typedef {(resolved: {[k: string]: unknown}) => true | string} RefineFn
- * `resolved` is this schema's own already-type-checked field values;
- * return `true` to accept the value, or a `string` describing why not.
+ * `version` is which version of `name` this is (`DXN.md` §4.8), 1 for
+ * a schema written without a header.
  */
 
 class Compiled {
   /**
-   * @param {{name?: string | null, fields?: import('./field.cjs')[], closed?: boolean, forbidden?: string[], refineFn?: RefineFn | null}} spec
+   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[]}} spec
    */
-  constructor({ name = null, fields = [], closed = false, forbidden = [], refineFn = null } = {}) {
+  constructor({ name = null, version = 1, fields = [] } = {}) {
     this.name = name;
+    this.version = version;
     this.fields = fields;
-    this.closed = closed;
-    this.forbidden = forbidden;
-    this.refineFn = refineFn;
   }
 
   /** @returns {string[]} */

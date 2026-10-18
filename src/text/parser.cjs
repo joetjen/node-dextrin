@@ -264,7 +264,8 @@ class Parser {
   }
 
   /**
-   * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct).
+   * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct), the struct
+   * optionally carrying the version it was written with: `%Name(3){...}`.
    * @returns {Map<unknown, unknown> | DXNStruct | Validated}
    */
   parsePercent() {
@@ -275,29 +276,47 @@ class Parser {
       return new DXNMap(pairs);
     }
     const name = this.next('IDENTIFIER').value;
+    const version = this.parseStructVersion();
     if (this.at('LBRACE')) {
       /** @type {Array<[string, unknown]>} */
       const pairs = this.parseEntries().map(([key, value]) => [structFieldName(key), value]);
-      return this.materializeStruct(name, { type: 'keyed', pairs });
+      return this.materializeStruct(name, { type: 'keyed', pairs }, version);
     }
     this.next('LBRACKET');
     /** @type {unknown[]} */
     const values = [];
     while (!this.at('RBRACKET')) values.push(this.parseValue());
     this.next('RBRACKET');
-    return this.materializeStruct(name, { type: 'positional', values });
+    return this.materializeStruct(name, { type: 'positional', values }, version);
+  }
+
+  /**
+   * The `(3)` of `%Name(3){...}` — the schema version a struct was
+   * written with (`DXN.md` §4.8), a positive integer — or `null` when
+   * there is none.
+   * @returns {number | null}
+   */
+  parseStructVersion() {
+    if (!this.at('LPAREN')) return null;
+    this.next('LPAREN');
+    const tok = this.next('INTEGER');
+    const version = Number(tok.value);
+    if (!Number.isSafeInteger(version) || version <= 0) {
+      throw new ParseError(`a struct version is a positive integer, got ${tok.value}`, tok.start);
+    }
+    this.next('RPAREN');
+    return version;
   }
 
   /**
    * @param {string} name
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
+   * @param {number | null} [version]
    * @returns {DXNStruct | Validated}
    */
-  materializeStruct(name, fields) {
+  materializeStruct(name, fields, version = null) {
     const found = this.registry?.fetchStructSchema(name);
-    if (!found) {
-      return fields.type === 'keyed' ? DXNStruct.keyed(name, fields.pairs) : DXNStruct.positional(name, fields.values);
-    }
+    if (!found) return new DXNStruct(name, fields, version);
     this.registry = found.registry;
     const materializer = this.registry.fetchMaterializer(name) ?? null;
     try {

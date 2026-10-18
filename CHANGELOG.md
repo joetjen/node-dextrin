@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same key exactly when their canonical forms are (`DXN.md` §1.6). Every
   decoded map is one.
 
+- **Versioned schemas** (`DXN.md` §4.8). `%schema(3){...}` is version 3
+  of its name, and one with no header is version 1. A registry keeps every
+  loaded version side by side: `addStructSchema` refuses a version that is
+  already loaded (`schema/duplicate-version`), `replaceStructSchema`
+  hot-swaps one that is loaded and refuses one that is not
+  (`schema/not-loaded`), and `fetchStructSchema(name)` answers the latest,
+  `fetchStructSchema(name, version)` exactly that one.
+- **A struct literal carries its version**: `%User(3){...}` and
+  `%User(3)[...]` decode to a `DXNStruct` whose `version` is 3, and are
+  written back with it. A version of zero or less is refused.
+- `DXNStruct.head` and `DXNStruct#withFields`.
+
 ### Changed
 
 - **A map key must be one of the eight types of `DXN.md` §1.6**
@@ -33,12 +45,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A repeated key such as `?c` merges into one entry, the last one, and a
   lookup with an equal key finds it: a plain `Map` compared object keys
   by identity, so `%{?c => 1, ?c => 2}` had two entries.
+- **A schema's body is its fields, in order**:
+  `User: %schema(3){name: :string, email: :string, id?: :uuid}`. The
+  `fields: @ordered %{...}` wrapper is gone, and so are `closed:`,
+  `forbidden:` and `refine-fn:`; `Schema.compile` and
+  `FileResolver.forPaths` lose their `predicates` argument. A failed
+  compile throws an error of category `schema/compile`.
 
 ### Fixed
 
 - A negative-zero decimal keeps its sign: `-0.0M` decoded as `0.0M`.
   Nothing is normalised (`DXN.md` §1.5); a value is written as it was
   given.
+- A walk over a struct's fields — stripping the schema marker, the
+  check on the way out, and the schema compiler's own normalising —
+  rebuilt the struct from its name and fields; it now changes only the
+  fields, so nothing else the struct carries is lost.
 
 ## [0.1.0] - 2026-08-14
 

@@ -15,7 +15,7 @@ class Money {
 /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
 const moneyProvider = {
   dxnSchema: () =>
-    '%{ Money: %schema{ fields: @ordered %{ amount: :decimal, currency: {:enum :usd :eur :gbp} } } }',
+    '%{ Money: %schema{ amount: :decimal, currency: {:enum :usd :eur :gbp} } }',
   dxnSchemaName: () => 'Money',
   dxnClass: () => Money,
   dxnMaterialize: (fields) => new Money(fields.amount, fields.currency)
@@ -45,7 +45,7 @@ describe('schema/provider', () => {
   it('folds every named type/schema the provider document defines, not only dxnSchemaName()\'s own', () => {
     /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
     const provider = {
-      dxnSchema: () => '%{ Currency: {:enum :usd :eur}, Money: %schema{ fields: @ordered %{ amount: :decimal, currency: Currency } } }',
+      dxnSchema: () => '%{ Currency: {:enum :usd :eur}, Money: %schema{ amount: :decimal, currency: Currency } }',
       dxnSchemaName: () => 'Money',
       dxnClass: () => Money
     };
@@ -56,7 +56,7 @@ describe('schema/provider', () => {
   it('works with no materializer at all, falling back to a plain object', () => {
     /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
     const provider = {
-      dxnSchema: () => '%{ Point: %schema{ fields: @ordered %{ x: :integer } } }',
+      dxnSchema: () => '%{ Point: %schema{ x: :integer } }',
       dxnSchemaName: () => 'Point',
       dxnClass: () => class Point {}
     };
@@ -68,7 +68,7 @@ describe('schema/provider', () => {
   it('throws a specific error when dxnSchemaName() names an entry the document does not define', () => {
     /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
     const mismatched = {
-      dxnSchema: () => '%{ Foo: %schema{ fields: @ordered %{ x: :integer } } }',
+      dxnSchema: () => '%{ Foo: %schema{ x: :integer } }',
       dxnSchemaName: () => 'Bar', // typo — document defines "Foo", not "Bar"
       dxnClass: () => class Bar {}
     };
@@ -78,7 +78,7 @@ describe('schema/provider', () => {
   it('composes across repeated registerProvider calls the same way compile does', () => {
     /** @type {import('../../src/schema/provider.cjs').DXNSchemaProvider} */
     const other = {
-      dxnSchema: () => '%{ Widget: %schema{ fields: @ordered %{ n: :integer } } }',
+      dxnSchema: () => '%{ Widget: %schema{ n: :integer } }',
       dxnSchemaName: () => 'Widget',
       dxnClass: () => class Widget {}
     };

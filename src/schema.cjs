@@ -27,16 +27,14 @@ const Provider = require('./schema/provider.cjs');
 
 /**
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
- * schema for each `%schema{}` entry, and a reusable named type for
- * every other entry. `predicates` resolves any `refine-fn:` names
- * used in the document.
+ * schema for each `%schema(N){}` entry, and a reusable named type for
+ * every other entry.
  * @param {unknown} schemaDoc
  * @param {import('./registry.cjs')} baseRegistry
- * @param {{[name: string]: (resolved: {[k: string]: unknown}) => true | string}} [predicates]
  * @returns {import('./registry.cjs')}
  */
-function compile(schemaDoc, baseRegistry, predicates = {}) {
-  return Compiler.compile(schemaDoc, baseRegistry, predicates);
+function compile(schemaDoc, baseRegistry) {
+  return Compiler.compile(schemaDoc, baseRegistry);
 }
 
 /**

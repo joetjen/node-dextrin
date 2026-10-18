@@ -206,6 +206,10 @@ function tokenize(src) {
       tokens.push({ type: 'LBRACE', value: '{', start, end: ++i });
     } else if (c === '}') {
       tokens.push({ type: 'RBRACE', value: '}', start, end: ++i });
+    } else if (c === '(') {
+      tokens.push({ type: 'LPAREN', value: '(', start, end: ++i });
+    } else if (c === ')') {
+      tokens.push({ type: 'RPAREN', value: ')', start, end: ++i });
     } else if (c === '"') {
       tokens.push(readString());
     } else if (c === '?') {

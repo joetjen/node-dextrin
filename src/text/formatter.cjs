@@ -67,10 +67,10 @@ function render(value, depth, opts) {
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
   if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length > 0) {
-    return `%${value.name}${bracketedKeywordEntries('{', value.fields.pairs, '}', depth, opts)}`;
+    return `${DXNStruct.head(value.name, value.version)}${bracketedKeywordEntries('{', value.fields.pairs, '}', depth, opts)}`;
   }
   if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length > 0) {
-    return `%${value.name}${bracketed('[', value.fields.values, ']', depth, opts)}`;
+    return `${DXNStruct.head(value.name, value.version)}${bracketed('[', value.fields.values, ']', depth, opts)}`;
   }
 
   // A registered application class instance — rebuilt as the

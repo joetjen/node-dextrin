@@ -14,7 +14,7 @@ class Point {
 }
 
 describe('text print/pretty with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('print() serializes a registered class instance as its named struct form', () => {
     const registry = compile(schemaDoc, new Registry()).putStructModule('Point', Point);

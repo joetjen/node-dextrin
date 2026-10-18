@@ -129,9 +129,7 @@ const { decode, encode, Schema, Registry } = require('dextrin');
 
 const schemaDoc = decode(`
   %{
-    Point: %schema{
-      fields: @ordered %{ x: :float, y: :float }
-    }
+    Point: %schema{ x: :float, y: :float }
   }
 `);
 const registry = Schema.compile(schemaDoc, new Registry());

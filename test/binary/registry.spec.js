@@ -9,7 +9,7 @@ import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
 
 describe('.dxnb binary codec with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('decoder materializes a registered struct instead of an opaque DXNStruct', () => {
     const registry = compile(schemaDoc, new Registry());

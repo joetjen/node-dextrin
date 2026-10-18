@@ -146,9 +146,9 @@ function struct(value) {
       const [name, field] = pair;
       return isBareIdentifier(name) ? `${name}: ${text(field)}` : `${quoted(name)} => ${text(field)}`;
     });
-    return `%${value.name}{${written.join(' ')}}`;
+    return `${DXNStruct.head(value.name, value.version)}{${written.join(' ')}}`;
   }
-  return `%${value.name}[${fields.values.map(text).join(' ')}]`;
+  return `${DXNStruct.head(value.name, value.version)}[${fields.values.map(text).join(' ')}]`;
 }
 
 /** @param {string} name @returns {string} */

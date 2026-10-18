@@ -88,7 +88,7 @@ describe('bin/dextrin.js CLI', () => {
     });
 
     it('validates against a --schema/--as pair', () => {
-      writeFileSync(join(dir, 'point.dxns'), '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+      writeFileSync(join(dir, 'point.dxns'), '%{ Point: %schema{ x: :float, y: :float } }');
       writeFileSync(join(dir, 'point.dxn'), '%Point{x: 1.0, y: 2.0}');
       const result = run(['validate', 'point.dxn', '--schema', 'point.dxns', '--as', 'Point'], { cwd: dir });
       expect(result.status).to.equal(0);
@@ -96,7 +96,7 @@ describe('bin/dextrin.js CLI', () => {
     });
 
     it('reports a schema violation by name', () => {
-      writeFileSync(join(dir, 'point.dxns'), '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+      writeFileSync(join(dir, 'point.dxns'), '%{ Point: %schema{ x: :float, y: :float } }');
       writeFileSync(join(dir, 'point-bad.dxn'), '%Point{x: 1.0}');
       const result = run(['validate', 'point-bad.dxn', '--schema', 'point.dxns', '--as', 'Point'], { cwd: dir });
       expect(result.status).to.equal(1);
