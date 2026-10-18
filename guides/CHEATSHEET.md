@@ -17,10 +17,9 @@ encodeBinary(value, opts = {})     //=> Buffer, throws DXNError
 `opts`: `registry:` (a `Registry`, both directions), `schema:` (encode
 only — validate the top-level value against one named schema),
 `validate:` (encode only, default `true` — set `false` to skip the
-automatic whole-tree schema check), `coerce:` (encode only, default
-`true` — let a mismatched field be coerced toward its declared type
-via that DXN type's `fromX` conversion helper before failing
-validation; no Elixir `dextrin` equivalent), `pretty:` (`encode` only,
+automatic whole-tree schema check; nothing is ever converted to match
+a field's type, `DXN.md` §4.7), `strict:` (decode only — refuse extra
+fields on schema-backed structs), `pretty:` (`encode` only,
 default `false` — multi-line, indented output instead of
 single-line/compact), `indent:` (`encode` only, meaningful with
 `pretty: true` — spaces per nesting level, default 2), `trusted:`
@@ -141,8 +140,8 @@ guard against the way Mix does.
 
 ```js
 Schema.validate(value, registry, schemaName);              //=> true, throws on failure
-Schema.validateEncode(value, registry, schemaName, opts);   // one named schema, encode-side — may coerce and return a new value
-Schema.validateEncodeTree(value, registry, opts);           // automatic whole-tree walk, encode-side — may coerce and return a new value
+Schema.validateEncode(value, registry, schemaName);   // one named schema, encode-side — checks, never converts
+Schema.validateEncodeTree(value, registry);           // automatic whole-tree walk, encode-side — checks, never converts
 ```
 
 ## `.dxns` type_expr forms, at a glance

@@ -90,6 +90,9 @@ function print(value, opts = {}) {
   if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
   if (value instanceof DXNTime) return `~T[${temporal.formatTime(value)}]`;
   if (value instanceof DXNTimestamp) return `~U[${temporal.formatInstant(value)}]`;
+  // A native `Date` is an instant: it always means a timestamp, with or
+  // without a schema (DXN.md §4.7).
+  if (value instanceof Date) return print(DXNTimestamp.fromDate(value), opts);
   if (value instanceof DXNDateTime) return tagForm('datetime', quoteString(temporal.formatOffsetDateTime(value)), opts);
   if (value instanceof DXNDuration) return tagForm('duration', quoteString(temporal.formatDuration(value)), opts);
 

@@ -47,12 +47,11 @@ describe('schema.cjs (top-level API)', () => {
       expect(Schema.validateEncode(struct, registry, 'P')).to.deep.equal(struct);
     });
 
-    it('coerces by default', () => {
+    it('never converts a mismatched field to its declared type (DXN.md §4.7)', () => {
       const rationalDoc = parse('%{ P: %schema{ amount: :rational } }');
       const registry = Schema.compile(rationalDoc, new Registry());
       const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
-      const result = Schema.validateEncode(struct, registry, 'P');
-      expect(result.fields.pairs[0][1].toNumber()).to.equal(0.5);
+      expect(() => Schema.validateEncode(struct, registry, 'P')).to.throw(/does not match/);
     });
 
     it('throws when no schema is registered for schemaName', () => {

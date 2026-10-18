@@ -152,21 +152,18 @@ and a `schema:` option additionally validates — and, for a nameless
 plain value, *names* — the top-level value itself against one named
 schema.
 
-**Schema-driven coercion on encode** (`coerce:`, default `true`, no
-Elixir `dextrin` equivalent) lets a field whose value doesn't already
-match its declared type be coerced toward it first, reusing the same
-`DXN*.fromX()` conversion helpers documented above — a plain `number`
-becomes a `DXNRational` for a `:rational` field, a native `Date`
-becomes a `DXNDate` for a `:date` field, and so on, recursively
-through `list-of`/`set-of`/`tuple-of`/`nilable`/`one-of` too. Pass
-`coerce: false` for strict validation with no silent conversion (see
-`src/schema/coercion.cjs`).
+**Nothing is converted to make a value match** (`DXN.md` §4.7): a host
+value always means the same DXN type, with or without a schema. A plain
+`number` is a `float`, so a `:rational` field refuses it rather than
+turning it into a `DXNRational`; say which type a value is with the
+`DXN*` classes and their `fromX()` helpers. A native `Date` is an
+instant, so it always means a `timestamp`. A field typed `Point` accepts
+only a `Point` struct — a `DXNStruct` named `Point`, or the class
+registered for it — never a plain object or `Map`.
 
 ```js
 encode({ x: 1, y: 2 }, { registry, schema: 'Point' });
-// x/y are plain numbers already matching :float -- no coercion needed here,
-// but a :rational/:decimal/:uuid/:date/... field would accept the
-// closest native JS shape the same way.
+// x/y are plain numbers, which is what :float means here
 ```
 
 Also included, each mirroring its `Dextrin.Schema.*` counterpart:

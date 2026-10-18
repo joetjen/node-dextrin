@@ -82,63 +82,10 @@ describe('schema/validator', () => {
       expect(() => Validator.validateForEncode(compiled, 42n, registry)).to.throw(/expected a map/);
     });
 
-    describe('coercion (coerce: true, the default)', () => {
-      it('coerces a plain number to DXNRational for a :rational field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
-        const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
-        const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
-        const amount = fieldValue(result, 'amount');
-        expect(amount).to.be.instanceOf(DXNRational);
-        expect(amount.toNumber()).to.equal(0.5);
-      });
-
-      it('coerces a plain number to DXNDecimal for a :decimal field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :decimal } }', 'P');
-        const struct = DXNStruct.keyed('P', [['amount', 19.99]]);
-        const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
-        expect(fieldValue(result, 'amount')).to.be.instanceOf(DXNDecimal);
-      });
-
-      it('coerces a string to DXNUUID for a :uuid field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ id: :uuid } }', 'P');
-        const struct = DXNStruct.keyed('P', [['id', '550e8400-e29b-41d4-a716-446655440000']]);
-        const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
-        expect(fieldValue(result, 'id')).to.be.instanceOf(DXNUUID);
-      });
-
-      it('coerces a native Date to DXNDate for a :date field', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ d: :date } }', 'P');
-        const struct = DXNStruct.keyed('P', [['d', new Date(Date.UTC(2024, 2, 15))]]);
-        const result = Validated.strip(Validator.validateForEncode(compiled, struct, registry, { coerce: true }));
-        const d = fieldValue(result, 'd');
-        expect(d).to.be.instanceOf(DXNDate);
-        expect(d.year).to.equal(2024);
-      });
-
-      it('coerces element-wise inside a list-of field', () => {
-        const registry0 = compile(parse('%{ Amount: :rational }'), new Registry());
-        const doc = parse('%{ P: %schema{ amounts: {:list-of :rational} } }');
-        const registry = compile(doc, registry0);
-        const found = registry.fetchStructSchema('P');
-        const struct = DXNStruct.keyed('P', [['amounts', [0.5, 0.25]]]);
-        const result = Validated.strip(Validator.validateForEncode(found.compiled, struct, found.registry, { coerce: true }));
-        const amounts = /** @type {DXNList} */ (fieldValue(result, 'amounts'));
-        expect(amounts.items.every((v) => v instanceof DXNRational)).to.equal(true);
-      });
-
-      it('does not coerce when a value cannot be coerced (an invalid UUID string still fails cleanly)', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ id: :uuid } }', 'P');
-        const struct = DXNStruct.keyed('P', [['id', 'not-a-uuid']]);
-        expect(() => Validator.validateForEncode(compiled, struct, registry, { coerce: true })).to.throw(/does not match/);
-      });
-    });
-
-    describe('coerce: false (strict)', () => {
-      it('rejects a plain number for a :rational field with no coercion', () => {
-        const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
-        const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
-        expect(() => Validator.validateForEncode(compiled, struct, registry, { coerce: false })).to.throw(/does not match/);
-      });
+    it('never converts a value to make it match (DXN.md §4.7)', () => {
+      const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
+      const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
+      expect(() => Validator.validateForEncode(compiled, struct, registry)).to.throw(/does not match/);
     });
 
     describe('validateTreeForEncode (automatic whole-tree walk)', () => {

@@ -75,6 +75,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`schema/undeclared-field`, `Registry#putStrict`).
 - A keyed struct entry whose key is not a name — `%Point{1 => 2}` — is an
   extra field instead of an error.
+- **A struct is matched only by a struct** (`DXN.md` §4.7). A field
+  typed `User` accepts a `DXNStruct` named `User`, or the class
+  registered for `User`; a `Map`, a plain object, any other value, and a
+  class registered for no schema or another are type errors. Until now
+  every non-struct value was accepted.
+- **Nothing is converted to make a value match its type.** The
+  schema-driven coercion and the `coerce:` option are removed
+  (`src/schema/coercion.cjs` is gone): a `number` for a `:rational` or
+  `:decimal` field, a string for `:uuid`, `:uri` or `:char`, a `Date` for
+  `:date` or `:datetime` and an array for `:list` or `:tuple` are now
+  refused. A host value always means the same DXN type, schema or not.
+- A native `Date` always means a `timestamp`: `encode`, `encodeBinary`
+  and `canonical` write it as one, and a `:timestamp` field accepts it.
 
 ### Changed
 

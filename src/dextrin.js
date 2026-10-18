@@ -27,7 +27,7 @@ function decode(text, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, registry?: Registry, validate?: boolean, schema?: string}} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {
@@ -50,7 +50,7 @@ function decodeBinary(bytes, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string, [k: string]: unknown}} [opts]
+ * @param {{registry?: Registry, validate?: boolean, schema?: string, [k: string]: unknown}} [opts]
  * @returns {Buffer}
  */
 function encodeBinary(value, opts = {}) {
@@ -64,19 +64,18 @@ function encodeBinary(value, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string}} opts
+ * @param {{registry?: Registry, validate?: boolean, schema?: string}} opts
  * @returns {unknown}
  */
 function maybeValidateEncode(value, opts) {
   const registry = opts.registry ?? new Registry();
-  const coerceOpts = { coerce: opts.coerce ?? true };
 
   let result = value;
   if (opts.validate ?? true) {
-    result = Schema.validateEncodeTree(result, registry, coerceOpts);
+    result = Schema.validateEncodeTree(result, registry);
   }
   if (opts.schema !== undefined) {
-    result = Schema.validateEncode(result, registry, opts.schema, coerceOpts);
+    result = Schema.validateEncode(result, registry, opts.schema);
   }
   return result;
 }

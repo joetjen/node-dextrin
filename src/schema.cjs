@@ -65,13 +65,13 @@ function validate(value, registry, schemaName) {
  * Encode-time schema validation: checks `value` — ordinary JS data
  * you're about to encode — against a named, compiled schema *before*
  * encoding produces any output. The mirror image of `validate`, for
- * data on its way out rather than in. Returns the checked value
- * (possibly coerced — see `schema/validator.cjs`'s own doc), stripped
- * of internal bookkeeping.
+ * data on its way out rather than in. Returns the checked value,
+ * stripped of internal bookkeeping; nothing is converted (`DXN.md`
+ * §4.7).
  * @param {unknown} value
  * @param {import('./registry.cjs')} registry
  * @param {string} schemaName
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateEncode(value, registry, schemaName, opts = {}) {
@@ -86,10 +86,10 @@ function validateEncode(value, registry, schemaName, opts = {}) {
  * anywhere in it against its own schema, wherever it turns out to be.
  * Symmetric to how decode checks every named struct unconditionally.
  * `encode`/`encodeBinary` call this automatically by default (opt out
- * with `validate: false`). Returns the (possibly-coerced) tree.
+ * with `validate: false`). Returns the checked tree.
  * @param {unknown} value
  * @param {import('./registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateEncodeTree(value, registry, opts = {}) {

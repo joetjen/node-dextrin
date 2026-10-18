@@ -84,6 +84,7 @@ function text(value) {
   if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
   if (value instanceof DXNTime) return `~T[${trimmed(temporal.formatTime(value))}]`;
   if (value instanceof DXNTimestamp) return `~U[${trimmedInstant(temporal.formatInstant(value))}]`;
+  if (value instanceof Date) return text(DXNTimestamp.fromDate(value));
   if (value instanceof DXNDateTime) return '@datetime ' + quoted(trimmedInstant(temporal.formatOffsetDateTime(value)));
   if (value instanceof DXNDuration) return '@duration ' + quoted(temporal.formatDuration(value));
   if (value instanceof DXNUUID) return '@uuid ' + quoted(value.toString().toLowerCase());

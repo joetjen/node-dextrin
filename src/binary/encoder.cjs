@@ -113,6 +113,9 @@ function encodeItem(value, opts) {
   if (value instanceof DXNDate) return tag(Tags.T_DATE, integerItem(epochDays(value)));
   if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(totalMicroseconds(value)));
   if (value instanceof DXNTimestamp) return tag(Tags.T_TIMESTAMP, integerItem(value.epochMicroseconds));
+  // A native `Date` is an instant: it always means a timestamp, with or
+  // without a schema (DXN.md §4.7).
+  if (value instanceof Date) return encodeItem(DXNTimestamp.fromDate(value), opts);
   if (value instanceof DXNDateTime) {
     return tag(Tags.T_DATETIME_OFFSET, arrayOf([integerItem(value.epochMicroseconds), integerItem(BigInt(value.offsetMinutes))]));
   }

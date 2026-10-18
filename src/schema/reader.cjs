@@ -187,7 +187,7 @@ function built(registry, materializer, reading, latest, pairs, extra) {
     throw materializerError(name, `refused: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    Validator.validateForEncode(latest, value, registry, { coerce: false });
+    Validator.validateForEncode(latest, value, registry);
   } catch (err) {
     throw materializerError(
       name,

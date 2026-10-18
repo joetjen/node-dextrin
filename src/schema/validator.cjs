@@ -11,16 +11,10 @@
  * uses, via `wrapAndCheck`, so there's one type-checking
  * implementation, not two that could drift.
  *
- * **One genuine difference from `Dextrin.Schema.Validator`**: encode
- * here can *transform* `value`, not just answer ok/error —
- * `resolveFields`'s `coerce` option (see `coercion.cjs`) may replace a
- * field's value with its coerced form (a plain `number` becoming a
- * `DXNRational` for a `:rational` field, say), and that coerced value
- * has to actually reach the printer/binary encoder, not just pass a
- * check and be discarded. `wrapAndCheck` therefore rebuilds every
- * container it walks from its (possibly-coerced) children rather than
- * returning `value` unchanged, the way `Dextrin.Schema.Validator`'s
- * own `wrap_and_check/2` does today (it has nothing to transform).
+ * **Nothing is converted to make a value match** (`DXN.md` §4.7): a
+ * schema accepts or rejects a value, and never changes what it means.
+ * `wrapAndCheck` rebuilds every container it walks from its children,
+ * so a checked struct reaches the printer/binary encoder wrapped.
  *
  * Enforcement is decode-time and fail-fast, with no lenient escape
  * hatch to get the materialized value anyway — a violation is always
@@ -30,7 +24,6 @@
 const DXNMap = require('../values/map.cjs');
 const Field = require('./field.cjs');
 const TypeExpr = require('./type-expr.cjs');
-const Coercion = require('./coercion.cjs');
 const Validated = require('./validated.cjs');
 const DXNList = require('../values/list.cjs');
 const DXNTuple = require('../values/tuple.cjs');
@@ -59,7 +52,6 @@ const ABSENT = Symbol('absent');
  * error; an optional field that is missing takes its default, or stays
  * absent when it has none — DXN tells an absent field from one written
  * `nil`. What is built from the result is `schema/reader.cjs`'s job.
- * Never coerces.
  * @param {import('./compiled.cjs')} compiled
  * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
  * @param {import('../registry.cjs')} registry
@@ -70,7 +62,7 @@ function resolve(compiled, fields, registry) {
   /** @type {Array<[string, unknown]>} */
   const pairs = [];
   for (const field of compiled.fields) {
-    const value = resolveField(field, given, registry, { coerce: false });
+    const value = resolveField(field, given, registry, {});
     if (value !== ABSENT) pairs.push([field.name, value]);
   }
   return pairs;
@@ -94,7 +86,7 @@ function toNameMap(compiled, fields) {
  * @param {import('./compiled.cjs')} compiled
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {{[k: string]: unknown}}
  */
 function resolveFields(compiled, given, registry, opts) {
@@ -113,7 +105,7 @@ function resolveFields(compiled, given, registry, opts) {
  * @param {import('./field.cjs')} field
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown} the checked value, or `ABSENT`.
  */
 function resolveField(field, given, registry, opts) {
@@ -130,7 +122,7 @@ function resolveField(field, given, registry, opts) {
  * @param {unknown} value
  * @param {import('./type-expr.cjs').TypeExpr} type
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function checkType(name, value, type, registry, opts) {
@@ -142,13 +134,6 @@ function checkType(name, value, type, registry, opts) {
     return Validated.strip(value);
   }
 
-  if (opts.coerce) {
-    const coerced = Coercion.tryCoerce(type, value);
-    if (coerced !== undefined && TypeExpr.matches(type, coerced, registry)) {
-      return Validated.strip(coerced);
-    }
-  }
-
   throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`);
 }
 
@@ -157,10 +142,8 @@ function checkType(name, value, type, registry, opts) {
 // The mirror image of `materialize`, for data on its way *out*:
 // `value` here is ordinary JS data about to be encoded — a
 // `DXNStruct` (the one shape that round-trips to `%Name{...}` wire
-// syntax), a plain `Map`, or a real application class instance — and
-// (unlike Elixir's equivalent) *may* come back transformed if
-// `opts.coerce` lets a field's value be coerced toward its declared
-// type; see this module's own doc for why.
+// syntax), a plain `Map`, or a real application class instance; it is
+// checked, never converted.
 //
 // The one structural difference from decode: decode's nested structs
 // arrive *already* `Validated`-wrapped, bottom-up, as a natural
@@ -172,16 +155,15 @@ function checkType(name, value, type, registry, opts) {
 
 /**
  * Checks `value` — ordinary JS data about to be encoded — against
- * `compiled`. Returns the checked (and, if `opts.coerce`, possibly
- * coerced) value, `Validated`-wrapped.
+ * `compiled`. Returns the checked value, `Validated`-wrapped.
  * @param {import('./compiled.cjs')} compiled
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {Validated}
  */
 function validateForEncode(compiled, value, registry, opts = {}) {
-  return checkCompiled(compiled, value, registry, { coerce: opts.coerce ?? true });
+  return checkCompiled(compiled, value, registry, opts);
 }
 
 /**
@@ -189,21 +171,21 @@ function validateForEncode(compiled, value, registry, opts = {}) {
  * application class instance anywhere in the tree and checks each one
  * against its own schema, if the registry has one — regardless of
  * what any enclosing field's declared type is, recursing fully into
- * whatever it finds. Returns the (possibly-coerced) tree.
+ * whatever it finds. Returns the checked tree.
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateTreeForEncode(value, registry, opts = {}) {
-  return wrapAndCheck(value, registry, { coerce: opts.coerce ?? true });
+  return wrapAndCheck(value, registry, opts);
 }
 
 /**
  * @param {import('./compiled.cjs')} compiled
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {Validated}
  */
 function checkCompiled(compiled, value, registry, opts) {
@@ -222,8 +204,8 @@ function checkCompiled(compiled, value, registry, opts) {
 
 /**
  * Rebuilds `value` in its *original* shape (a `DXNStruct`, or a real
- * application class instance) with `resolved`'s checked — and, if
- * `opts.coerce` applied, coerced — field values written back in.
+ * application class instance) with `resolved`'s checked field values
+ * written back in.
  * Without this, `checkCompiled` would hand the printer/binary encoder
  * a bare `{[name]: value}` field map instead of something it actually
  * knows how to encode (a plain object has no name of its own to
@@ -301,13 +283,13 @@ function stringifyEntry([k, v]) {
  * `wrapAndCheck` is the recursive core: for any value that's a named
  * struct with a registered schema, check it (`checkCompiled`) and
  * wrap the result in `Validated`; otherwise recurse into whatever
- * container it is, reconstructing it from the (possibly-coerced,
- * possibly-wrapped) results so a wrapped/coerced grandchild survives
+ * container it is, reconstructing it from the (possibly-wrapped)
+ * results so a wrapped grandchild survives
  * all the way up to whichever ancestor's field type actually needs to
  * see it.
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function wrapAndCheck(value, registry, opts) {
@@ -344,7 +326,7 @@ function schemaNameFor(value, registry) {
 /**
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {{[k: string]: unknown}}
  */
 function wrapGiven(given, registry, opts) {
@@ -354,7 +336,7 @@ function wrapGiven(given, registry, opts) {
 /**
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function wrapChildren(value, registry, opts) {
