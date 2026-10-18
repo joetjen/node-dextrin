@@ -19,7 +19,7 @@
 class DXNError extends Error {
   /**
    * @param {string} message
-   * @param {{stage?: string, offset?: number, cause?: unknown}} [details]
+   * @param {{stage?: string, offset?: number, cause?: unknown, category?: string | null}} [details]
    */
   constructor(message, details = {}) {
     super(message, details.cause !== undefined ? { cause: details.cause } : undefined);
@@ -28,6 +28,14 @@ class DXNError extends Error {
     this.stage = details.stage ?? 'unknown';
     /** @type {number | undefined} */
     this.offset = details.offset;
+    /**
+     * What kind of error this is, as `DXN.md` §5 names it — `'syntax'`,
+     * `'binary'`, `'encode/unsupported'`, … — so errors compare across
+     * implementations without comparing messages. `null` where none has
+     * been assigned yet.
+     * @type {string | null}
+     */
+    this.category = details.category ?? null;
   }
 
   /**
@@ -43,7 +51,8 @@ class DXNError extends Error {
     if (err instanceof DXNError) return err;
     const message = err instanceof Error ? err.message : String(err);
     const offset = err instanceof Error && typeof (/** @type {any} */ (err).offset) === 'number' ? (/** @type {any} */ (err).offset) : undefined;
-    return new DXNError(message, { stage, offset, cause: err });
+    const category = err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string' ? (/** @type {any} */ (err).category) : null;
+    return new DXNError(message, { stage, offset, cause: err, category });
   }
 }
 

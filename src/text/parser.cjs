@@ -50,6 +50,8 @@ class ParseError extends Error {
     super(message);
     this.name = 'ParseError';
     this.offset = offset;
+    /** `DXN.md` §5's category for text that does not parse. */
+    this.category = 'syntax';
   }
 }
 

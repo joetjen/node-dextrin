@@ -14,6 +14,7 @@
  */
 
 const { encodeString, encodeChar } = require('./escapes.cjs');
+const { unsupported } = require('../binary/errors.cjs');
 const { tokenize } = require('./lexer.cjs');
 const temporal = require('./temporal.cjs');
 
@@ -124,7 +125,7 @@ function printViaRegistry(value, opts) {
     }
   }
 
-  throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
+  throw unsupported(describeForError(value));
 }
 
 /** @param {number} n */

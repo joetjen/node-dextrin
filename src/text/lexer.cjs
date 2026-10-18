@@ -55,6 +55,8 @@ class LexError extends Error {
     super(message);
     this.name = 'LexError';
     this.offset = offset;
+    /** `DXN.md` §5's category for text that does not lex. */
+    this.category = 'syntax';
   }
 }
 

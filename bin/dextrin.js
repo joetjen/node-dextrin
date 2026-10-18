@@ -26,7 +26,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
-import { decode, encode, decodeBinary, encodeBinary, DXNError, Schema, Registry } from '../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry } from '../src/dextrin.js';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -37,6 +37,7 @@ Commands:
                                                 Reformat a .dxn file
   validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                 Validate a .dxn/.dxnb file, optionally against a schema
+  conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
 
@@ -52,6 +53,8 @@ function main(argv) {
       return run(() => cmdFormat(rest));
     case 'validate':
       return run(() => cmdValidate(rest));
+    case 'conformance':
+      return run(() => cmdConformance(rest));
     default:
       console.log(USAGE);
       process.exitCode = command === undefined ? 0 : 1;
@@ -221,3 +224,17 @@ function detectFormat(path, forced) {
 }
 
 main(process.argv.slice(2));
+
+/**
+ * `dextrin conformance REQUEST ANSWER` — this implementation's adapter
+ * for the Dextrin Conformance Suite: reads the JSON request, answers every
+ * case, writes the JSON answer. It fails only when the adapter itself
+ * cannot work, never because a case did: a failed case is an answer, and
+ * the suite judges it.
+ * @param {string[]} args
+ */
+function cmdConformance(args) {
+  if (args.length !== 2) throw new Error('usage: dextrin conformance REQUEST ANSWER');
+  const [request, response] = args;
+  writeFileSync(response, JSON.stringify(answer(JSON.parse(readFileSync(request, 'utf8')))));
+}

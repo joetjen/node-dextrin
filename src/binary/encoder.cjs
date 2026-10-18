@@ -25,6 +25,7 @@
  * one recursive function keyed on the JS value's own shape.
  */
 
+const { unsupported } = require('./errors.cjs');
 const { head, floatItem, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
 const Tags = require('./tags.cjs');
 
@@ -155,7 +156,7 @@ function encodeViaRegistry(value, opts) {
     }
   }
 
-  throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
+  throw unsupported(describeForError(value));
 }
 
 /**
