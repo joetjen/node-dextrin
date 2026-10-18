@@ -22,7 +22,7 @@
     "priv",
     "bin"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "directories": {
     "src": "./src"
   },
