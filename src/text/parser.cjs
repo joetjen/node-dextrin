@@ -9,8 +9,8 @@
  * hand-rolled port with no grammar-compiler step.
  *
  * A `struct` decodes against a compiled schema when `opts.registry`
- * has one for that name (`Validator.materialize`, same as the binary
- * decoder); with no registry, or no schema registered for that name,
+ * has one for that name (`schema/reader.cjs`, which picks the schema by
+ * the struct's version, same as the binary decoder); with no registry, or no schema registered for that name,
  * it falls back to an opaque `DXNStruct` — never a hard failure,
  * mirroring `Dextrin.Text.Actions`'s own "no registry" fallback
  * exactly. Same story for a non-built-in tag against `registry.tags`,
@@ -38,7 +38,8 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
-const Validator = require('../schema/validator.cjs');
+const Reader = require('../schema/reader.cjs');
+const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
 const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'datetime', 'duration']);
@@ -315,15 +316,17 @@ class Parser {
    * @returns {DXNStruct | Validated}
    */
   materializeStruct(name, fields, version = null) {
-    const found = this.registry?.fetchStructSchema(name);
-    if (!found) return new DXNStruct(name, fields, version);
-    this.registry = found.registry;
-    const materializer = this.registry.fetchMaterializer(name) ?? null;
+    if (!this.registry) return new DXNStruct(name, fields, version);
     try {
       // Fail-fast, decode-time enforcement — a schema violation is an
-      // ordinary parse error, same channel as bad syntax.
-      return Validator.materialize(found.compiled, fields, materializer, this.registry);
+      // ordinary parse error, same channel as bad syntax. Which schema a
+      // struct is read with depends on its version (schema/reader.cjs).
+      const read = Reader.read(this.registry, name, version, fields);
+      if (!read) return new DXNStruct(name, fields, version);
+      this.registry = read.registry;
+      return /** @type {Validated} */ (read.value);
     } catch (err) {
+      if (err instanceof DXNError) throw err;
       throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
     }
   }

@@ -48,7 +48,8 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
-const Validator = require('../schema/validator.cjs');
+const Reader = require('../schema/reader.cjs');
+const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
 const MAGIC = 'DX';
@@ -470,13 +471,14 @@ function buildStruct(value, registry) {
   }
   const { name, version } = parsed;
 
-  const found = registry?.fetchStructSchema(name);
-  if (!found) return DXNStruct.positional(name, fields, version);
-
-  const materializer = found.registry.fetchMaterializer(name) ?? null;
+  if (!registry) return DXNStruct.positional(name, fields, version);
   try {
-    return Validator.materialize(found.compiled, { type: 'positional', values: fields }, materializer, found.registry);
+    // Same fail-fast enforcement as the text parser, through the same
+    // schema/reader.cjs.
+    const read = Reader.read(registry, name, version, { type: 'positional', values: fields });
+    return read ? read.value : DXNStruct.positional(name, fields, version);
   } catch (err) {
+    if (err instanceof DXNError) throw err;
     throw new BinaryError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`);
   }
 }
