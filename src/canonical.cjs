@@ -141,14 +141,21 @@ function keywordName(key) {
 /** @param {DXNStruct} value @returns {string} */
 function struct(value) {
   const fields = /** @type {any} */ (value.fields);
+  /** @param {unknown} key @param {unknown} field @returns {string} */
+  const entry = (key, field) => {
+    if (typeof key !== 'string') return `${text(key)} => ${text(field)}`;
+    return isBareIdentifier(key) ? `${key}: ${text(field)}` : `${quoted(key)} => ${text(field)}`;
+  };
+  // A keyed struct's extra fields follow its declared ones in the order
+  // they were written; a positional struct's follow its items in
+  // canonical order of their keys (DXN.md §1.5).
   if (fields.type === 'keyed') {
-    const written = fields.pairs.map((/** @type {[string, unknown]} */ pair) => {
-      const [name, field] = pair;
-      return isBareIdentifier(name) ? `${name}: ${text(field)}` : `${quoted(name)} => ${text(field)}`;
-    });
+    const written = [...fields.pairs, ...value.extra].map(([key, field]) => entry(key, field));
     return `${DXNStruct.head(value.name, value.version)}{${written.join(' ')}}`;
   }
-  return `${DXNStruct.head(value.name, value.version)}[${fields.values.map(text).join(' ')}]`;
+  const byKey = new Map(value.extra.map(([key, field]) => [text(key), entry(key, field)]));
+  const extras = sorted([...byKey.keys()]).map((key) => /** @type {string} */ (byKey.get(key)));
+  return `${DXNStruct.head(value.name, value.version)}[${[...fields.values.map(text), ...extras].join(' ')}]`;
 }
 
 /** @param {string} name @returns {string} */

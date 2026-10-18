@@ -38,6 +38,8 @@ const T_DATETIME_OFFSET = 211;
 const T_DURATION = 212;
 const T_REGEX = 213;
 const T_CUSTOM = 214;
+/** A struct's extra fields: only ever its last item (`DXN.md` §2.3). */
+const T_EXTRA = 215;
 
 /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
 const DURATION_FIELDS = /** @type {const} */ (['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'microseconds']);
@@ -116,6 +118,7 @@ module.exports = {
   T_DURATION,
   T_REGEX,
   T_CUSTOM,
+  T_EXTRA,
   DURATION_FIELDS,
   REGEX_FLAG_BITS,
   regexFlagsToByte,

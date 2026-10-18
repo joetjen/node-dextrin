@@ -32,6 +32,7 @@
  */
 
 const DXNError = require('../error.cjs');
+const { canonical } = require('../canonical.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const Validated = require('./validated.cjs');
 const Validator = require('./validator.cjs');
@@ -50,16 +51,17 @@ const Validator = require('./validator.cjs');
  * @param {string} name
  * @param {number | null} version
  * @param {Fields} fields
+ * @param {Array<[unknown, unknown]>} [extra] the extra fields as decoded (`DXN.md` §4.7).
  * @returns {{value: unknown, registry: import('../registry.cjs')} | null}
  */
-function read(registry, name, version, fields) {
+function read(registry, name, version, fields, extra = []) {
   const found = registry.fetchStructSchema(name);
   if (!found) return null;
   const latest = found.compiled;
   const current = found.registry;
 
-  if (version === null || version === latest.version) return materialized(current, latest, latest, fields);
-  if (version > latest.version) return materialized(current, latest, latest, forward(latest, fields));
+  if (version === null || version === latest.version) return materialized(current, latest, latest, fields, extra);
+  if (version > latest.version) return materialized(current, latest, latest, forward(latest, fields), extra);
 
   const older = current.fetchStructSchema(name, version);
   if (!older) {
@@ -75,7 +77,7 @@ function read(registry, name, version, fields) {
       { stage: 'schema', category: 'schema/no-materializer' }
     );
   }
-  return materialized(current, older.compiled, latest, fields);
+  return materialized(current, older.compiled, latest, fields, extra);
 }
 
 /**
@@ -106,16 +108,62 @@ function forward(latest, fields) {
  * @param {import('./compiled.cjs')} reading
  * @param {import('./compiled.cjs')} latest
  * @param {Fields} fields
+ * @param {Array<[unknown, unknown]>} given extra fields as decoded.
  * @returns {{value: unknown, registry: import('../registry.cjs')}}
  */
-function materialized(registry, reading, latest, fields) {
+function materialized(registry, reading, latest, fields, given) {
   const name = /** @type {string} */ (reading.name);
-  const pairs = Validator.resolve(reading, fields, registry);
+  const separated = separate(reading, fields, given);
+  if (registry.strict && separated.extra.length > 0) {
+    throw new DXNError(
+      `struct ${JSON.stringify(name)} carries ${JSON.stringify(String(separated.extra[0][0]))}, which its schema does not declare`,
+      { stage: 'schema', category: 'schema/undeclared-field' }
+    );
+  }
+  const pairs = Validator.resolve(reading, separated.fields, registry);
   const materializer = registry.fetchMaterializer(name);
   const value = materializer
-    ? built(registry, materializer, reading, latest, pairs)
-    : DXNStruct.keyed(name, pairs, latest.version);
+    ? built(registry, materializer, reading, latest, pairs, separated.extra)
+    : DXNStruct.keyed(name, pairs, latest.version, separated.extra);
   return { value: new Validated(name, value), registry };
+}
+
+/**
+ * The fields `reading` declares, apart from the extra ones (`DXN.md`
+ * §4.7): a keyed struct's undeclared names join the extras. A name given
+ * twice — a declared field and an extra of the same name, or a keyed
+ * field written twice — is refused: an extra never shadows a declared
+ * field. A positional struct gives every declared name, by position.
+ * @param {import('./compiled.cjs')} reading
+ * @param {Fields} fields
+ * @param {Array<[unknown, unknown]>} given
+ * @returns {{fields: Fields, extra: Array<[unknown, unknown]>}}
+ */
+function separate(reading, fields, given) {
+  const declared = new Set(reading.fieldNames());
+  /** @type {Fields} */
+  let mine = fields;
+  /** @type {Array<[unknown, unknown]>} */
+  let undeclared = [];
+  /** @type {unknown[]} */
+  let names = reading.fieldNames();
+  if (fields.type === 'keyed') {
+    mine = { type: 'keyed', pairs: fields.pairs.filter(([key]) => declared.has(key)) };
+    undeclared = fields.pairs.filter(([key]) => !declared.has(key));
+    names = mine.pairs.map(([key]) => key);
+  }
+  const extra = [...undeclared, ...given];
+  const seen = new Set();
+  for (const key of [...names, ...extra.map(([key]) => key)]) {
+    if (seen.has(key)) {
+      throw new DXNError(
+        `struct ${JSON.stringify(reading.name)} names ${JSON.stringify(String(key))} twice: an extra field never shadows a declared one`,
+        { stage: 'schema', category: 'schema/shadowed-field' }
+      );
+    }
+    seen.add(key);
+  }
+  return { fields: mine, extra };
 }
 
 /**
@@ -124,13 +172,17 @@ function materialized(registry, reading, latest, fields) {
  * @param {import('./compiled.cjs')} reading
  * @param {import('./compiled.cjs')} latest
  * @param {Array<[string, unknown]>} pairs
+ * @param {Array<[unknown, unknown]>} extra
  * @returns {unknown}
  */
-function built(registry, materializer, reading, latest, pairs) {
+function built(registry, materializer, reading, latest, pairs, extra) {
   const name = /** @type {string} */ (reading.name);
   let value;
   try {
-    value = materializer(name, reading.version, Object.fromEntries(pairs));
+    // An extra field keyed by something other than a name is keyed by
+    // its canonical text: a JS object's keys are strings.
+    const fields = Object.fromEntries([...pairs, ...extra.map(([k, v]) => [typeof k === 'string' ? k : canonical(k), v])]);
+    value = materializer(name, reading.version, fields);
   } catch (err) {
     throw materializerError(name, `refused: ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -207,6 +207,13 @@ function validateTreeForEncode(value, registry, opts = {}) {
  * @returns {Validated}
  */
 function checkCompiled(compiled, value, registry, opts) {
+  // An extra field never shadows a declared one (DXN.md §4.7), on the
+  // way out as on the way in.
+  if (value instanceof DXNStruct) {
+    const declared = new Set(compiled.fieldNames());
+    const shadowing = value.extra.find(([key]) => typeof key === 'string' && declared.has(key));
+    if (shadowing) throw new SchemaValidationError(`extra field ${JSON.stringify(shadowing[0])} shadows a declared field`);
+  }
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
   const resolved = resolveFields(compiled, wrappedGiven, registry, opts);

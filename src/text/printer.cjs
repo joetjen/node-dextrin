@@ -249,14 +249,28 @@ function printKeywordEntry(name, value, opts) {
  */
 function printStruct(struct, opts) {
   const head = writtenHead(struct, opts);
+  const extra = struct.extra.map(([key, value]) => printExtraEntry(key, value, opts));
   if (struct.fields.type === 'keyed') {
-    const entries = struct.fields.pairs
-      .map(([name, value]) => printKeywordEntry(name, value, opts))
-      .join(',');
-    return `${head}{${entries}}`;
+    const entries = struct.fields.pairs.map(([name, value]) => printKeywordEntry(name, value, opts));
+    return `${head}{${[...entries, ...extra].join(',')}}`;
   }
-  const items = struct.fields.values.map((v) => print(v, opts)).join(',');
-  return `${head}[${items}]`;
+  // A positional struct's items, then its extra fields as entries
+  // (DXN.md §1.2).
+  const items = struct.fields.values.map((v) => print(v, opts));
+  return `${head}[${[...items, ...extra].join(',')}]`;
+}
+
+/**
+ * One extra field as an entry: a name is written like a field name, any
+ * other map key as itself (`DXN.md` §1.2).
+ * @param {unknown} key
+ * @param {unknown} value
+ * @param {{[k: string]: unknown}} opts
+ * @returns {string}
+ */
+function printExtraEntry(key, value, opts) {
+  if (typeof key === 'string') return printKeywordEntry(key, value, opts);
+  return `${print(key, opts)}=>${print(value, opts)}`;
 }
 
 /**

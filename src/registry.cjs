@@ -43,6 +43,8 @@ class Registry {
     this.structModules = new Map();
     /** @type {boolean} */
     this.trusted = true;
+    /** @type {boolean} refuse extra fields on schema-backed structs (`putStrict`). */
+    this.strict = false;
   }
 
   /** @returns {Registry} a shallow copy, ready for one field to be overwritten. */
@@ -56,6 +58,22 @@ class Registry {
     copy.typeAliases = new Map(this.typeAliases);
     copy.structModules = new Map(this.structModules);
     copy.trusted = this.trusted;
+    copy.strict = this.strict;
+    return copy;
+  }
+
+  /**
+   * Marks this registry as decoding *strictly*: a schema-backed struct
+   * that carries a field its schema does not declare is refused
+   * (`schema/undeclared-field`, `DXN.md` §4.7) instead of keeping it as
+   * an extra field. A config loader decodes strictly; a message consumer
+   * does not. `decode`/`decodeBinary` take it as `strict: true`.
+   * @param {boolean} strict
+   * @returns {Registry}
+   */
+  putStrict(strict) {
+    const copy = this.clone();
+    copy.strict = strict;
     return copy;
   }
 

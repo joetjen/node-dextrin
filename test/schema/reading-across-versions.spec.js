@@ -67,9 +67,9 @@ describe('reading across versions', () => {
   });
 
   describe("the writer's version is newer than anything loaded", () => {
-    it('is read against the latest loaded, matching text by name', () => {
+    it('is read against the latest loaded, matching text by name and keeping the rest as extras', () => {
       expect(decode('%User(3){nick: "n", name: "a"}', { registry: loaded(V1, V2) })).to.deep.equal(
-        DXNStruct.keyed('User', [['name', 'a']], 2)
+        DXNStruct.keyed('User', [['name', 'a']], 2, [['nick', 'n']])
       );
     });
 

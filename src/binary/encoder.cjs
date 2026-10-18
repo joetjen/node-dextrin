@@ -186,7 +186,14 @@ function encodePairs(pairs, opts) {
 function encodeStruct(value, opts) {
   const written = opts.registry ? opts.registry.asWritten(value) : value;
   const values = positionalValues(value, opts.registry);
-  return tag(Tags.T_STRUCT, arrayOf([textItem(DXNStruct.typeName(written.name, written.version)), ...values.map((v) => encodeItem(v, opts))]));
+  const items = [textItem(DXNStruct.typeName(written.name, written.version)), ...values.map((v) => encodeItem(v, opts))];
+  // Extra fields, when there are any, as one trailing tag-215 map in the
+  // order they were written (DXN.md §2.3).
+  if (value.extra.length > 0) {
+    checkPairs(value.extra);
+    items.push(tag(Tags.T_EXTRA, mapOf(encodePairs(value.extra, opts))));
+  }
+  return tag(Tags.T_STRUCT, arrayOf(items));
 }
 
 /**

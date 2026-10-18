@@ -79,13 +79,13 @@ class Decoder {
   /**
    * @param {Buffer} buf
    * @param {number} pos
-   * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
+   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} opts
    */
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
     this.trusted = opts.trusted ?? true;
-    this.registry = opts.registry ?? null;
+    this.registry = opts.registry && opts.strict !== undefined ? opts.registry.putStrict(opts.strict) : (opts.registry ?? null);
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];
     /** @type {Array<Map<number, string>>} innermost scope last. */
@@ -234,6 +234,7 @@ class Decoder {
     if (tagNumber === Tags.T_SHARED_REF) return this.decodeSharedRef();
     if (tagNumber === Tags.T_STRINGREF_NAMESPACE) return this.decodeStringrefNamespace();
     if (tagNumber === Tags.T_STRINGREF) return this.decodeStringref();
+    if (tagNumber === Tags.T_STRUCT) return this.decodeStruct();
     const payload = this.decodeItem();
     return buildTagged(tagNumber, payload, this.trusted, this.registry);
   }
@@ -300,6 +301,52 @@ class Decoder {
     return value;
   }
 
+  /**
+   * A struct's payload, `[type-name, field..., extras?]`, read item by
+   * item so its last item may be its extra fields: a tag-215 map
+   * (`DXN.md` §2.3), legal nowhere else — anywhere else it is an
+   * unrecognized tag. Read in order, so the extras keep the order they
+   * were written in.
+   * @returns {unknown}
+   */
+  decodeStruct() {
+    if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 4) {
+      throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`, this.pos);
+    }
+    const count = Number(this.readHead().arg);
+    if (count === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`, this.pos);
+    const items = this.decodeNItems(count - 1);
+    /** @type {Array<[unknown, unknown]>} */
+    let extra = [];
+    if (count > 1 && this.atTag(Tags.T_EXTRA)) {
+      this.readHead();
+      if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 5) {
+        throw new BinaryError(`extra fields (tag ${Tags.T_EXTRA}) require a map payload`, this.pos);
+      }
+      const pairs = this.decodeMapPairs(Number(this.readHead().arg));
+      checkPairs(pairs);
+      extra = pairs.map(([key, value]) => [DXNStruct.extraKey(key), value]);
+    } else {
+      items.push(this.decodeItem());
+    }
+    return buildStruct(items, extra, this.registry);
+  }
+
+  /**
+   * Whether the next item is a tag of `number`, without consuming it.
+   * @param {number} number
+   * @returns {boolean}
+   */
+  atTag(number) {
+    const start = this.pos;
+    try {
+      if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 6) return false;
+      return Number(this.readHead().arg) === number;
+    } finally {
+      this.pos = start;
+    }
+  }
+
   /** @param {string} text */
   registerStringref(text) {
     const scope = this.stringrefStack[this.stringrefStack.length - 1];
@@ -348,8 +395,6 @@ function buildTagged(tag, value, trusted, registry) {
       return buildFromList(value, tag, 'set', (items) => new Set(items));
     case Tags.T_SORTED_SET:
       return buildFromList(value, tag, 'sorted-set', (items) => DXNSortedSet.fromArray(items));
-    case Tags.T_STRUCT:
-      return buildStruct(value, registry);
     case Tags.T_DATE:
       return buildDate(value);
     case Tags.T_TIME:
@@ -456,12 +501,12 @@ function buildOrdered(value) {
  * against a compiled schema when `registry` has one for `name` — same
  * as the text parser's `Parser#materializeStruct` — falling back to
  * an opaque `DXNStruct` when it doesn't.
- * @param {unknown} value
+ * @param {unknown[]} items the type name, then the fields.
+ * @param {Array<[unknown, unknown]>} extra
  * @param {import('../registry.cjs') | null} registry
  */
-function buildStruct(value, registry) {
-  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
-  const [typeName, ...fields] = value.items;
+function buildStruct(items, extra, registry) {
+  const [typeName, ...fields] = items;
   if (typeof typeName !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
   // The type name carries the version the struct was written with,
   // "User(3)" (DXN.md §2.4, §4.8).
@@ -471,12 +516,12 @@ function buildStruct(value, registry) {
   }
   const { name, version } = parsed;
 
-  if (!registry) return DXNStruct.positional(name, fields, version);
+  if (!registry) return DXNStruct.positional(name, fields, version, extra);
   try {
     // Same fail-fast enforcement as the text parser, through the same
     // schema/reader.cjs.
-    const read = Reader.read(registry, name, version, { type: 'positional', values: fields });
-    return read ? read.value : DXNStruct.positional(name, fields, version);
+    const read = Reader.read(registry, name, version, { type: 'positional', values: fields }, extra);
+    return read ? read.value : DXNStruct.positional(name, fields, version, extra);
   } catch (err) {
     if (err instanceof DXNError) throw err;
     throw new BinaryError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`);

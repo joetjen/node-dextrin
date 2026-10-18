@@ -47,7 +47,7 @@ const binaryDecoder = require('./binary/decoder.cjs');
  * failure.
  *
  * @param {string} text
- * @param {{trusted?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function decode(text, opts = {}) {
@@ -102,7 +102,7 @@ function encode(value, opts = {}) {
  * byte) or a schema violation.
  *
  * @param {Uint8Array} bytes
- * @param {{trusted?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function decodeBinary(bytes, opts = {}) {
