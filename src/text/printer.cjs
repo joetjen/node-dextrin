@@ -13,6 +13,7 @@
  * every built-in DXN-representable shape always succeeds.
  */
 
+const { checkPairs } = require('../map-key.cjs');
 const { encodeString, encodeChar } = require('./escapes.cjs');
 const { unsupported } = require('../binary/errors.cjs');
 const { tokenize } = require('./lexer.cjs');
@@ -75,8 +76,14 @@ function print(value, opts = {}) {
     return tagForm('sorted-set', '@{' + value.items.map((v) => print(v, opts)).join(' ') + '}', opts);
   }
 
-  if (value instanceof DXNOrderedMap) return tagForm('ordered', '%{' + printEntries(value.pairs, opts) + '}', opts);
-  if (value instanceof Map) return '%{' + printEntries(Array.from(value.entries()), opts) + '}';
+  if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
+    return tagForm('ordered', '%{' + printEntries(value.pairs, opts) + '}', opts);
+  }
+  if (value instanceof Map) {
+    checkPairs(value.entries());
+    return '%{' + printEntries(Array.from(value.entries()), opts) + '}';
+  }
 
   if (value instanceof DXNStruct) return printStruct(value, opts);
 

@@ -30,6 +30,8 @@ const DXNOrderedMap = require('../values/ordered-map.cjs');
 const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
+const DXNMap = require('../values/map.cjs');
+const { checkPairs } = require('../map-key.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
@@ -268,7 +270,9 @@ class Parser {
   parsePercent() {
     this.next('PERCENT');
     if (this.at('LBRACE')) {
-      return new Map(this.parseEntries());
+      const pairs = this.parseEntries();
+      checkPairs(pairs);
+      return new DXNMap(pairs);
     }
     const name = this.next('IDENTIFIER').value;
     if (this.at('LBRACE')) {

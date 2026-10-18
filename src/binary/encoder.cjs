@@ -25,6 +25,7 @@
  * one recursive function keyed on the JS value's own shape.
  */
 
+const { checkPairs } = require('../map-key.cjs');
 const { unsupported } = require('./errors.cjs');
 const { head, floatItem, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
 const Tags = require('./tags.cjs');
@@ -95,8 +96,14 @@ function encodeItem(value, opts) {
   if (value instanceof DXNTuple) return tag(Tags.T_TUPLE, arrayOf(value.items.map((v) => encodeItem(v, opts))));
   if (Array.isArray(value)) return tag(Tags.T_ARRAY, arrayOf(value.map((v) => encodeItem(v, opts))));
 
-  if (value instanceof DXNOrderedMap) return tag(Tags.T_ORDERED, mapOf(encodePairs(value.pairs, opts)));
-  if (value instanceof Map) return mapOf(encodePairs(Array.from(value.entries()), opts));
+  if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
+    return tag(Tags.T_ORDERED, mapOf(encodePairs(value.pairs, opts)));
+  }
+  if (value instanceof Map) {
+    checkPairs(value.entries());
+    return mapOf(encodePairs(Array.from(value.entries()), opts));
+  }
 
   if (value instanceof Set) return tag(Tags.T_SET, arrayOf(Array.from(value).map((v) => encodeItem(v, opts))));
   if (value instanceof DXNSortedSet) return tag(Tags.T_SORTED_SET, arrayOf(value.items.map((v) => encodeItem(v, opts))));

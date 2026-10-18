@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compare across implementations without comparing messages.
 - `answer(request)` and `dextrin conformance REQUEST ANSWER` -- this
   implementation's adapter for the Dextrin Conformance Suite.
+- `DXNMap` -- a `Map` whose keys are compared by value: two keys are the
+  same key exactly when their canonical forms are (`DXN.md` §1.6). Every
+  decoded map is one.
+
+### Changed
+
+- **A map key must be one of the eight types of `DXN.md` §1.6**
+  (`string`, keyword, integer, uuid, date, bytes, symbol, char). Any other
+  key -- a float, `null`, a boolean, a time, a collection, ... -- is
+  refused as `key/not-allowed` when decoding text or binary and when
+  encoding, in maps and ordered maps alike.
+- A repeated key such as `?c` merges into one entry, the last one, and a
+  lookup with an equal key finds it: a plain `Map` compared object keys
+  by identity, so `%{?c => 1, ?c => 2}` had two entries.
 
 ### Fixed
 

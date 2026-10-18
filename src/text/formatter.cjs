@@ -16,6 +16,7 @@
  * forward.
  */
 
+const { checkPairs } = require('../map-key.cjs');
 const Printer = require('./printer.cjs');
 
 const DXNList = require('../values/list.cjs');
@@ -58,9 +59,11 @@ function render(value, depth, opts) {
     return value.length === 0 ? '@array[]' : `@array${bracketed('[', value, ']', depth, opts)}`;
   }
   if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
     return value.pairs.length === 0 ? '@ordered %{}' : `@ordered ${bracketedEntries('%{', value.pairs, '}', depth, opts)}`;
   }
   if (value instanceof Map && value.size > 0) {
+    checkPairs(value.entries());
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
   if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length > 0) {

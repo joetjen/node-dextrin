@@ -22,6 +22,8 @@
  * the order `DXNOrderedMap` needs.
  */
 
+const DXNMap = require('../values/map.cjs');
+const { checkPairs } = require('../map-key.cjs');
 const { BinaryError } = require('./errors.cjs');
 const Tags = require('./tags.cjs');
 const { bigIntToBytes } = require('./writer.cjs');
@@ -171,7 +173,7 @@ class Decoder {
       case 4:
         return new DXNList(this.decodeNItems(Number(arg)));
       case 5:
-        return new Map(this.decodeMapPairs(Number(arg)));
+        return this.decodeMap(Number(arg));
       case 6:
         return this.decodeTag(Number(arg));
       default:
@@ -197,6 +199,17 @@ class Decoder {
     const items = [];
     for (let i = 0; i < count; i += 1) items.push(this.decodeItem());
     return items;
+  }
+
+  /**
+   * A map of `pairCount` pairs, every key one `DXN.md` §1.6 allows.
+   * @param {number} pairCount
+   * @returns {DXNMap<unknown>}
+   */
+  decodeMap(pairCount) {
+    const pairs = this.decodeMapPairs(pairCount);
+    checkPairs(pairs);
+    return new DXNMap(pairs);
   }
 
   /** @param {number} pairCount @returns {Array<[unknown, unknown]>} */
@@ -556,7 +569,7 @@ function deepClone(value) {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(deepClone);
   if (value instanceof Uint8Array) return new Uint8Array(value);
-  if (value instanceof Map) return new Map(Array.from(value.entries(), ([k, v]) => [deepClone(k), deepClone(v)]));
+  if (value instanceof Map) return new DXNMap(Array.from(value.entries(), ([k, v]) => [deepClone(k), deepClone(v)]));
   if (value instanceof Set) return new Set(Array.from(value, deepClone));
   const clone = Object.create(Object.getPrototypeOf(value));
   for (const key of Object.keys(value)) {

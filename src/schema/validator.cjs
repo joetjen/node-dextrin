@@ -27,6 +27,7 @@
  * a thrown error.
  */
 
+const DXNMap = require('../values/map.cjs');
 const Field = require('./field.cjs');
 const TypeExpr = require('./type-expr.cjs');
 const Coercion = require('./coercion.cjs');
@@ -382,7 +383,7 @@ function wrapChildren(value, registry, opts) {
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, wrapAndCheck(value.value, registry, opts));
   if (value instanceof Map) {
-    return new Map(Array.from(value.entries(), ([k, v]) => [k, wrapAndCheck(v, registry, opts)]));
+    return new DXNMap(Array.from(value.entries(), ([k, v]) => [k, wrapAndCheck(v, registry, opts)]));
   }
   // Every other DXN* leaf/composite wrapper (DXNChar, DXNSymbol,
   // DXNKeyword, DXNDecimal, DXNRational, DXNDate, DXNTime,

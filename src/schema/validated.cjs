@@ -15,6 +15,7 @@
  * value reaches somewhere that isn't itself another schema check.
  */
 
+const DXNMap = require('../values/map.cjs');
 const DXNList = require('../values/list.cjs');
 const DXNTuple = require('../values/tuple.cjs');
 const DXNOrderedMap = require('../values/ordered-map.cjs');
@@ -45,7 +46,7 @@ function strip(value) {
   if (value instanceof DXNList) return new DXNList(value.items.map(strip));
   if (value instanceof DXNTuple) return new DXNTuple(value.items.map(strip));
   if (value instanceof DXNOrderedMap) return new DXNOrderedMap(value.pairs.map(([k, v]) => [strip(k), strip(v)]));
-  if (value instanceof Map) return new Map(Array.from(value.entries(), ([k, v]) => [strip(k), strip(v)]));
+  if (value instanceof Map) return new DXNMap(Array.from(value.entries(), ([k, v]) => [strip(k), strip(v)]));
   if (value instanceof Set) return new Set(Array.from(value, strip));
   if (value instanceof DXNSortedSet) return DXNSortedSet.fromArray(value.items.map(strip));
   if (value instanceof DXNStruct) {
