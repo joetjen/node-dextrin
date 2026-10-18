@@ -46,6 +46,12 @@ describe('conformance adapter', () => {
     ]);
   });
 
+  it('encodes a struct decoded against a schema under its versioned type name', () => {
+    expect(answered([{ id: 'a', operation: 'encode', text: '%User{name: "x"}', schemas: [USER] }])).to.deep.equal([
+      { id: 'a', binary: Buffer.from('445801d8d082675573657228322961' + '78', 'hex').toString('base64') },
+    ]);
+  });
+
   it('answers a schema that does not compile with its category', () => {
     expect(answered([{ id: 'a', operation: 'decode', text: '1', schemas: ['%{User: 1}'] }])).to.deep.equal([
       { id: 'a', error: 'schema/compile' },

@@ -27,8 +27,7 @@ const binaryDecoder = require('./binary/decoder.cjs');
 const binaryEncoder = require('./binary/encoder.cjs');
 const { canonical } = require('./canonical.cjs');
 const Registry = require('./registry.cjs');
-const Compiler = require('./schema/compiler.cjs');
-const Validator = require('./schema/validator.cjs');
+const Schema = require('./schema.cjs');
 
 /**
  * The answer to a decoded JSON request: one result per case, in order.
@@ -54,7 +53,7 @@ function outcome(c) {
       case 'decode-binary':
         return { canonical: canonical(binaryDecoder.decode(new Uint8Array(Buffer.from(String(c.binary), 'base64')), opts)) };
       case 'encode': {
-        const value = Validator.validateTreeForEncode(parser.parse(String(c.text), opts), registry);
+        const value = Schema.validateEncodeTree(parser.parse(String(c.text), opts), registry);
         return { binary: Buffer.from(binaryEncoder.encode(value, { registry })).toString('base64') };
       }
       default:
@@ -72,7 +71,7 @@ function outcome(c) {
  * @returns {import('./registry.cjs')}
  */
 function loaded(sources) {
-  return sources.reduce((registry, source) => Compiler.compile(parser.parse(source), registry), new Registry());
+  return sources.reduce((registry, source) => Schema.compile(parser.parse(source), registry), new Registry());
 }
 
 module.exports = { answer };
