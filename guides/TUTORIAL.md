@@ -270,8 +270,15 @@ hand-build a `DXNStruct` first:
 
 ```js
 encode(new Point(1n, 2n), { registry: registry3 });
-//=> '%Point{x:1,y:2}'
+//=> '%Point(1){x:1,y:2}'
 ```
+
+The `(1)` is the schema's version. A schema with no header is version
+1; `%schema(2){...}` is version 2, and a registry can hold several
+versions of `Point` side by side. Encoding always writes the latest
+one loaded, so the reader knows exactly which shape it is looking at;
+a struct written without one, `%Point{...}`, is read as the latest.
+See `DXN.md` §4.8 for how to deploy a schema change.
 
 `Registry` is updated immutable-style — every `put*` method returns a
 *new* `Registry`, never mutates the one it's called on — so build up
@@ -340,7 +347,7 @@ const registry5 = Schema.registerProvider(new Registry(), PointProvider, Schema.
 decode('%Point{x: 1, y: 2}', { registry: registry5 });
 //=> LibPoint { x: 1n, y: 2n }
 encode(new LibPoint(1n, 2n), { registry: registry5 });
-//=> '%Point{x:1,y:2}'
+//=> '%Point(1){x:1,y:2}'
 ```
 
 `dxnMaterialize` is optional — without it, decoding falls back to the

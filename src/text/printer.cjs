@@ -248,14 +248,28 @@ function printKeywordEntry(name, value, opts) {
  * @param {{[k: string]: unknown}} opts
  */
 function printStruct(struct, opts) {
+  const head = writtenHead(struct, opts);
   if (struct.fields.type === 'keyed') {
     const entries = struct.fields.pairs
       .map(([name, value]) => printKeywordEntry(name, value, opts))
       .join(',');
-    return `${DXNStruct.head(struct.name, struct.version)}{${entries}}`;
+    return `${head}{${entries}}`;
   }
   const items = struct.fields.values.map((v) => print(v, opts)).join(',');
-  return `${DXNStruct.head(struct.name, struct.version)}[${items}]`;
+  return `${head}[${items}]`;
+}
+
+/**
+ * How `struct` opens when it is written: `%Name(3)` with the latest
+ * loaded version of its schema, or with its own when there is no schema
+ * (`DXN.md` §4.8). The formatter writes the same head.
+ * @param {DXNStruct} struct
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @returns {string}
+ */
+function writtenHead(struct, opts) {
+  const written = opts.registry ? opts.registry.asWritten(struct) : struct;
+  return DXNStruct.head(written.name, written.version);
 }
 
 /** @param {unknown} value */
@@ -267,4 +281,4 @@ function describeForError(value) {
   }
 }
 
-module.exports = { print, isBareIdentifier, quoteString, keywordEntryName };
+module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead };

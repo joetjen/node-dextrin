@@ -52,7 +52,32 @@ class DXNStruct {
    * @returns {string}
    */
   static head(name, version = null) {
-    return version === null ? `%${name}` : `%${name}(${version})`;
+    return `%${DXNStruct.typeName(name, version)}`;
+  }
+
+  /**
+   * The struct's name as `.dxnb` writes it: `Name`, or `Name(3)` when it
+   * carries a version (`DXN.md` §2.4, §4.8).
+   * @param {string} name
+   * @param {number | null} [version]
+   * @returns {string}
+   */
+  static typeName(name, version = null) {
+    return version === null ? name : `${name}(${version})`;
+  }
+
+  /**
+   * The other direction: a `.dxnb` type name read back into its name and
+   * version, or `null` when its version is not a positive integer.
+   * @param {string} text
+   * @returns {{name: string, version: number | null} | null}
+   */
+  static parseTypeName(text) {
+    if (!text.includes('(') && !text.includes(')')) return { name: text, version: null };
+    const match = /^([^()]+)\(([0-9]+)\)$/s.exec(text);
+    if (!match) return null;
+    const version = Number(match[2]);
+    return Number.isSafeInteger(version) && version > 0 ? { name: match[1], version } : null;
   }
 
   /** @param {unknown} other @returns {boolean} */

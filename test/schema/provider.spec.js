@@ -39,7 +39,7 @@ describe('schema/provider', () => {
   it('encode serializes a real class instance directly, no manual DXNStruct wrapping needed', () => {
     const registry = Schema.registerProvider(new Registry(), moneyProvider);
     const money = new Money(DXNDecimal.fromString('19.99'), Symbol.for('usd'));
-    expect(encode(money, { registry })).to.equal('%Money{amount:19.99M,currency::usd}');
+    expect(encode(money, { registry })).to.equal('%Money(1){amount:19.99M,currency::usd}');
   });
 
   it('folds every named type/schema the provider document defines, not only dxnSchemaName()\'s own', () => {

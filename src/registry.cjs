@@ -23,6 +23,7 @@
 
 const DXNError = require('./error.cjs');
 const Compiled = require('./schema/compiled.cjs');
+const DXNStruct = require('./values/struct.cjs');
 
 class Registry {
   constructor() {
@@ -222,6 +223,21 @@ class Registry {
     const resolved = this.resolver(name);
     if (!resolved) return undefined;
     return { compiled: resolved, registry: this.putStructSchema(name, resolved) };
+  }
+
+  /**
+   * `struct` as it is written here: carrying the latest loaded version of
+   * its schema (`DXN.md` §4.8), whatever version it says itself. A
+   * struct whose name has no schema keeps its own version, or none.
+   * Every writer goes through this — text, the formatter and binary — so
+   * encoding never writes a version other than the latest, and never
+   * writes one no schema stands behind.
+   * @param {DXNStruct} struct
+   * @returns {DXNStruct}
+   */
+  asWritten(struct) {
+    const found = this.fetchStructSchema(struct.name);
+    return found ? new DXNStruct(struct.name, struct.fields, found.compiled.version) : struct;
   }
 
   /** @param {string} name @returns {((fields: {[k: string]: unknown}) => unknown) | undefined} */

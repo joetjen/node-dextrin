@@ -176,16 +176,34 @@ function encodePairs(pairs, opts) {
 }
 
 /**
- * `.dxnb` structs are always positional (`DXN.md` §2.1) — a keyed
- * `DXNStruct` (no schema known) falls back to its pairs' own
- * iteration order, the only field order available without a schema.
+ * `.dxnb` structs are always positional (`DXN.md` §2.1), written with
+ * the type name `Name(3)` that `Registry#asWritten` says — the latest
+ * loaded version of its schema, or its own (§2.4, §4.8).
  * @param {DXNStruct} value
- * @param {{[k: string]: unknown}} opts
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  * @returns {Buffer}
  */
 function encodeStruct(value, opts) {
-  const values = value.fields.type === 'positional' ? value.fields.values : value.fields.pairs.map(([, v]) => v);
-  return tag(Tags.T_STRUCT, arrayOf([textItem(value.name), ...values.map((v) => encodeItem(v, opts))]));
+  const written = opts.registry ? opts.registry.asWritten(value) : value;
+  const values = positionalValues(value, opts.registry);
+  return tag(Tags.T_STRUCT, arrayOf([textItem(DXNStruct.typeName(written.name, written.version)), ...values.map((v) => encodeItem(v, opts))]));
+}
+
+/**
+ * A struct's field values in the order the wire wants them. A keyed
+ * struct is put in its schema's field order, because a position is what
+ * the wire has; with no schema there is no order to consult, and the
+ * pairs' own order is all there is.
+ * @param {DXNStruct} value
+ * @param {import('../registry.cjs') | undefined} registry
+ * @returns {unknown[]}
+ */
+function positionalValues(value, registry) {
+  if (value.fields.type === 'positional') return value.fields.values;
+  const found = registry?.fetchStructSchema(value.name);
+  if (!found) return value.fields.pairs.map(([, v]) => v);
+  const named = new Map(value.fields.pairs);
+  return found.compiled.fieldNames().map((name) => named.get(name));
 }
 
 /** @param {DXNDate} date @returns {bigint} */

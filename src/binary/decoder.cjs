@@ -460,11 +460,18 @@ function buildOrdered(value) {
  */
 function buildStruct(value, registry) {
   if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
-  const [name, ...fields] = value.items;
-  if (typeof name !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
+  const [typeName, ...fields] = value.items;
+  if (typeof typeName !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
+  // The type name carries the version the struct was written with,
+  // "User(3)" (DXN.md §2.4, §4.8).
+  const parsed = DXNStruct.parseTypeName(typeName);
+  if (!parsed) {
+    throw new BinaryError(`struct type name ${JSON.stringify(typeName)} has a version that is not a positive integer`);
+  }
+  const { name, version } = parsed;
 
   const found = registry?.fetchStructSchema(name);
-  if (!found) return DXNStruct.positional(name, fields);
+  if (!found) return DXNStruct.positional(name, fields, version);
 
   const materializer = found.registry.fetchMaterializer(name) ?? null;
   try {

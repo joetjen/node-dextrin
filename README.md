@@ -138,7 +138,7 @@ decode('%Point{x: 1.0, y: 2.0}', { registry });
 // => { x: 1, y: 2 } -- schema-validated, decode-time enforcement
 
 encode({ x: 1.0, y: 2.0 }, { registry, schema: 'Point' });
-// => '%Point{x:1.0,y:2.0}'
+// => '%Point(1){x:1.0,y:2.0}'
 ```
 
 A `struct`/tag with no matching registry entry still falls back to an

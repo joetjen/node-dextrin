@@ -90,13 +90,13 @@ describe('dextrin (top-level API)', () => {
     it('encode skips validation entirely with validate: false', () => {
       const DXNStruct = esm.DXNStruct;
       const bad = DXNStruct.keyed('Point', [['x', 'not a float']]);
-      expect(esm.encode(bad, { registry, validate: false })).to.equal('%Point{x:"not a float"}');
+      expect(esm.encode(bad, { registry, validate: false })).to.equal('%Point(1){x:"not a float"}');
     });
 
     it('encode coerces mismatched fields by default (coerce: true)', () => {
       const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ amount: :rational } }'), new esm.Registry());
       const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
-      expect(esm.encode(struct, { registry: rationalRegistry })).to.equal('%P{amount:1/2}');
+      expect(esm.encode(struct, { registry: rationalRegistry })).to.equal('%P(1){amount:1/2}');
     });
 
     it('encode with coerce: false rejects the same mismatched field', () => {
@@ -107,7 +107,7 @@ describe('dextrin (top-level API)', () => {
 
     it('encode with schema: validates a nameless value the automatic tree walk cannot reach on its own, promoting it to the named struct', () => {
       const plain = new Map([[Symbol.for('x'), 1.0], [Symbol.for('y'), 2.0]]);
-      expect(esm.encode(plain, { registry, schema: 'Point' })).to.equal('%Point{x:1.0,y:2.0}');
+      expect(esm.encode(plain, { registry, schema: 'Point' })).to.equal('%Point(1){x:1.0,y:2.0}');
     });
 
     it('encode with schema: throws when the named value does not conform', () => {
@@ -121,7 +121,7 @@ describe('dextrin (top-level API)', () => {
     });
 
     it('a full decode -> encode round trip through a schema-backed struct is stable', () => {
-      const text = '%Point{x:1.0,y:2.0}';
+      const text = '%Point(1){x:1.0,y:2.0}';
       const decoded = esm.decode(text, { registry });
       expect(esm.encode(decoded, { registry, schema: 'Point' })).to.equal(text);
     });
