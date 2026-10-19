@@ -131,4 +131,11 @@ function compat(oldRegistry, newRegistry) {
   return Compat.check(oldRegistry, newRegistry);
 }
 
+// The names `compat`'s declaration uses, in scope here: `tsc` writes its
+// result type by them (`npm run types`).
+/**
+ * @typedef {import('./schema/compat.cjs').Problem} Problem
+ * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
+ */
+
 module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider, compat };

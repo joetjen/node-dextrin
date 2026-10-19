@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": false,
+    "types": ["node"],
+    "paths": { "@joetjen/dextrin": ["../../types/dextrin.d.cts"] }
+  },
+  "files": ["consumer.ts"]
+}

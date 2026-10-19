@@ -157,4 +157,16 @@ const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
 const Document = require('./document.cjs');
 
+// The names the declarations of `Document` and `Schema` use, in scope
+// here too: `tsc` writes those modules' types out inline in this one's
+// declarations, by these names (`npm run types`).
+/**
+ * @typedef {import('./document.cjs').Options} Options
+ * @typedef {import('./document.cjs').Doc} Doc
+ * @typedef {import('./document.cjs').Path} Path
+ * @typedef {import('./document.cjs').Change} Change
+ * @typedef {import('./schema/compat.cjs').Problem} Problem
+ * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
+ */
+
 module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };
