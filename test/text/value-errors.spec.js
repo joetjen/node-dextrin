@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { decode, DXNError } from '../../src/dextrin.js';
+import { decode, DXNError, Registry, Schema } from '../../src/dextrin.js';
 
 // A value that is written well but is not a value -- an impossible date,
 // a uuid that is not one, an unknown escape -- is text that does not
@@ -44,5 +44,46 @@ describe('a value that is not one', () => {
   // An error that has a category of its own keeps it.
   it('a map key that is not allowed stays key/not-allowed', () => {
     expect(refusal('%{1.5 => 1}').category).to.equal('key/not-allowed');
+  });
+});
+
+describe('a map key that is not allowed', () => {
+  // As the reference places it: at the key, line 2, column 2.
+  it('is placed at the key', () => {
+    expect(refusal('%{a: 1\n 1.5 => 2}')).to.deep.equal({ category: 'key/not-allowed', offset: 8 });
+  });
+
+  it('in an ordered map too', () => {
+    expect(refusal('@ordered %{a: 1, [1] => 2}')).to.deep.equal({ category: 'key/not-allowed', offset: 17 });
+  });
+
+  it("and a struct's extra field", () => {
+    expect(refusal('%P{a: 1, 1.5 => 2}')).to.deep.equal({ category: 'key/not-allowed', offset: 9 });
+  });
+
+  // Written as DXN, as the reference writes it: it said `[object Object]`.
+  it('is named as written', () => {
+    try {
+      decode('%{[1] => 2}');
+    } catch (err) {
+      expect(err.message).to.match(/^\[1\] cannot be a map key/);
+      return;
+    }
+    throw new Error('expected a refusal');
+  });
+});
+
+describe('a schema violation found while decoding', () => {
+  // As the reference places it: at the struct, line 2, column 2.
+  it('is placed at its struct', () => {
+    const registry = Schema.compile(decode('%{U: %schema{a: :string}}'), new Registry());
+    try {
+      decode('[1\n %U{a: 2}]', { registry });
+    } catch (err) {
+      expect(err).to.be.instanceOf(DXNError);
+      expect({ category: err.category, offset: err.offset }).to.deep.equal({ category: 'schema/type-mismatch', offset: 4 });
+      return;
+    }
+    throw new Error('expected a refusal');
   });
 });

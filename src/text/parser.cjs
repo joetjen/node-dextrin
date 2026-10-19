@@ -31,7 +31,7 @@ const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
 const DXNMap = require('../values/map.cjs');
-const { checkPairs } = require('../map-key.cjs');
+const { check: checkKey, checkPairs } = require('../map-key.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
@@ -431,6 +431,7 @@ class Parser {
         this.rewrapAsEntry(keyAt);
         this.next('ARROW');
         this.mark('arrow');
+        this.keyAllowed(value, start);
         entries.push([value, this.parseValue()]);
         this.end();
       } else if (entries.length > 0) {
@@ -483,8 +484,13 @@ class Parser {
       return /** @type {Validated} */ (read.value);
     } catch (err) {
       // A schema violation keeps its own category (DXN.md §5); it is not
-      // a syntax error for having been found while parsing.
-      if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
+      // a syntax error for having been found while parsing. It is placed
+      // at this struct's `%` unless a struct inside it was already where
+      // it was found -- the innermost place wins, as the reference's.
+      if (err instanceof DXNError || err instanceof SchemaValidationError) {
+        if (typeof (/** @type {any} */ (err).offset) !== 'number') /** @type {any} */ (err).offset = start;
+        throw err;
+      }
       throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, start);
     }
   }
@@ -507,9 +513,11 @@ class Parser {
         this.mark('key');
         pairs.push([key, this.parseValue()]);
       } else {
+        const keyStart = this.peek().start;
         const key = this.parseValue();
         this.next('ARROW');
         this.mark('arrow');
+        this.keyAllowed(key, keyStart);
         pairs.push([key, this.parseValue()]);
       }
       this.end();
@@ -517,6 +525,23 @@ class Parser {
     this.next('RBRACE');
     if (ownNode) this.end();
     return pairs;
+  }
+
+  /**
+   * Refuses `key` as a map key (DXN.md §1.6) unless it may be one,
+   * placed at `offset`, where the key was written -- as the reference
+   * places it. Checked here rather than once the map is built, where
+   * nothing says which entry it was.
+   * @param {unknown} key
+   * @param {number} offset
+   */
+  keyAllowed(key, offset) {
+    try {
+      checkKey(key);
+    } catch (err) {
+      /** @type {any} */ (err).offset = offset;
+      throw err;
+    }
   }
 
   /**
