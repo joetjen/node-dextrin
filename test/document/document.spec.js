@@ -198,8 +198,21 @@ describe('Document', () => {
     it('lays a document out and keeps its comments', () => {
       const text = '# top\n\n%{name: "acme", # the name\n deps: ["a" # temporary\n# still about a\n "b"\n\n# pinned\n "c"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n';
       expect(Document.format(Document.parse(text))).to.equal(
-        '# top\n\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"  # temporary\n         # still about a\n    "b"\n\n    # pinned\n    "c"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end'
+        '# top\n\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"  # temporary\n         # still about a\n    "b"\n\n    # pinned\n    "c"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end\n'
       );
+    });
+
+    // The header is `@dxn` and its version, one space between them,
+    // however they were spaced.
+    it('keeps one space between the header tag and its version', () => {
+      expect(Document.format(Document.parse('@dxn   "1.0"\n[1]'))).to.equal('@dxn "1.0"\n[\n  1\n]');
+    });
+
+    // A formatter run on save must not take a file's last newline away;
+    // one the source did not end with, it does not add.
+    it('ends with a newline exactly when the source did', () => {
+      expect(Document.format(Document.parse('%{a: 1}\n'))).to.equal('%{\n  a: 1\n}\n');
+      expect(Document.format(Document.parse('%{a: 1}'))).to.equal('%{\n  a: 1\n}');
     });
 
     it('a document with no comments comes out as the pretty printer writes its value', () => {

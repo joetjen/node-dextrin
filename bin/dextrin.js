@@ -171,8 +171,11 @@ function cmdFormat(argv) {
   // value.
   const doc = Document.parse(readFileSync(path, 'utf8'));
   const text = mode === 'pretty' ? Document.format(doc) : encode(Document.toValue(doc));
-  if (flags['in-place']) writeFileSync(path, `${text}\n`);
-  else console.log(text);
+  // A file written in place ends with one newline, and printed output with
+  // none of its own, whether or not the formatted text kept the source's.
+  const line = text.replace(/\n+$/, '');
+  if (flags['in-place']) writeFileSync(path, `${line}\n`);
+  else console.log(line);
 }
 
 /** @param {string[]} argv */
