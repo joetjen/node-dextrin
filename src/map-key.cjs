@@ -60,8 +60,21 @@ function checkPairs(pairs) {
   for (const [key] of pairs) check(key);
 }
 
-/** @param {unknown} key @returns {string} */
+/**
+ * `key` as a reader would recognise it: written as DXN, as the reference
+ * names it (`[1] cannot be a map key`), rather than JavaScript's
+ * `[object Object]`. The printer is loaded here, not at the top: it
+ * checks map keys itself, so each needs the other.
+ * @param {unknown} key
+ * @returns {string}
+ */
 function describe(key) {
+  try {
+    return require('./text/printer.cjs').print(key);
+  } catch {
+    // A value the printer refuses -- one with no DXN meaning -- is named
+    // the way JavaScript names it.
+  }
   if (typeof key === 'symbol') return key.toString();
   try {
     return String(key);
