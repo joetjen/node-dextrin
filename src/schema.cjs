@@ -20,6 +20,7 @@
  */
 
 const DXNStruct = require('./values/struct.cjs');
+const Registry = require('./registry.cjs');
 const Compiler = require('./schema/compiler.cjs');
 const Validator = require('./schema/validator.cjs');
 const Reader = require('./schema/reader.cjs');
@@ -37,6 +38,28 @@ const Compat = require('./schema/compat.cjs');
  */
 function compile(schemaDoc, baseRegistry) {
   return Compiler.compile(schemaDoc, baseRegistry);
+}
+
+/**
+ * Compiles several decoded `.dxns` documents into one registry, in order,
+ * over `baseRegistry` (a new one by default) -- each seeing the schemas
+ * and named types of those before it, as `compile` called on each in
+ * turn. The first that does not compile throws, naming which it was
+ * (`schema/compile`). As the reference's `Dextrin.Schema.compile_all/2`.
+ * @param {unknown[]} schemaDocs
+ * @param {import('./registry.cjs')} [baseRegistry]
+ * @returns {import('./registry.cjs')}
+ */
+function compileAll(schemaDocs, baseRegistry = new Registry()) {
+  let registry = baseRegistry;
+  for (const [index, doc] of schemaDocs.entries()) {
+    try {
+      registry = Compiler.compile(doc, registry);
+    } catch (err) {
+      throw new Compiler.SchemaCompileError(`document ${index + 1}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return registry;
 }
 
 /**
@@ -138,4 +161,4 @@ function compat(oldRegistry, newRegistry) {
  * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
  */
 
-module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider, compat };
+module.exports = { compile, compileAll, validate, validateEncode, validateEncodeTree, registerProvider, compat };
