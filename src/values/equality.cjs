@@ -54,6 +54,7 @@ const KIND_ORDER = [
   'uuid',
   'uri',
   'bytes',
+  'bits',
   'regex',
   'custom-tag',
   'unknown'

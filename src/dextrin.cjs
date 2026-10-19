@@ -33,6 +33,7 @@ const {
   DXNUUID,
   DXNURI,
   DXNBytes,
+  DXNBits,
   DXNRegex,
   DXNCustomTag,
   dxnEquals,
@@ -220,6 +221,7 @@ module.exports.DXNDuration = DXNDuration;
 module.exports.DXNUUID = DXNUUID;
 module.exports.DXNURI = DXNURI;
 module.exports.DXNBytes = DXNBytes;
+module.exports.DXNBits = DXNBits;
 module.exports.DXNRegex = DXNRegex;
 module.exports.DXNCustomTag = DXNCustomTag;
 module.exports.dxnEquals = dxnEquals;

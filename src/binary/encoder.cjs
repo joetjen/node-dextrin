@@ -50,6 +50,7 @@ const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 
@@ -93,6 +94,8 @@ function encodeItem(value, opts) {
   if (value instanceof DXNSymbol) return tag(Tags.T_SYMBOL, textItem(value.name));
   if (value instanceof DXNKeyword) return tag(Tags.T_KEYWORD, textItem(value.name));
   if (value instanceof DXNBytes) return bytesItem(value.data);
+  // Bits that are not whole bytes (DXN.md §2.3): T_BITS around [bytes, count].
+  if (value instanceof DXNBits) return tag(Tags.T_BITS, arrayOf([bytesItem(value.data), integerItem(BigInt(value.bitLength))]));
 
   if (value instanceof DXNList) return arrayOf(value.items.map((v) => encodeItem(v, opts)));
   if (value instanceof DXNTuple) return tag(Tags.T_TUPLE, arrayOf(value.items.map((v) => encodeItem(v, opts))));

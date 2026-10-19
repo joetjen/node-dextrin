@@ -46,6 +46,7 @@ const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Reader = require('../schema/reader.cjs');
@@ -408,6 +409,8 @@ function buildTagged(tag, value, trusted, registry) {
       return buildRegex(value);
     case Tags.T_CUSTOM:
       return buildCustom(value, registry);
+    case Tags.T_BITS:
+      return buildBits(value);
     default:
       throw new BinaryError(`unrecognized CBOR tag ${tag}`);
   }
@@ -638,6 +641,24 @@ function deepClone(value) {
 /** @param {unknown} err @returns {string} */
 function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * T_BITS, `[bytes, count]` (DXN.md §2.3): the count must match the bytes;
+ * a whole number of them is bytes.
+ * @param {unknown} value
+ * @returns {DXNBits | DXNBytes}
+ */
+function buildBits(value) {
+  const malformed = `malformed bits (tag ${Tags.T_BITS}) payload: [bytes, count] with the count matching the bytes`;
+  if (!(value instanceof DXNList) || value.items.length !== 2) throw new BinaryError(malformed);
+  const [data, count] = value.items;
+  if (!(data instanceof DXNBytes) || (typeof count !== 'bigint' && typeof count !== 'number')) throw new BinaryError(malformed);
+  try {
+    return DXNBits.from(data.data, count);
+  } catch {
+    throw new BinaryError(malformed);
+  }
 }
 
 module.exports = { decode, BinaryError };

@@ -41,6 +41,7 @@ const DXNDuration = require('./values/duration.cjs');
 const DXNUUID = require('./values/uuid.cjs');
 const DXNURI = require('./values/uri.cjs');
 const DXNBytes = require('./values/bytes.cjs');
+const DXNBits = require('./values/bits.cjs');
 const DXNRegex = require('./values/regex.cjs');
 const DXNCustomTag = require('./values/custom-tag.cjs');
 
@@ -76,6 +77,7 @@ function text(value) {
   }
   if (value instanceof DXNKeyword) return keyword(value.name);
   if (value instanceof DXNBytes) return '@bytes ' + quoted(Buffer.from(value.data).toString('base64'));
+  if (value instanceof DXNBits) return '@bits {' + quoted(Buffer.from(value.data).toString('base64')) + ' ' + value.bitLength + '}';
   if (value instanceof DXNList) return '[' + value.items.map(text).join(' ') + ']';
   if (value instanceof DXNTuple) return '{' + value.items.map(text).join(' ') + '}';
   if (Array.isArray(value)) return '@array[' + value.map(text).join(' ') + ']';

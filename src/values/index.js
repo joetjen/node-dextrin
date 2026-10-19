@@ -17,6 +17,7 @@ import DXNDuration from './duration.js';
 import DXNUUID from './uuid.js';
 import DXNURI from './uri.js';
 import DXNBytes from './bytes.js';
+import DXNBits from './bits.js';
 import DXNRegex from './regex.js';
 import DXNCustomTag from './custom-tag.js';
 import { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK } from './equality.js';
@@ -41,6 +42,7 @@ export {
   DXNUUID,
   DXNURI,
   DXNBytes,
+  DXNBits,
   DXNRegex,
   DXNCustomTag,
   dxnEquals,

@@ -50,6 +50,7 @@ const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const Validated = require('./validated.cjs');
 
@@ -193,6 +194,9 @@ function primitiveMatches(name, value) {
       return value instanceof DXNURI;
     case 'bytes':
       return value instanceof DXNBytes;
+    // Bits and bytes are one value space (DXN.md §4.1): `:bits` takes both.
+    case 'bits':
+      return value instanceof DXNBits || value instanceof DXNBytes;
     case 'regex':
       return value instanceof DXNRegex;
     default:
