@@ -88,7 +88,7 @@ function render(value, depth, opts) {
   if (registry && value !== null && typeof value === 'object' && !(value instanceof DXNStruct)) {
     const name = registry.fetchSchemaNameForModule(value.constructor);
     const found = name && registry.fetchStructSchema(name);
-    if (found) return render(DXNStruct.keyed(name, found.compiled.fieldValues(value)), depth, opts);
+    if (found) return render(found.compiled.structOf(value), depth, opts);
   }
 
   // Every scalar, every empty collection, and any struct-shaped

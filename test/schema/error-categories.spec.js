@@ -82,6 +82,35 @@ describe('schema error categories', () => {
     });
   });
 
+  // nil in an optional field stays strict (Jan, 2026-10-19): a reader
+  // refuses it unless the type is nilable, so a writer never puts one
+  // where a field is merely absent.
+  describe('encoding binary, which fills every position', () => {
+    const compiled = (source) => Schema.compile(decode(source), new Registry());
+
+    it('an absent optional field with no default is schema/missing-field', () => {
+      const user = decode('%User{name: "a"}', { registry: loaded() });
+      expect(category(() => encodeBinary(user, { registry: loaded() }))).to.equal('schema/missing-field');
+    });
+
+    it('text leaves it out, so text has nothing to refuse', () => {
+      const user = decode('%User{name: "a"}', { registry: loaded() });
+      expect(encode(user, { registry: loaded() })).to.equal('%User(2){name:"a"}');
+    });
+
+    it('an absent field with a default is written as its default', () => {
+      const registry = compiled('%{User: %schema{name: :string, role?: %field{type: :string, default: "guest"}}}');
+      const bytes = encodeBinary(DXNStruct.keyed('User', [['name', 'a']], 1), { registry });
+      expect(decodeBinary(bytes, { registry }).fields.pairs).to.deep.equal([['name', 'a'], ['role', 'guest']]);
+    });
+
+    it('a nilable field written as nil reads back', () => {
+      const registry = compiled('%{User: %schema{name: :string, email?: {:nilable :string}}}');
+      const bytes = encodeBinary(DXNStruct.keyed('User', [['name', 'a'], ['email', null]], 1), { registry });
+      expect(decodeBinary(bytes, { registry }).fields.pairs).to.deep.equal([['name', 'a'], ['email', null]]);
+    });
+  });
+
   it("a materializer's rejected value is schema/materializer, whatever was wrong with it", () => {
     const registry = loaded().putStructMaterializer('User', () => DXNStruct.keyed('User', [['name', 1n]]));
     expect(category(() => decode('%User{name: "a"}', { registry }))).to.equal('schema/materializer');

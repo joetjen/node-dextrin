@@ -309,6 +309,21 @@ and a materializer receives the extras with the declared fields. Pass
 (`schema/undeclared-field`): right for a config file written by hand,
 where an unknown field is a typo.
 
+A registered class instance is written the same way. An own property
+its schema does not declare is an extra field, and a field it does not
+have — or holds as `undefined` — is absent, never `nil`:
+
+```js
+encode(Object.assign(new Point(1n, 2n), { label: 'origin' }), { registry: registry3 });
+//=> '%Point(1){x:1,y:2,label:"origin"}'
+```
+
+Text leaves an absent field out. `.dxnb` has to fill every position, so
+there an absent field is written as its default, or refused
+(`schema/missing-field`) when it has none: a reader would refuse the
+`nil` that could stand in for it, unless the field is declared
+`{:nilable t}`.
+
 ## 8. Evolving a schema
 
 A schema changes; data written with the old one does not. Each `.dxns`

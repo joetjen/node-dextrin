@@ -125,7 +125,7 @@ function printViaRegistry(value, opts) {
     const name = registry.fetchSchemaNameForModule(value.constructor);
     if (name) {
       const found = registry.fetchStructSchema(name);
-      if (found) return printStruct(DXNStruct.keyed(name, found.compiled.fieldValues(/** @type {any} */ (value))), opts);
+      if (found) return printStruct(found.compiled.structOf(/** @type {object} */ (value)), opts);
     }
 
     const tagEncoder = registry.fetchTagEncoder(value.constructor);

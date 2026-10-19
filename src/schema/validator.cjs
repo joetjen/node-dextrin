@@ -98,10 +98,10 @@ function resolveFields(compiled, given, registry, opts) {
   /** @type {{[k: string]: unknown}} */
   const resolved = {};
   for (const field of compiled.fields) {
-    // An absent optional field still holds its position when a value
-    // goes out, as null.
+    // An absent optional field stays absent: null is not a stand-in for
+    // it (DXN.md §4.3), and each writer decides what absent means there.
     const value = resolveField(field, given, registry, opts);
-    resolved[field.name] = value === ABSENT ? null : value;
+    if (value !== ABSENT) resolved[field.name] = value;
   }
   return resolved;
 }
@@ -243,7 +243,10 @@ function rebuildChecked(value, compiled, resolved) {
     for (const [name, v] of Object.entries(resolved)) rebuilt[name] = v;
     return rebuilt;
   }
-  return DXNStruct.keyed(/** @type {string} */ (compiled.name), compiled.fieldNames().map((name) => [name, resolved[name]]));
+  return DXNStruct.keyed(
+    /** @type {string} */ (compiled.name),
+    compiled.fieldNames().filter((name) => Object.prototype.hasOwnProperty.call(resolved, name)).map((name) => [name, resolved[name]]),
+  );
 }
 
 /**
@@ -263,7 +266,8 @@ function toNameMapForEncode(compiled, value) {
   }
   if (value instanceof Map) return Object.fromEntries(Array.from(value.entries(), stringifyEntry));
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value));
+    // A property held as undefined is one the object does not have.
+    return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   }
   throw new SchemaValidationError(`expected a map/struct/object to validate against a schema, got ${String(value)}`, 'schema/type-mismatch');
 }

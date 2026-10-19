@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A registered class instance carries extra fields**: an own property
+  its schema does not declare is written as an extra field (text entries,
+  the trailing tag-215 map in `.dxnb`), as an Elixir struct's undeclared
+  keys are. It was dropped.
+- **An absent field is never written as `nil`** (`DXN.md` §4.3): a field
+  an instance does not have, or holds as `undefined`, is left out of
+  text, and in `.dxnb`, which fills every position, written as its
+  default or refused (`schema/missing-field`). Both writers wrote `nil`,
+  which the same schema then refused to read back.
 - **Every schema violation carries its `DXN.md` §5 category**:
   `schema/field-count`, `schema/missing-field`, `schema/type-mismatch`
   and `schema/shadowed-field`, decoding text or binary and encoding

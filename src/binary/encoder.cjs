@@ -29,6 +29,8 @@ const { checkPairs } = require('../map-key.cjs');
 const { unsupported } = require('./errors.cjs');
 const { head, floatItem, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
 const Tags = require('./tags.cjs');
+const Field = require('../schema/field.cjs');
+const { SchemaValidationError } = require('../schema/validator.cjs');
 
 const DXNChar = require('../values/char.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
@@ -154,8 +156,7 @@ function encodeViaRegistry(value, opts) {
     if (name) {
       const found = registry.fetchStructSchema(name);
       if (found) {
-        const values = found.compiled.fieldValues(/** @type {object} */ (value)).map(([, v]) => v);
-        return encodeStruct(DXNStruct.positional(name, values), opts);
+        return encodeStruct(found.compiled.structOf(/** @type {object} */ (value)), opts);
       }
     }
 
@@ -204,6 +205,11 @@ function encodeStruct(value, opts) {
  * struct is put in its schema's field order, because a position is what
  * the wire has; with no schema there is no order to consult, and the
  * pairs' own order is all there is.
+ *
+ * Every position must be filled, and null is not a stand-in for an
+ * absent field (DXN.md §4.3): a reader refuses null unless the type is
+ * nilable. So an absent field is written as its default where it has
+ * one, and is otherwise refused (`schema/missing-field`).
  * @param {DXNStruct} value
  * @param {import('../registry.cjs') | undefined} registry
  * @returns {unknown[]}
@@ -213,7 +219,15 @@ function positionalValues(value, registry) {
   const found = registry?.fetchStructSchema(value.name);
   if (!found) return value.fields.pairs.map(([, v]) => v);
   const named = new Map(value.fields.pairs);
-  return found.compiled.fieldNames().map((name) => named.get(name));
+  return found.compiled.fields.map((field) => {
+    if (named.has(field.name)) return named.get(field.name);
+    if (field.default !== Field.NO_DEFAULT) return field.default;
+    throw new SchemaValidationError(
+      `struct ${JSON.stringify(value.name)} has no ${JSON.stringify(field.name)}, and .dxnb fills every position: ` +
+        'give it a value or a default, or declare it nilable',
+      'schema/missing-field',
+    );
+  });
 }
 
 /** @param {DXNDate} date @returns {bigint} */

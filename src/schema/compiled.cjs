@@ -31,17 +31,28 @@ class Compiled {
   }
 
   /**
-   * Reads `instance`'s fields (an arbitrary registered JS class
-   * instance, not a `DXNStruct`) out in this schema's own canonical
-   * field order — the same order `.dxnb`'s positional wire encoding
-   * needs. A field this schema declares but `instance` doesn't have
-   * is `undefined`, same as any other absent field; extra instance
-   * properties the schema doesn't know about are simply not included.
+   * `instance` -- a registered application class instance -- as the
+   * keyed struct it is written as (DXN.md §4.3, §4.7). A field it does
+   * not have, or holds as `undefined`, is absent, never null: a reader
+   * refuses null unless the type admits it. An own property the schema
+   * does not declare is an extra field, written back with the struct,
+   * as an Elixir struct's undeclared keys are.
    * @param {object} instance
-   * @returns {Array<[string, unknown]>}
+   * @returns {import('../values/struct.cjs')}
    */
-  fieldValues(instance) {
-    return this.fieldNames().map((name) => [name, (/** @type {{[k: string]: unknown}} */ (instance))[name]]);
+  structOf(instance) {
+    const DXNStruct = require('../values/struct.cjs');
+    const declared = new Set(this.fieldNames());
+    const own = /** @type {{[k: string]: unknown}} */ (instance);
+    /** @type {Array<[string, unknown]>} */
+    const pairs = this.fieldNames()
+      .filter((name) => own[name] !== undefined)
+      .map((name) => [name, own[name]]);
+    /** @type {Array<[unknown, unknown]>} */
+    const extra = Object.keys(own)
+      .filter((key) => !declared.has(key) && own[key] !== undefined)
+      .map((key) => [key, own[key]]);
+    return DXNStruct.keyed(/** @type {string} */ (this.name), pairs, null, extra);
   }
 }
 
