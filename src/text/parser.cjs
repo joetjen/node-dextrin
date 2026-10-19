@@ -62,13 +62,46 @@ class ParseError extends Error {
 class Parser {
   /**
    * @param {import('./lexer.cjs').Token[]} tokens
-   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} opts
+   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs'), recordTree?: boolean}} opts
    */
   constructor(tokens, opts) {
     this.tokens = tokens;
     this.pos = 0;
     this.trusted = opts.trusted ?? true;
     this.registry = strictly(opts.registry ?? null, opts.strict);
+    /**
+     * The syntax tree being recorded, when one was asked for
+     * (`parseTree`): a stack of open nodes, the document at its bottom.
+     * @type {SyntaxNode[] | null}
+     */
+    this.recording = opts.recordTree ? [{ kind: 'document', first: 0, last: -1, children: [] }] : null;
+  }
+
+  /**
+   * Opens a node of `kind` at the next token -- or at token `first` --
+   * when a tree is being recorded.
+   * @param {string} kind
+   * @param {number} [first]
+   */
+  begin(kind, first = this.pos) {
+    if (this.recording) this.recording.push({ kind, first, last: -1, children: [] });
+  }
+
+  /** Closes the innermost open node at the last token consumed, under its parent. */
+  end() {
+    if (!this.recording) return;
+    const node = /** @type {SyntaxNode} */ (this.recording.pop());
+    node.last = this.pos - 1;
+    this.recording[this.recording.length - 1].children.push(node);
+  }
+
+  /**
+   * Notes on the innermost open node that the last token consumed is its
+   * `field` -- an opening bracket, a key, a tag's name.
+   * @param {'open' | 'key' | 'arrow' | 'name'} field
+   */
+  mark(field) {
+    if (this.recording) this.recording[this.recording.length - 1][field] = this.pos - 1;
   }
 
   peek() {
@@ -95,13 +128,16 @@ class Parser {
     this.tryConsumeHeader();
     const value = this.parseValue();
     this.next('EOF');
+    if (this.recording) this.recording[0].last = this.pos - 1;
     return value;
   }
 
   tryConsumeHeader() {
     const save = this.pos;
     if (this.at('AT') && this.tokens[this.pos + 1]?.type === 'IDENTIFIER' && this.tokens[this.pos + 1].value === 'dxn' && this.tokens[this.pos + 2]?.type === 'STRING') {
+      this.begin('header');
       this.pos += 3;
+      this.end();
     } else {
       this.pos = save;
     }
@@ -113,12 +149,19 @@ class Parser {
    * @returns {unknown}
    */
   parseValue() {
+    this.begin('value');
     while (this.at('AT') && this.isDiscard()) {
+      this.begin('discard');
       this.pos += 1; // AT
       this.pos += 1; // IDENTIFIER "_"
       this.parseValue(); // parse and throw away
+      this.end();
     }
-    return this.parseValueBody();
+    this.begin('body');
+    const value = this.parseValueBody();
+    this.end();
+    this.end();
+    return value;
   }
 
   isDiscard() {
@@ -237,31 +280,43 @@ class Parser {
 
   /** @returns {DXNList} */
   parseList() {
+    this.begin('list');
     this.next('LBRACKET');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACKET')) items.push(this.parseValue());
     this.next('RBRACKET');
+    this.end();
     return new DXNList(items);
   }
 
   /** @returns {DXNTuple} */
   parseTuple() {
+    this.begin('tuple');
     this.next('LBRACE');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACE')) items.push(this.parseValue());
     this.next('RBRACE');
+    this.end();
     return new DXNTuple(items);
   }
 
-  /** @returns {Set<unknown>} */
-  parseSet() {
+  /**
+   * @param {number} at the index of the set's `@`, already consumed.
+   * @returns {Set<unknown>}
+   */
+  parseSet(at) {
+    this.begin('set', at);
     this.next('LBRACE');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACE')) items.push(this.parseValue());
     this.next('RBRACE');
+    this.end();
     return new Set(items);
   }
 
@@ -271,18 +326,35 @@ class Parser {
    * @returns {Map<unknown, unknown> | DXNStruct | Validated}
    */
   parsePercent() {
+    const at = this.pos;
     this.next('PERCENT');
     if (this.at('LBRACE')) {
-      const pairs = this.parseEntries();
+      this.begin('map', at);
+      const pairs = this.parseEntries(false);
+      this.end();
       checkPairs(pairs);
       return new DXNMap(pairs);
     }
+    this.begin('struct', at);
+    try {
+      return this.parseStructBody();
+    } finally {
+      this.end();
+    }
+  }
+
+  /**
+   * The rest of a struct after its `%`: its name, its version, and its
+   * keyed or positional body.
+   * @returns {DXNStruct | Validated}
+   */
+  parseStructBody() {
     const name = this.next('IDENTIFIER').value;
     const version = this.parseStructVersion();
     if (this.at('LBRACE')) {
       // Entries keyed by a name are the struct's fields; any other map
       // key (DXN.md §1.6) is an extra field's (§4.7).
-      const entries = this.parseEntries();
+      const entries = this.parseEntries(true);
       checkPairs(entries);
       /** @type {Array<[string, unknown]>} */
       const pairs = [];
@@ -305,22 +377,31 @@ class Parser {
    * @returns {{values: unknown[], extra: Array<[unknown, unknown]>}}
    */
   parsePositionalBody() {
+    this.begin('positional');
     this.next('LBRACKET');
+    this.mark('open');
     /** @type {unknown[]} */
     const values = [];
     /** @type {Array<[unknown, unknown]>} */
     const entries = [];
     while (!this.at('RBRACKET')) {
       if (this.at('MAP_KEY')) {
+        this.begin('entry');
         const key = this.keywordValue(this.next('MAP_KEY').value);
+        this.mark('key');
         entries.push([key, this.parseValue()]);
+        this.end();
         continue;
       }
       const start = this.peek().start;
+      const keyAt = this.pos;
       const value = this.parseValue();
       if (this.at('ARROW')) {
+        this.rewrapAsEntry(keyAt);
         this.next('ARROW');
+        this.mark('arrow');
         entries.push([value, this.parseValue()]);
+        this.end();
       } else if (entries.length > 0) {
         throw new ParseError('a positional struct\'s items come before its extra fields', start);
       } else {
@@ -328,6 +409,7 @@ class Parser {
       }
     }
     this.next('RBRACKET');
+    this.end();
     checkPairs(entries);
     return { values, extra: entries.map(([key, value]) => [DXNStruct.extraKey(key), value]) };
   }
@@ -376,22 +458,46 @@ class Parser {
   }
 
   /** `{ map_entry* }`, ordered pairs — used by both `map_lit` and `struct_keyed`. */
-  parseEntries() {
+  /**
+   * @param {boolean} ownNode whether the entries are a node of their own,
+   *   a struct's keyed body, rather than the map's own contents.
+   */
+  parseEntries(ownNode) {
+    if (ownNode) this.begin('keyed');
     this.next('LBRACE');
+    this.mark('open');
     /** @type {Array<[unknown, unknown]>} */
     const pairs = [];
     while (!this.at('RBRACE')) {
+      this.begin('entry');
       if (this.at('MAP_KEY')) {
         const key = this.keywordValue(this.next('MAP_KEY').value);
+        this.mark('key');
         pairs.push([key, this.parseValue()]);
       } else {
         const key = this.parseValue();
         this.next('ARROW');
+        this.mark('arrow');
         pairs.push([key, this.parseValue()]);
       }
+      this.end();
     }
     this.next('RBRACE');
+    if (ownNode) this.end();
     return pairs;
+  }
+
+  /**
+   * Makes the value just recorded, starting at token `first`, the key of
+   * a new entry: a positional struct's item turns out to be an extra
+   * field's key once `=>` follows it.
+   * @param {number} first
+   */
+  rewrapAsEntry(first) {
+    if (!this.recording) return;
+    const parent = this.recording[this.recording.length - 1];
+    const key = /** @type {SyntaxNode} */ (parent.children.pop());
+    this.recording.push({ kind: 'entry', first, last: -1, children: [key] });
   }
 
   /**
@@ -400,10 +506,17 @@ class Parser {
    * @returns {unknown}
    */
   parseAt() {
+    const at = this.pos;
     this.next('AT');
-    if (this.at('LBRACE')) return this.parseSet();
+    if (this.at('LBRACE')) return this.parseSet(at);
+    this.begin('tag', at);
     const nameTok = this.next('IDENTIFIER');
-    return this.dispatchTag(nameTok.value, nameTok.start);
+    this.mark('name');
+    try {
+      return this.dispatchTag(nameTok.value, nameTok.start);
+    } finally {
+      this.end();
+    }
   }
 
   /**
@@ -491,6 +604,29 @@ function parse(text, opts = {}) {
   return Validated.strip(parser.parseDocument());
 }
 
+/**
+ * @typedef {{kind: string, first: number, last: number, children: SyntaxNode[], open?: number, key?: number, arrow?: number, name?: number}} SyntaxNode
+ *   One node of a document's syntax tree: its kind, its first and last
+ *   token (indices into the tokens), the nodes inside it, and which of
+ *   its tokens open it, key it, or name it.
+ */
+
+/**
+ * `text` parsed the way `parse` parses it -- the same parser, the same
+ * errors -- with the syntax tree beside the value: every token, and the
+ * nodes over them. The trivia between two tokens is the text between
+ * them. What `Document.parse` reads with.
+ * @param {string} text
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @returns {{value: unknown, tree: SyntaxNode, tokens: import('./lexer.cjs').Token[]}}
+ */
+function parseTree(text, opts = {}) {
+  const tokens = tokenize(text);
+  const parser = new Parser(tokens, { ...opts, recordTree: true });
+  const value = Validated.strip(parser.parseDocument());
+  return { value, tree: /** @type {SyntaxNode[]} */ (parser.recording)[0], tokens };
+}
+
 /** @param {unknown} err @returns {string} */
 function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
@@ -506,4 +642,4 @@ function strictly(registry, strict) {
   return registry && strict !== undefined ? registry.putStrict(strict) : registry;
 }
 
-module.exports = { parse, ParseError, LexError };
+module.exports = { parse, parseTree, ParseError, LexError };

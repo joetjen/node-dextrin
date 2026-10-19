@@ -16,7 +16,12 @@
  * its canonical form; `encode` reads `text` and answers the exact bytes
  * as base64. A case may carry `schemas`, `.dxns` sources compiled in
  * order into the registry it runs with, and `strict: true`, which decodes
- * strictly (`DXN.md` §4.7). Any of them may answer `error` instead: the error's category
+ * strictly (`DXN.md` §4.7). `format` reads `text` as a document and
+ * answers it laid out, comments kept, as `text`; `edit` reads `text` as a
+ * document, makes its `edits` in order -- `replace`, `delete`, `insert`,
+ * `update`, their `path`, `value` and `where` written as DXN text -- and
+ * answers the document rendered, as `text`; a refused edit answers
+ * `document/<reason>`. Any of them may answer `error` instead: the error's category
  * (`DXN.md` §5), never its message. An error with no category yet is
  * `uncategorised`, which no case expects, so it shows as a disagreement
  * rather than passing by accident.
@@ -28,6 +33,7 @@ const binaryEncoder = require('./binary/encoder.cjs');
 const { canonical } = require('./canonical.cjs');
 const Registry = require('./registry.cjs');
 const Schema = require('./schema.cjs');
+const Document = require('./document.cjs');
 
 /**
  * The answer to a decoded JSON request: one result per case, in order.
@@ -39,7 +45,7 @@ function answer(request) {
 }
 
 /**
- * @typedef {{id: string, operation: string, text?: string, binary?: string, schemas?: string[], strict?: boolean}} Case
+ * @typedef {{id: string, operation: string, text?: string, binary?: string, schemas?: string[], strict?: boolean, edits?: Array<Record<string, string>>}} Case
  */
 
 /** @param {Case} c @returns {Record<string, string>} */
@@ -52,6 +58,10 @@ function outcome(c) {
         return { canonical: canonical(parser.parse(String(c.text), opts)) };
       case 'decode-binary':
         return { canonical: canonical(binaryDecoder.decode(new Uint8Array(Buffer.from(String(c.binary), 'base64')), opts)) };
+      case 'format':
+        return { text: Document.format(Document.parse(String(c.text), opts)) };
+      case 'edit':
+        return { text: Document.render(edited(Document.parse(String(c.text), opts), c.edits ?? [], opts)) };
       case 'encode': {
         const value = Schema.validateEncodeTree(parser.parse(String(c.text), opts), registry);
         return { binary: Buffer.from(binaryEncoder.encode(value, { registry })).toString('base64') };
@@ -63,6 +73,30 @@ function outcome(c) {
     const category = err instanceof Error ? /** @type {any} */ (err).category : undefined;
     return { error: typeof category === 'string' ? category : 'uncategorised' };
   }
+}
+
+/**
+ * `doc` after `edits`, made in order; each one's path, value and where
+ * are DXN text, read by this implementation's own parser.
+ * @param {import('./document.cjs').Doc} doc
+ * @param {Array<Record<string, string>>} edits
+ * @param {{registry: import('./registry.cjs'), strict: boolean}} opts
+ */
+function edited(doc, edits, opts) {
+  const read = (/** @type {string} */ text) => parser.parse(text, opts);
+  const path = (/** @type {string} */ text) => /** @type {import('./values/list.cjs')} */ (read(text)).items;
+  let current = doc;
+  for (const edit of edits) {
+    if (edit.op === 'replace') current = Document.replace(current, path(edit.path), read(edit.value));
+    else if (edit.op === 'delete') current = Document.delete(current, path(edit.path));
+    else if (edit.op === 'insert') current = Document.insert(current, path(edit.path), read(edit.where), read(edit.value));
+    else if (edit.op === 'update') {
+      const onAmbiguity = /** @type {'safe' | 'guess' | 'error'} */ (edit.on_ambiguity ?? 'safe');
+      if (!['safe', 'guess', 'error'].includes(onAmbiguity)) throw new Error(`unknown on_ambiguity ${JSON.stringify(onAmbiguity)}`);
+      current = Document.update(current, read(edit.value), { onAmbiguity }).doc;
+    } else throw new Error(`unknown edit ${JSON.stringify(edit.op)}`);
+  }
+  return current;
 }
 
 /**

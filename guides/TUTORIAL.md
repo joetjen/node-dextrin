@@ -150,9 +150,42 @@ hood, which is also directly callable on its own (the CLI's `dextrin
 format --mode pretty` uses it that way, without going through
 `encode`'s own validation).
 
-Comments are never preserved by either path — `.dxn`'s lexer discards
-`#`-comments as trivia before the parser ever sees them, so there's no
-comment text left by the time a value exists to reprint.
+### Keeping comments
+
+A value has no comments: `decode` keeps the data and nothing else, so
+decoding a file, changing it and encoding it again deletes every comment
+in it. For a file people annotate, parse it as a `Document` instead,
+which keeps everything — comments, blank lines, commas — beside the
+value:
+
+```js
+const { Document } = require('dextrin');
+
+let doc = Document.parse('# the config\n%{name: "acme", version: "1.0.0" # bumped for the fix\n}\n');
+
+Document.toValue(doc);   // what decode gives
+
+Document.format(doc);
+//=> '# the config\n%{\n  name: "acme"\n  version: "1.0.0"  # bumped for the fix\n}'
+```
+
+`format` changes layout only and keeps every comment with its entry — it
+is what `dextrin format` does. Edits change exactly what they name, and
+every byte they do not touch stays as it was:
+
+```js
+doc = Document.replace(doc, [Symbol.for('version')], '2.0.0');
+Document.render(doc);
+//=> '# the config\n%{name: "acme", version: "2.0.0" # bumped for the fix\n}\n'
+```
+
+A path names a map's key as it decodes (`Symbol.for('version')`), a
+struct's field name (`'x'`) or an index. `Document.delete` takes an
+entry's own comments with it, the ones above it and the one beside it;
+`Document.insert` puts a new entry above the comments of the one it
+lands before; `Document.update` turns a whole new value into these
+edits, and refuses where guessing which edit you meant would lose a
+comment (`onAmbiguity`).
 
 ## 5. Extending: custom tags
 

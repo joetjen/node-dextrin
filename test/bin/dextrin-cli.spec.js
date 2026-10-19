@@ -65,6 +65,18 @@ describe('bin/dextrin.js CLI', () => {
       expect(readFileSync(join(dir, 'sample.dxn'), 'utf8').trim()).to.equal('%{x:1,y:[1 2 3]}');
     });
 
+    it('--mode pretty keeps every comment beside its entry', () => {
+      writeFileSync(join(dir, 'commented.dxn'), '# the config\n%{name: "acme", # the name\n deps: ["a"]}\n');
+      const result = run(['format', 'commented.dxn'], { cwd: dir });
+      expect(result.stdout).to.equal('# the config\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"\n  ]\n}\n');
+    });
+
+    it('--mode condense drops comments: a comment ends its line, and condensed is one', () => {
+      writeFileSync(join(dir, 'commented.dxn'), '%{name: "acme"} # the name\n');
+      const result = run(['format', 'commented.dxn', '--mode', 'condense'], { cwd: dir });
+      expect(result.stdout).to.equal('%{name:"acme"}\n');
+    });
+
     it('rejects an unrecognized --mode', () => {
       const result = run(['format', 'sample.dxn', '--mode', 'bogus'], { cwd: dir });
       expect(result.status).to.equal(1);

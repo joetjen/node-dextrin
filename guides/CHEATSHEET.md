@@ -58,6 +58,19 @@ only changes rendering, never what the value decodes back to.
 dextrin format data.dxn --mode pretty|condense [--in-place]
 ```
 
+## Documents: keeping comments
+
+```js
+let doc = Document.parse(source, opts);                 // decode's opts and errors
+Document.toValue(doc);                                  // what decode gives
+Document.render(doc);                                   // the source, byte for byte
+Document.format(doc);                                   // laid out, comments kept
+doc = Document.replace(doc, [Symbol.for('version')], '2.0.0');
+doc = Document.delete(doc, [Symbol.for('deps'), 0]);    // with its own comments
+doc = Document.insert(doc, [Symbol.for('deps')], -1, 'new');  // index, or a map's new key
+const { doc: updated, changes } = Document.update(doc, newValue, { onAmbiguity: 'safe' });
+```
+
 ## Value-type cheatsheet
 
 ```text
@@ -217,7 +230,7 @@ NonEmptyList, NonEmptySet
 dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
-dextrin format data.dxn [--mode pretty|condense] [--in-place]
+dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps comments
 dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 ```
 

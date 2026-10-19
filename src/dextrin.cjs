@@ -155,5 +155,6 @@ function maybeValidateEncode(value, opts) {
 
 const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
+const Document = require('./document.cjs');
 
-module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, ...values };
+module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };

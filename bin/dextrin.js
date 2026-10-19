@@ -27,7 +27,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry } from '../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document } from '../src/dextrin.js';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -166,9 +166,11 @@ function cmdFormat(argv) {
   if (mode !== 'pretty' && mode !== 'condense') {
     throw new Error(`unrecognized --mode ${JSON.stringify(mode)} — expected "pretty" or "condense"`);
   }
-  const source = readFileSync(path, 'utf8');
-  const value = decode(source);
-  const text = encode(value, { pretty: mode === 'pretty' });
+  // Pretty lays the document out and keeps its comments; condensed
+  // output is one line, which no comment fits on, so it reprints the
+  // value.
+  const doc = Document.parse(readFileSync(path, 'utf8'));
+  const text = mode === 'pretty' ? Document.format(doc) : encode(Document.toValue(doc));
   if (flags['in-place']) writeFileSync(path, `${text}\n`);
   else console.log(text);
 }

@@ -15,6 +15,7 @@ const Std = require('./schema/std.cjs');
 const FileResolver = require('./schema/file-resolver.cjs');
 const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
+const Document = require('./document.cjs');
 
 /** @param {string} text @param {{trusted?: boolean, registry?: Registry}} [opts] @returns {unknown} */
 function decode(text, opts = {}) {
@@ -80,7 +81,7 @@ function maybeValidateEncode(value, opts) {
   return result;
 }
 
-export { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver };
+export { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document };
 export * from './values/index.js';
 
-export default { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, ...values };
+export default { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };

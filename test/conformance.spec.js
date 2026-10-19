@@ -52,6 +52,27 @@ describe('conformance adapter', () => {
     ]);
   });
 
+  it('answers a format with the document laid out, its comments kept', () => {
+    expect(answered([{ id: 'a', operation: 'format', text: '[1 # one\n 2]' }])).to.deep.equal([{ id: 'a', text: '[\n  1  # one\n  2\n]' }]);
+  });
+
+  it('answers an edit with the document rendered after its edits, in order', () => {
+    const edits = [
+      { op: 'replace', path: '[:name]', value: '"other"' },
+      { op: 'delete', path: '[:deps 0]' },
+      { op: 'insert', path: '[:deps]', where: '-1', value: '"c"' },
+    ];
+    const text = '%{\n  name: "acme" # the name\n  deps: ["a" "b"]\n}\n';
+    expect(answered([{ id: 'a', operation: 'edit', text, edits }])).to.deep.equal([
+      { id: 'a', text: '%{\n  name: "other" # the name\n  deps: ["b" "c"]\n}\n' },
+    ]);
+  });
+
+  it('answers a refused edit as document/<reason>', () => {
+    const edits = [{ op: 'delete', path: '[:nope]' }];
+    expect(answered([{ id: 'a', operation: 'edit', text: '%{a: 1}', edits }])).to.deep.equal([{ id: 'a', error: 'document/not-found' }]);
+  });
+
   it('answers a schema that does not compile with its category', () => {
     expect(answered([{ id: 'a', operation: 'decode', text: '1', schemas: ['%{User: 1}'] }])).to.deep.equal([
       { id: 'a', error: 'schema/compile' },
