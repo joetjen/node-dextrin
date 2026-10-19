@@ -199,7 +199,7 @@ id.toString(); // => '550e8400-e29b-41d4-a716-446655440000'
 const { decode, encode } = require('@joetjen/dextrin');
 
 const value = decode('%{x: 1, y: 2}');
-// => Map(2) { Symbol(x) => 1n, Symbol(y) => 2n }
+// => DXNMap(2) { Symbol(x) => 1n, Symbol(y) => 2n } -- a Map whose keys compare by value
 
 encode(value);
 // => '%{x:1,y:2}'
