@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeping a second copy of `decode`, `encode`, `decodeBinary` and
   `encodeBinary`; so does `values/equality.js`, the last ES module that
   reached its CommonJS one through `import.meta.url`.
+- **A map key that is not allowed, and a schema violation, say where
+  they are** when decoding text: `key/not-allowed` at the key, a schema
+  error at its struct's `%` (the innermost one), as the reference places
+  them. They had no offset. A refused key is named as written --
+  `[1] cannot be a map key` -- not as `[object Object]`.
 - **A value written well that is not one is a `syntax` error** at the
   token it began with (`DXN.md` §5), as the reference answers: an
   impossible date or time, a uuid or datetime that is not one, an unknown
