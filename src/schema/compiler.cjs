@@ -150,6 +150,7 @@ function compileEntry(entry, aliases) {
   if (entry.fields.type !== 'keyed') {
     throw new SchemaCompileError('a schema lists its fields by name: %schema(N){field: type, ...}');
   }
+  notFormat10(entry.fields.pairs);
   const fields = entry.fields.pairs.map(([key, value]) => {
     try {
       return compileField(key, value, aliases);
@@ -163,6 +164,29 @@ function compileEntry(entry, aliases) {
     seen.add(field.name);
   }
   return new Compiled({ version: entry.version ?? 1, fields });
+}
+
+/**
+ * Refuses a schema written in DXN 1.0's syntax -- `fields: @ordered
+ * %{...}`, `closed: true`, `forbidden: [...]` -- saying so, and what 1.1
+ * writes instead (DXN.md §4.4), rather than that a field has no known
+ * type. Only those shapes: in 1.1 `fields`, `closed` and `forbidden` are
+ * ordinary field names, whose values are type expressions.
+ * @param {Array<[string, unknown]>} pairs
+ */
+function notFormat10(pairs) {
+  const old = pairs.some(
+    ([key, value]) =>
+      (key === 'fields' && value instanceof DXNOrderedMap) ||
+      (key === 'closed' && typeof value === 'boolean') ||
+      (key === 'forbidden' && value instanceof DXNList)
+  );
+  if (old) {
+    throw new SchemaCompileError(
+      "this is DXN 1.0's schema syntax (fields:, closed:, forbidden:); DXN 1.1 lists the fields directly, " +
+        '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXN.md §4.4)'
+    );
+  }
 }
 
 /**

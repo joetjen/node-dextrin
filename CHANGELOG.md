@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `registry: Registry`, `x: DXNStruct`): the entry and `values/` export
   name by name, which `tsc` declares so.
 
+### Changed
+
+- **A 1.0 schema says it is one**, as the reference's (dextrin afbb00d):
+  `fields: @ordered %{...}`, `closed: true` and `forbidden: [...]` are
+  refused (`schema/compile`) naming DXN 1.0's syntax and what 1.1 writes
+  instead, rather than as a field of no known type.
+
 ### Fixed
 
 - **The package survives a bundler.** The standard library's schemas
