@@ -13,7 +13,7 @@ API around it.
 ```js
 const { decode, encode } = require('@joetjen/dextrin');
 
-const value = decode('%{name: "Ada", active: true, score: 19.99M}');
+const value = decode('%{name: "Ada", active: true, score: 19.99M}', { trusted: true });
 //=> DXNMap(3) {
 //     Symbol(name) => 'Ada',
 //     Symbol(active) => true,
@@ -26,19 +26,19 @@ encode(value);
 
 Notice the map's keys: a plain map's shorthand keys (`name:`) are
 themselves DXN `keyword`s, not bare strings — `%{name: "Ada"}` and
-`%{:name => "Ada"}` are the exact same value, and `keyword`'s own JS
-type (`DXN.md` §1.3) is a real, global `Symbol.for(name)`, which is
-what `decode` produces by default (`trusted: true`) — the closest
-native analog to a BEAM atom, and like an atom, never garbage
-collected. Pass `trusted: false` for input you don't fully control —
-untrusted `.dxn`/`.dxnb` must never be able to exhaust the global
-symbol registry via an unbounded `Symbol.for` — and `keyword` decodes
-as `DXNKeyword` instead:
+`%{:name => "Ada"}` are the exact same value. **By default a keyword
+decodes as `DXNKeyword`**: a `.dxn`/`.dxnb` from anywhere must never be
+able to fill the global symbol registry, which is never garbage
+collected, via an unbounded `Symbol.for`:
 
 ```js
-decode('%{name: "Ada"}', { trusted: false });
+decode('%{name: "Ada"}');
 //=> DXNMap(1) { DXNKeyword { name: 'name' } => 'Ada' }
 ```
+
+For input you control, `trusted: true` decodes it as a real, global
+`Symbol.for(name)`, `keyword`'s own JS type (`DXN.md` §1.3) — the
+closest native analog to a BEAM atom — as in the first example.
 
 A schema-backed `struct`'s fields are the one place names *do* come
 back as plain strings regardless of `trusted:` (§6 below), since a
@@ -94,8 +94,8 @@ Two things worth noticing right away:
   escape hatch at all, since nothing about it should ever need one.
 
 `keyword` is the one type with two faces, controlled by `trusted:`
-(default `true`): a real `Symbol.for(name)`, as shown above, or
-`DXNKeyword` when decoded untrusted. See the `DXNValue` typedef in
+(default `false`): `DXNKeyword`, or a real `Symbol.for(name)` when the
+input is trusted. See the `DXNValue` typedef in
 [`src/values/index.cjs`](../src/values/index.cjs) for the complete
 type-to-shape mapping, and each wrapper class's own file for
 conversion helpers (`toX()`/`DXN*.fromX()`) to and from the closest

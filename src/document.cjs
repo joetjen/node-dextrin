@@ -42,6 +42,7 @@ const { parseTree } = require('./text/parser.cjs');
 const DXNError = require('./error.cjs');
 const DXNStruct = require('./values/struct.cjs');
 const DXNList = require('./values/list.cjs');
+const DXNKeyword = require('./values/keyword.cjs');
 const { dxnEquals } = require('./values/equality.cjs');
 const Formatter = require('./document/formatter.cjs');
 
@@ -474,9 +475,21 @@ function keyOf(doc, entry, kind) {
   return parseTree(doc.source.slice(from, to), doc.opts).value;
 }
 
-/** @param {unknown} a @param {unknown} b */
+/**
+ * Whether the key `a` a document holds is the path's step `b`. A path is
+ * the caller's own code, so a keyword in it -- a global `Symbol.for` or a
+ * `DXNKeyword` -- names a keyword key of that name however the document
+ * decoded it (untrusted by default, as `DXNKeyword`).
+ * @param {unknown} a
+ * @param {unknown} b
+ */
 function sameKey(a, b) {
-  return typeof a === 'string' && typeof b === 'symbol' ? false : dxnEquals(a, b);
+  if (typeof a === 'string' && typeof b === 'symbol') return false;
+  const name = (/** @type {unknown} */ k) =>
+    typeof k === 'symbol' ? Symbol.keyFor(k) : k instanceof DXNKeyword ? k.name : undefined;
+  const [na, nb] = [name(a), name(b)];
+  if (na !== undefined && nb !== undefined) return na === nb;
+  return dxnEquals(a, b);
 }
 
 /** A node's `[from, to)` in the source. @param {Doc} doc @param {SyntaxNode} node @returns {Span} */

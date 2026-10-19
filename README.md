@@ -198,7 +198,7 @@ id.toString(); // => '550e8400-e29b-41d4-a716-446655440000'
 ```js
 const { decode, encode } = require('@joetjen/dextrin');
 
-const value = decode('%{x: 1, y: 2}');
+const value = decode('%{x: 1, y: 2}', { trusted: true });
 // => DXNMap(2) { Symbol(x) => 1n, Symbol(y) => 2n } -- a Map whose keys compare by value
 
 encode(value);
@@ -208,11 +208,12 @@ encode(value, { pretty: true });
 // => '%{\n  x: 1\n  y: 2\n}'
 ```
 
-`keyword` (`:name`) decodes as a real, global `Symbol.for(name)` by
-default (`trusted: true`) — the closest native analog to a BEAM atom.
-Pass `trusted: false` for any source you don't fully control; it then
-decodes as `DXNKeyword` instead, the same way `Dextrin.Keyword` exists
-on the Elixir side. `decode`/`encode` throw `DXNError` on failure —
+**Decoding is safe by default**: `keyword` (`:name`) decodes as
+`DXNKeyword`, the same way `Dextrin.Keyword` exists on the Elixir side,
+so no input can fill the global symbol registry, which is never garbage
+collected. Pass `trusted: true` (or `registry.putTrusted(true)`) for a
+source you control, as above, and it decodes as a real, global
+`Symbol.for(name)` — the closest native analog to a BEAM atom. `decode`/`encode` throw `DXNError` on failure —
 see `src/error.cjs` for why that's a deliberate divergence from
 `Dextrin`'s own `{:ok, _} | {:error, _}` tuples (an API-shape choice,
 not a value-representation one).

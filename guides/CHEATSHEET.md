@@ -23,10 +23,9 @@ fields on schema-backed structs), `pretty:` (`encode` only,
 default `false` — multi-line, indented output instead of
 single-line/compact), `indent:` (`encode` only, meaningful with
 `pretty: true` — spaces per nesting level, default 2), `trusted:`
-(decode only, default `true` — `keyword` decodes as a real, global
-`Symbol.for(name)`; `false` for untrusted input decodes it as
-`DXNKeyword` instead, so `Symbol.for` is never reachable from
-attacker-controlled text).
+(decode only, default `false` — `keyword` decodes as `DXNKeyword`, so
+`Symbol.for` is never reachable from the input; `true`, for a source
+you control, decodes it as a real, global `Symbol.for(name)`).
 
 ## Render an error
 
@@ -75,7 +74,7 @@ const { doc: updated, changes } = Document.update(doc, newValue, { onAmbiguity: 
 
 ```text
 symbol      DXNSymbol{name}                        bare identifier, e.g. `foo`
-keyword     Symbol.for(name) (default) / DXNKeyword `:foo` / `foo:` (key position) — trusted: false for the latter
+keyword     DXNKeyword (default) / Symbol.for(name) `:foo` / `foo:` (key position) — trusted: true for the latter
 list        DXNList{items}                         `[1 2 3]` — distinct from array
 tuple       DXNTuple{items}                        `{1 2 3}` — arbitrary length
 array       Array (native)                         `@array[1 2 3]` — the obvious native-type pairing

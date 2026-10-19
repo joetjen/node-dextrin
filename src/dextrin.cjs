@@ -60,13 +60,12 @@ const binaryDecoder = require('./binary/decoder.cjs');
  * malformed input, including a schema violation for any registered
  * `struct` name the text uses.
  *
- * `keyword` decodes as a real, global `Symbol.for(name)` by default
- * (`trusted: true`) — the closest native analog to a BEAM atom, and
- * like an atom, never garbage collected, so pass `trusted: false` for
- * any source you don't fully control (the default assumes you do —
- * your own config, your own application's data — not arbitrary
- * untrusted/network input). `trusted: false` decodes `keyword` as
- * `DXNKeyword` instead. `symbol` is unaffected either way.
+ * **Safe by default**: `keyword` decodes as `DXNKeyword`, so no input
+ * can fill the global symbol registry. Pass `trusted: true` (or a
+ * registry with `putTrusted(true)`) for a source you control -- your own
+ * config, your own application's data -- and it decodes as a real, global
+ * `Symbol.for(name)`, the closest native analog to a BEAM atom and, like
+ * one, never garbage collected. `symbol` is unaffected either way.
  *
  * `registry:` (a `Registry` built via `schema.compile`) enables
  * schema-backed `struct` decoding and custom-tag decoding for any
