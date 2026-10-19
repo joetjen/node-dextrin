@@ -14,7 +14,7 @@ API around it.
 const { decode, encode } = require('@joetjen/dextrin');
 
 const value = decode('%{name: "Ada", active: true, score: 19.99M}');
-//=> Map(3) {
+//=> DXNMap(3) {
 //     Symbol(name) => 'Ada',
 //     Symbol(active) => true,
 //     Symbol(score) => DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }
@@ -37,7 +37,7 @@ as `DXNKeyword` instead:
 
 ```js
 decode('%{name: "Ada"}', { trusted: false });
-//=> Map(1) { DXNKeyword { name: 'name' } => 'Ada' }
+//=> DXNMap(1) { DXNKeyword { name: 'name' } => 'Ada' }
 ```
 
 A schema-backed `struct`'s fields are the one place names *do* come

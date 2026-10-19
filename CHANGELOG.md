@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `DXNMap` prints as the map it is: its entries, without the
+  `byIdentity` bookkeeping it keeps to compare keys by value. The README
+  and the tutorial show `decode`'s result as it is, a `DXNMap` (they said
+  `Map`; found by the joetjen.net site session).
 - **The package survives a bundler.** The standard library's schemas
   were read off disk next to the source at load, and the ES module entry
   reached the implementation through `import.meta.url`; bundled into one
