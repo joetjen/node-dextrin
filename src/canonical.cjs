@@ -70,7 +70,10 @@ function text(value) {
   if (value instanceof DXNDecimal) return decimal(value);
   if (value instanceof DXNRational) return `${value.numerator}/${value.denominator}`;
   if (value instanceof DXNChar) return '?' + charBody(value.codepoint);
-  if (value instanceof DXNSymbol) return value.name;
+  if (value instanceof DXNSymbol) {
+    if (isBareIdentifier(value.name)) return value.name;
+    throw unsupported(`a symbol named ${JSON.stringify(value.name)}, which is not an identifier`);
+  }
   if (value instanceof DXNKeyword) return keyword(value.name);
   if (value instanceof DXNBytes) return '@bytes ' + quoted(Buffer.from(value.data).toString('base64'));
   if (value instanceof DXNList) return '[' + value.items.map(text).join(' ') + ']';

@@ -63,7 +63,13 @@ function print(value, opts = {}) {
   if (value instanceof DXNDecimal) return `${value.toString()}M`;
   if (value instanceof DXNRational) return `${value.numerator}/${value.denominator}`;
   if (value instanceof DXNChar) return '?' + printCharBody(value.codepoint);
-  if (value instanceof DXNSymbol) return value.name;
+  // A symbol is an identifier (DXN.md §1.1); a name that is not one has
+  // no text form, and writing it verbatim would read back as something
+  // else, or as nothing.
+  if (value instanceof DXNSymbol) {
+    if (isBareIdentifier(value.name)) return value.name;
+    throw unsupported(`a symbol named ${JSON.stringify(value.name)}, which is not an identifier`);
+  }
   if (value instanceof DXNKeyword) return ':' + keywordName(value.name);
   if (value instanceof DXNBytes) return tagForm('bytes', quoteString(Buffer.from(value.data).toString('base64')), opts);
 
