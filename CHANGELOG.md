@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `priv/schema/std.dxns` (`npm run std`; a test fails when it is out of
   date), and the ES module entry re-exports the CommonJS one instead of
   keeping a second copy of `decode`, `encode`, `decodeBinary` and
-  `encodeBinary`.
+  `encodeBinary`; so does `values/equality.js`, the last ES module that
+  reached its CommonJS one through `import.meta.url`.
 - **A value written well that is not one is a `syntax` error** at the
   token it began with (`DXN.md` §5), as the reference answers: an
   impossible date or time, a uuid or datetime that is not one, an unknown

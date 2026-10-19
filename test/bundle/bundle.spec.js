@@ -17,25 +17,33 @@ const bundledRun = (entrySource) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dextrin-bundle-'));
   const entry = path.join(dir, 'entry.mjs');
   fs.writeFileSync(entry, entrySource);
-  const outfile = path.join(dir, 'out.cjs');
-  buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'silent',
-              nodePaths: [path.dirname(root)], alias: { '@joetjen/dextrin': root } });
-  return execFileSync(process.execPath, [outfile], { cwd: dir, encoding: 'utf8' }).trim();
+  // Installed as a package is, so that `exports` decides which entry an
+  // `import` and a `require` get (an alias to the directory would load
+  // `main` for both); the bundle runs from a directory of its own.
+  fs.mkdirSync(path.join(dir, 'node_modules', '@joetjen'), { recursive: true });
+  fs.symlinkSync(root, path.join(dir, 'node_modules', '@joetjen', 'dextrin'), 'dir');
+  const outdir = path.join(dir, 'run');
+  fs.mkdirSync(outdir);
+  const outfile = path.join(outdir, 'out.cjs');
+  buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'silent' });
+  return execFileSync(process.execPath, [outfile], { cwd: outdir, encoding: 'utf8' }).trim();
 };
 
 // What both entries are asked: a standard schema, which is what read
-// `priv/` at load.
+// `priv/` at load, and value equality, whose ES module wrapper reached
+// its CommonJS module through `import.meta.url` too.
 const probe = (dextrin) => `
   ${dextrin}.Std.registry();
-  console.log(${dextrin}.encode(${dextrin}.decode('%{a: 1}')), ${dextrin}.Std.source().includes('PositiveInteger'));
+  console.log(${dextrin}.encode(${dextrin}.decode('%{a: 1}')), ${dextrin}.Std.source().includes('PositiveInteger'),
+              ${dextrin}.dxnEquals(${dextrin}.decode('[1]'), ${dextrin}.decode('[1]')));
 `;
 
 describe('the package, bundled', () => {
   it('runs from an import, with no files beside the bundle', () => {
-    expect(bundledRun(`import * as dextrin from '@joetjen/dextrin';\n${probe('dextrin')}`)).to.equal('%{a:1} true');
+    expect(bundledRun(`import * as dextrin from '@joetjen/dextrin';\n${probe('dextrin')}`)).to.equal('%{a:1} true true');
   });
 
   it('and from a require', () => {
-    expect(bundledRun(`const dextrin = require('@joetjen/dextrin');\n${probe('dextrin')}`)).to.equal('%{a:1} true');
+    expect(bundledRun(`const dextrin = require('@joetjen/dextrin');\n${probe('dextrin')}`)).to.equal('%{a:1} true true');
   });
 });
