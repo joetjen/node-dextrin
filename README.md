@@ -1,7 +1,7 @@
 # node-dextrin
 
 [![CI](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/node-dextrin/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/dextrin.svg)](https://www.npmjs.com/package/dextrin)
+[![npm](https://img.shields.io/npm/v/@joetjen/dextrin.svg)](https://www.npmjs.com/package/@joetjen/dextrin)
 [![Docs](https://img.shields.io/badge/docs-typedoc-blue.svg)](https://joetjen.github.io/node-dextrin/)
 
 A Node.js port of [`dextrin`](https://github.com/joetjen/dextrin), an
@@ -182,7 +182,7 @@ rationale for each wrapper-vs-native choice, lives in this project's
 development plan for now and will move here as the port progresses.
 
 ```js
-const { DXNRational, DXNUUID } = require('dextrin');
+const { DXNRational, DXNUUID } = require('@joetjen/dextrin');
 
 const r = new DXNRational(22n, 7n);
 r.toNumber(); // => 3.142857142857143
@@ -196,7 +196,7 @@ id.toString(); // => '550e8400-e29b-41d4-a716-446655440000'
 ## `.dxn` text
 
 ```js
-const { decode, encode } = require('dextrin');
+const { decode, encode } = require('@joetjen/dextrin');
 
 const value = decode('%{x: 1, y: 2}');
 // => Map(2) { Symbol(x) => 1n, Symbol(y) => 2n }
@@ -225,7 +225,7 @@ With no `registry:` option, every `struct` decodes as an opaque
 ## `.dxnb` binary
 
 ```js
-const { decode, decodeBinary, encodeBinary } = require('dextrin');
+const { decode, decodeBinary, encodeBinary } = require('@joetjen/dextrin');
 
 const value = decode('%{x: 1, y: 2}');
 const bin = encodeBinary(value); // => Buffer, "DX" + version + CBOR
@@ -244,7 +244,7 @@ deliberate for now.
 ## `.dxns` schemas
 
 ```js
-const { decode, encode, Schema, Registry } = require('dextrin');
+const { decode, encode, Schema, Registry } = require('@joetjen/dextrin');
 
 const schemaDoc = decode(`
   %{
@@ -294,7 +294,7 @@ without depending on `dextrin`, see `src/schema/provider.cjs`),
 resolver for `Registry#putResolver`:
 
 ```js
-const { decode, Schema, Registry, Std, FileResolver } = require('dextrin');
+const { decode, Schema, Registry, Std, FileResolver } = require('@joetjen/dextrin');
 
 const withStd = Std.registry(); // PositiveInteger, NonEmptyString, ...
 const registry = Schema.compile(decode('%{ Age: PositiveInteger }'), withStd);
@@ -329,7 +329,7 @@ npx dextrin compat old-schemas/ schemas/                            # changed sc
 ## Installation
 
 ```sh
-npm install dextrin
+npm install @joetjen/dextrin
 ```
 
 ## Other language implementations
@@ -343,7 +343,7 @@ shape-per-type choices wherever their host language allows.
 | Language | Package | Source |
 | --- | --- | --- |
 | Elixir | [`dextrin` on Hex.pm](https://hex.pm/packages/dextrin) | [joetjen/dextrin](https://github.com/joetjen/dextrin) |
-| Node.js (this project) | [`dextrin` on npm](https://www.npmjs.com/package/dextrin) | [joetjen/node-dextrin](https://github.com/joetjen/node-dextrin) |
+| Node.js (this project) | [`@joetjen/dextrin` on npm](https://www.npmjs.com/package/@joetjen/dextrin) | [joetjen/node-dextrin](https://github.com/joetjen/node-dextrin) |
 | PHP | [`joetjen/dextrin` on Packagist](https://packagist.org/packages/joetjen/dextrin) | [joetjen/php-dextrin](https://github.com/joetjen/php-dextrin) |
 
 ## Development
