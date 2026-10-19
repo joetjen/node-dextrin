@@ -37,6 +37,7 @@ const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 
@@ -72,6 +73,7 @@ function print(value, opts = {}) {
   }
   if (value instanceof DXNKeyword) return ':' + keywordName(value.name);
   if (value instanceof DXNBytes) return tagForm('bytes', quoteString(Buffer.from(value.data).toString('base64')), opts);
+  if (value instanceof DXNBits) return tagForm('bits', bitsBody(value), opts);
 
   if (value instanceof DXNList) return '[' + value.items.map((v) => print(v, opts)).join(' ') + ']';
   if (value instanceof DXNTuple) return '{' + value.items.map((v) => print(v, opts)).join(' ') + '}';
@@ -302,6 +304,16 @@ function describeForError(value) {
   } catch {
     return Object.prototype.toString.call(value);
   }
+}
+
+/**
+ * The body of `@bits {"..." n}` (DXN.md §1.5): the bytes in base64, the
+ * unused bits zero (as DXNBits holds them), and the count.
+ * @param {DXNBits} bits
+ * @returns {string}
+ */
+function bitsBody(bits) {
+  return `{${quoteString(Buffer.from(bits.data).toString('base64'))} ${bits.bitLength}}`;
 }
 
 module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead };

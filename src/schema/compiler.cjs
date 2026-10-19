@@ -37,7 +37,7 @@ const Field = require('./field.cjs');
 const PRIMITIVES = new Set([
   'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
   'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
-  'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'regex'
+  'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex'
 ]);
 
 class SchemaCompileError extends Error {

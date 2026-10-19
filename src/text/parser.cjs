@@ -36,6 +36,7 @@ const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Reader = require('../schema/reader.cjs');
@@ -43,7 +44,7 @@ const { SchemaValidationError } = require('../schema/validator.cjs');
 const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
-const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'datetime', 'duration']);
+const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'bits', 'datetime', 'duration']);
 
 class ParseError extends Error {
   /**
@@ -616,6 +617,20 @@ class Parser {
         return DXNURI.fromString(this.parseStringValue(name, offset));
       case 'bytes':
         return new DXNBytes(new Uint8Array(Buffer.from(this.parseStringValue(name, offset), 'base64')));
+      case 'bits': {
+        // `@bits {"..." n}` (DXN.md §1.4): base64 and a bit count; a whole
+        // number of bytes reads as bytes, which is what it is.
+        const inner = this.parseValue();
+        const wanted = '@bits takes {"base64" bit-count}, the count matching the bytes';
+        if (!(inner instanceof DXNTuple) || inner.items.length !== 2) throw new ParseError(wanted, offset);
+        const [text, count] = inner.items;
+        if (typeof text !== 'string' || typeof count !== 'bigint') throw new ParseError(wanted, offset);
+        try {
+          return DXNBits.from(new Uint8Array(Buffer.from(text, 'base64')), count);
+        } catch {
+          throw new ParseError(wanted, offset);
+        }
+      }
       case 'datetime':
         return temporal.parseOffsetDateTime(this.parseStringValue(name, offset));
       case 'duration':
