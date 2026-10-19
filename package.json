@@ -42,8 +42,8 @@
     "npm": ">=9.0.0"
   },
   "scripts": {
-    "test": "npx mocha --recursive test/",
-    "autotest": "npx mocha --recursive --watch test/",
+    "test": "npx mocha --recursive test/ --ignore 'test/fixtures/**'",
+    "autotest": "npx mocha --recursive --watch test/ --ignore 'test/fixtures/**'",
     "typecheck": "npx tsc --checkJs --noEmit",
     "precommit": "npm run typecheck && npm test",
     "docs": "npx typedoc"

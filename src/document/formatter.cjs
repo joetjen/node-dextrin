@@ -38,11 +38,28 @@ function format(doc, opts = {}) {
   const step = ' '.repeat(opts.indent ?? 2);
   const tree = doc.tree;
   const header = tree.children.filter((n) => n.kind === 'header');
-  const head = header.map((n) => `${tokensText(doc, n.first, n.last)}\n`).join('');
+  const head = header.map((n) => `${headerText(doc, n)}\n`).join('');
   const value = /** @type {SyntaxNode} */ (tree.children.find((n) => n.kind === 'value'));
   const from = header.length > 0 ? doc.tokens[header[header.length - 1].last].end : 0;
   const sequence = [{ gap: doc.source.slice(from, start(doc, value)) }, { node: value }, { gap: doc.source.slice(end(doc, value)) }];
-  return head + lines(slots(sequence, false), '', (node) => valueText(doc, node, '', step));
+  // It ends with a newline exactly when the source did: a formatter run
+  // on save keeps a file's last newline, and a comment-free document
+  // without one comes out exactly as the pretty printer writes its value.
+  const ending = doc.source.endsWith('\n') ? '\n' : '';
+  return head + lines(slots(sequence, false), '', (node) => valueText(doc, node, '', step)) + ending;
+}
+
+/**
+ * The header, `@dxn "1.0"`: the tag, one space, and the version, each as
+ * written, however they were spaced. The tag is two tokens here (`@`,
+ * `dxn`), so the space goes before the version alone.
+ *
+ * @param {Doc} doc
+ * @param {SyntaxNode} node
+ */
+function headerText(doc, node) {
+  const texts = doc.tokens.slice(node.first, node.last + 1).map((t) => doc.source.slice(t.start, t.end));
+  return `${texts.slice(0, -1).join('')} ${texts[texts.length - 1]}`;
 }
 
 // ---- slots: which comment belongs where -------------------------------------
