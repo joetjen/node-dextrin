@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
 import * as esm from '../src/dextrin.js';
+import { fieldsOf } from './support/decoded-fields.js';
 
 const require = createRequire(import.meta.url);
 const cjs = require('../src/dextrin.cjs');
@@ -68,13 +69,13 @@ describe('dextrin (top-level API)', () => {
     });
   });
 
-  describe('schema-backed decode/encode (registry:, validate:, coerce:, schema:)', () => {
-    const schemaDoc = esm.decode('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  describe('schema-backed decode/encode (registry:, validate:, schema:)', () => {
+    const schemaDoc = esm.decode('%{ Point: %schema{ x: :float, y: :float } }');
     const registry = esm.Schema.compile(schemaDoc, new esm.Registry());
 
     it('decode materializes a registered struct via the registry', () => {
       const value = esm.decode('%Point{x: 1.0, y: 2.0}', { registry });
-      expect(value).to.deep.equal({ x: 1, y: 2 });
+      expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
     });
 
     it('decode throws DXNError with the schema violation reason for a bad struct', () => {
@@ -90,24 +91,18 @@ describe('dextrin (top-level API)', () => {
     it('encode skips validation entirely with validate: false', () => {
       const DXNStruct = esm.DXNStruct;
       const bad = DXNStruct.keyed('Point', [['x', 'not a float']]);
-      expect(esm.encode(bad, { registry, validate: false })).to.equal('%Point{x:"not a float"}');
+      expect(esm.encode(bad, { registry, validate: false })).to.equal('%Point(1){x:"not a float"}');
     });
 
-    it('encode coerces mismatched fields by default (coerce: true)', () => {
-      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }'), new esm.Registry());
+    it('encode never converts a mismatched field to its declared type (DXN.md §4.7)', () => {
+      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ amount: :rational } }'), new esm.Registry());
       const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
-      expect(esm.encode(struct, { registry: rationalRegistry })).to.equal('%P{amount:1/2}');
-    });
-
-    it('encode with coerce: false rejects the same mismatched field', () => {
-      const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }'), new esm.Registry());
-      const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
-      expect(() => esm.encode(struct, { registry: rationalRegistry, coerce: false })).to.throw(esm.DXNError, /does not match/);
+      expect(() => esm.encode(struct, { registry: rationalRegistry })).to.throw(esm.DXNError, /does not match/);
     });
 
     it('encode with schema: validates a nameless value the automatic tree walk cannot reach on its own, promoting it to the named struct', () => {
       const plain = new Map([[Symbol.for('x'), 1.0], [Symbol.for('y'), 2.0]]);
-      expect(esm.encode(plain, { registry, schema: 'Point' })).to.equal('%Point{x:1.0,y:2.0}');
+      expect(esm.encode(plain, { registry, schema: 'Point' })).to.equal('%Point(1){x:1.0,y:2.0}');
     });
 
     it('encode with schema: throws when the named value does not conform', () => {
@@ -117,11 +112,11 @@ describe('dextrin (top-level API)', () => {
 
     it('decodeBinary/encodeBinary accept the same registry/validate/coerce options', () => {
       const value = esm.decodeBinary(esm.encodeBinary(esm.DXNStruct.positional('Point', [1.0, 2.0]), { registry }), { registry });
-      expect(value).to.deep.equal({ x: 1, y: 2 });
+      expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
     });
 
     it('a full decode -> encode round trip through a schema-backed struct is stable', () => {
-      const text = '%Point{x:1.0,y:2.0}';
+      const text = '%Point(1){x:1.0,y:2.0}';
       const decoded = esm.decode(text, { registry });
       expect(esm.encode(decoded, { registry, schema: 'Point' })).to.equal(text);
     });

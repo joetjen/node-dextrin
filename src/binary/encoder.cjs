@@ -25,8 +25,12 @@
  * one recursive function keyed on the JS value's own shape.
  */
 
+const { checkPairs } = require('../map-key.cjs');
+const { unsupported } = require('./errors.cjs');
 const { head, floatItem, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
 const Tags = require('./tags.cjs');
+const Field = require('../schema/field.cjs');
+const { SchemaValidationError } = require('../schema/validator.cjs');
 
 const DXNChar = require('../values/char.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
@@ -94,8 +98,14 @@ function encodeItem(value, opts) {
   if (value instanceof DXNTuple) return tag(Tags.T_TUPLE, arrayOf(value.items.map((v) => encodeItem(v, opts))));
   if (Array.isArray(value)) return tag(Tags.T_ARRAY, arrayOf(value.map((v) => encodeItem(v, opts))));
 
-  if (value instanceof DXNOrderedMap) return tag(Tags.T_ORDERED, mapOf(encodePairs(value.pairs, opts)));
-  if (value instanceof Map) return mapOf(encodePairs(Array.from(value.entries()), opts));
+  if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
+    return tag(Tags.T_ORDERED, mapOf(encodePairs(value.pairs, opts)));
+  }
+  if (value instanceof Map) {
+    checkPairs(value.entries());
+    return mapOf(encodePairs(Array.from(value.entries()), opts));
+  }
 
   if (value instanceof Set) return tag(Tags.T_SET, arrayOf(Array.from(value).map((v) => encodeItem(v, opts))));
   if (value instanceof DXNSortedSet) return tag(Tags.T_SORTED_SET, arrayOf(value.items.map((v) => encodeItem(v, opts))));
@@ -105,6 +115,9 @@ function encodeItem(value, opts) {
   if (value instanceof DXNDate) return tag(Tags.T_DATE, integerItem(epochDays(value)));
   if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(totalMicroseconds(value)));
   if (value instanceof DXNTimestamp) return tag(Tags.T_TIMESTAMP, integerItem(value.epochMicroseconds));
+  // A native `Date` is an instant: it always means a timestamp, with or
+  // without a schema (DXN.md §4.7).
+  if (value instanceof Date) return encodeItem(DXNTimestamp.fromDate(value), opts);
   if (value instanceof DXNDateTime) {
     return tag(Tags.T_DATETIME_OFFSET, arrayOf([integerItem(value.epochMicroseconds), integerItem(BigInt(value.offsetMinutes))]));
   }
@@ -143,8 +156,7 @@ function encodeViaRegistry(value, opts) {
     if (name) {
       const found = registry.fetchStructSchema(name);
       if (found) {
-        const values = found.compiled.fieldValues(/** @type {object} */ (value)).map(([, v]) => v);
-        return encodeStruct(DXNStruct.positional(name, values), opts);
+        return encodeStruct(found.compiled.structOf(/** @type {object} */ (value)), opts);
       }
     }
 
@@ -155,7 +167,7 @@ function encodeViaRegistry(value, opts) {
     }
   }
 
-  throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
+  throw unsupported(describeForError(value));
 }
 
 /**
@@ -168,16 +180,54 @@ function encodePairs(pairs, opts) {
 }
 
 /**
- * `.dxnb` structs are always positional (`DXN.md` §2.1) — a keyed
- * `DXNStruct` (no schema known) falls back to its pairs' own
- * iteration order, the only field order available without a schema.
+ * `.dxnb` structs are always positional (`DXN.md` §2.1), written with
+ * the type name `Name(3)` that `Registry#asWritten` says — the latest
+ * loaded version of its schema, or its own (§2.4, §4.8).
  * @param {DXNStruct} value
- * @param {{[k: string]: unknown}} opts
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  * @returns {Buffer}
  */
 function encodeStruct(value, opts) {
-  const values = value.fields.type === 'positional' ? value.fields.values : value.fields.pairs.map(([, v]) => v);
-  return tag(Tags.T_STRUCT, arrayOf([textItem(value.name), ...values.map((v) => encodeItem(v, opts))]));
+  const written = opts.registry ? opts.registry.asWritten(value) : value;
+  const values = positionalValues(value, opts.registry);
+  const items = [textItem(DXNStruct.typeName(written.name, written.version)), ...values.map((v) => encodeItem(v, opts))];
+  // Extra fields, when there are any, as one trailing tag-215 map in the
+  // order they were written (DXN.md §2.3).
+  if (value.extra.length > 0) {
+    checkPairs(value.extra);
+    items.push(tag(Tags.T_EXTRA, mapOf(encodePairs(value.extra, opts))));
+  }
+  return tag(Tags.T_STRUCT, arrayOf(items));
+}
+
+/**
+ * A struct's field values in the order the wire wants them. A keyed
+ * struct is put in its schema's field order, because a position is what
+ * the wire has; with no schema there is no order to consult, and the
+ * pairs' own order is all there is.
+ *
+ * Every position must be filled, and null is not a stand-in for an
+ * absent field (DXN.md §4.3): a reader refuses null unless the type is
+ * nilable. So an absent field is written as its default where it has
+ * one, and is otherwise refused (`schema/missing-field`).
+ * @param {DXNStruct} value
+ * @param {import('../registry.cjs') | undefined} registry
+ * @returns {unknown[]}
+ */
+function positionalValues(value, registry) {
+  if (value.fields.type === 'positional') return value.fields.values;
+  const found = registry?.fetchStructSchema(value.name);
+  if (!found) return value.fields.pairs.map(([, v]) => v);
+  const named = new Map(value.fields.pairs);
+  return found.compiled.fields.map((field) => {
+    if (named.has(field.name)) return named.get(field.name);
+    if (field.default !== Field.NO_DEFAULT) return field.default;
+    throw new SchemaValidationError(
+      `struct ${JSON.stringify(value.name)} has no ${JSON.stringify(field.name)}, and .dxnb fills every position: ` +
+        'give it a value or a default, or declare it nilable',
+      'schema/missing-field',
+    );
+  });
 }
 
 /** @param {DXNDate} date @returns {bigint} */

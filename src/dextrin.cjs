@@ -47,7 +47,7 @@ const binaryDecoder = require('./binary/decoder.cjs');
  * failure.
  *
  * @param {string} text
- * @param {{trusted?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function decode(text, opts = {}) {
@@ -74,16 +74,14 @@ function decode(text, opts = {}) {
  * specific schema — the one case the automatic walk can't cover on
  * its own, a nameless top-level plain object or unregistered struct.
  *
- * `coerce:` (default `true`) lets a field whose value doesn't already
- * match its declared type be coerced toward it first (a plain
- * `number` becoming a `DXNRational` for a `:rational` field, say) —
- * see `src/schema/coercion.cjs`'s own doc; this has no Elixir
- * `dextrin` equivalent, see that module for why it exists here.
- * Pass `coerce: false` for strict validation with no silent
- * conversion.
+ * Nothing is converted to make a value match its declared type
+ * (`DXN.md` §4.7): a host value always means the same DXN type, schema
+ * or not, so a `number` for a `:rational` field is refused rather than
+ * turned into a `DXNRational`. Use the `DXN*` classes to say which type
+ * a value is.
  *
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: import('./registry.cjs'), validate?: boolean, coerce?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {
@@ -102,7 +100,7 @@ function encode(value, opts = {}) {
  * byte) or a schema violation.
  *
  * @param {Uint8Array} bytes
- * @param {{trusted?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
  * @returns {unknown}
  */
 function decodeBinary(bytes, opts = {}) {
@@ -115,12 +113,12 @@ function decodeBinary(bytes, opts = {}) {
 
 /**
  * Encodes a value to `.dxnb` binary, returning a `Buffer`. Same
- * `registry:`/`validate:`/`coerce:`/`schema:` opts as `encode`. Throws
+ * `registry:`/`validate:`/`schema:` opts as `encode`. Throws
  * `DXNError` for a value with no DXN representation, or that fails
  * schema validation.
  *
  * @param {unknown} value
- * @param {{registry?: import('./registry.cjs'), validate?: boolean, coerce?: boolean, schema?: string, [k: string]: unknown}} [opts]
+ * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string, [k: string]: unknown}} [opts]
  * @returns {Buffer}
  */
 function encodeBinary(value, opts = {}) {
@@ -136,27 +134,27 @@ function encodeBinary(value, opts = {}) {
  * Two independent checks, both applied when requested: the automatic
  * whole-tree walk (every named struct anywhere in `value`, driven by
  * whether a schema is registered for its name) and, only if
- * `schema:` was given, a check of the (possibly already-coerced)
- * result against that one named schema. Both may return a
- * *transformed* value when `coerce:` (default `true`) lets a
- * mismatched field be coerced toward its declared type — see
- * `encode`'s own doc.
+ * `schema:` was given, a check of the result against that one named
+ * schema.
  * @param {unknown} value
- * @param {{registry?: import('./registry.cjs'), validate?: boolean, coerce?: boolean, schema?: string}} opts
+ * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} opts
  * @returns {unknown}
  */
 function maybeValidateEncode(value, opts) {
   const registry = opts.registry ?? new Registry();
-  const coerceOpts = { coerce: opts.coerce ?? true };
 
   let result = value;
   if (opts.validate ?? true) {
-    result = Schema.validateEncodeTree(result, registry, coerceOpts);
+    result = Schema.validateEncodeTree(result, registry);
   }
   if (opts.schema !== undefined) {
-    result = Schema.validateEncode(result, registry, opts.schema, coerceOpts);
+    result = Schema.validateEncode(result, registry, opts.schema);
   }
   return result;
 }
 
-module.exports = { version, decode, encode, decodeBinary, encodeBinary, DXNError, Registry, Schema, Std, FileResolver, ...values };
+const { canonical } = require('./canonical.cjs');
+const { answer } = require('./conformance.cjs');
+const Document = require('./document.cjs');
+
+module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };

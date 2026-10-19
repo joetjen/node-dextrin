@@ -13,7 +13,9 @@
  * every built-in DXN-representable shape always succeeds.
  */
 
+const { checkPairs } = require('../map-key.cjs');
 const { encodeString, encodeChar } = require('./escapes.cjs');
+const { unsupported } = require('../binary/errors.cjs');
 const { tokenize } = require('./lexer.cjs');
 const temporal = require('./temporal.cjs');
 
@@ -61,7 +63,13 @@ function print(value, opts = {}) {
   if (value instanceof DXNDecimal) return `${value.toString()}M`;
   if (value instanceof DXNRational) return `${value.numerator}/${value.denominator}`;
   if (value instanceof DXNChar) return '?' + printCharBody(value.codepoint);
-  if (value instanceof DXNSymbol) return value.name;
+  // A symbol is an identifier (DXN.md §1.1); a name that is not one has
+  // no text form, and writing it verbatim would read back as something
+  // else, or as nothing.
+  if (value instanceof DXNSymbol) {
+    if (isBareIdentifier(value.name)) return value.name;
+    throw unsupported(`a symbol named ${JSON.stringify(value.name)}, which is not an identifier`);
+  }
   if (value instanceof DXNKeyword) return ':' + keywordName(value.name);
   if (value instanceof DXNBytes) return tagForm('bytes', quoteString(Buffer.from(value.data).toString('base64')), opts);
 
@@ -74,14 +82,23 @@ function print(value, opts = {}) {
     return tagForm('sorted-set', '@{' + value.items.map((v) => print(v, opts)).join(' ') + '}', opts);
   }
 
-  if (value instanceof DXNOrderedMap) return tagForm('ordered', '%{' + printEntries(value.pairs, opts) + '}', opts);
-  if (value instanceof Map) return '%{' + printEntries(Array.from(value.entries()), opts) + '}';
+  if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
+    return tagForm('ordered', '%{' + printEntries(value.pairs, opts) + '}', opts);
+  }
+  if (value instanceof Map) {
+    checkPairs(value.entries());
+    return '%{' + printEntries(Array.from(value.entries()), opts) + '}';
+  }
 
   if (value instanceof DXNStruct) return printStruct(value, opts);
 
   if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
   if (value instanceof DXNTime) return `~T[${temporal.formatTime(value)}]`;
   if (value instanceof DXNTimestamp) return `~U[${temporal.formatInstant(value)}]`;
+  // A native `Date` is an instant: it always means a timestamp, with or
+  // without a schema (DXN.md §4.7).
+  if (value instanceof Date) return print(DXNTimestamp.fromDate(value), opts);
   if (value instanceof DXNDateTime) return tagForm('datetime', quoteString(temporal.formatOffsetDateTime(value)), opts);
   if (value instanceof DXNDuration) return tagForm('duration', quoteString(temporal.formatDuration(value)), opts);
 
@@ -114,7 +131,7 @@ function printViaRegistry(value, opts) {
     const name = registry.fetchSchemaNameForModule(value.constructor);
     if (name) {
       const found = registry.fetchStructSchema(name);
-      if (found) return printStruct(DXNStruct.keyed(name, found.compiled.fieldValues(/** @type {any} */ (value))), opts);
+      if (found) return printStruct(found.compiled.structOf(/** @type {object} */ (value)), opts);
     }
 
     const tagEncoder = registry.fetchTagEncoder(value.constructor);
@@ -124,7 +141,7 @@ function printViaRegistry(value, opts) {
     }
   }
 
-  throw new TypeError(`cannot encode value with no DXN representation: ${describeForError(value)}`);
+  throw unsupported(describeForError(value));
 }
 
 /** @param {number} n */
@@ -240,14 +257,42 @@ function printKeywordEntry(name, value, opts) {
  * @param {{[k: string]: unknown}} opts
  */
 function printStruct(struct, opts) {
+  const head = writtenHead(struct, opts);
+  const extra = struct.extra.map(([key, value]) => printExtraEntry(key, value, opts));
   if (struct.fields.type === 'keyed') {
-    const entries = struct.fields.pairs
-      .map(([name, value]) => printKeywordEntry(name, value, opts))
-      .join(',');
-    return `%${struct.name}{${entries}}`;
+    const entries = struct.fields.pairs.map(([name, value]) => printKeywordEntry(name, value, opts));
+    return `${head}{${[...entries, ...extra].join(',')}}`;
   }
-  const items = struct.fields.values.map((v) => print(v, opts)).join(',');
-  return `%${struct.name}[${items}]`;
+  // A positional struct's items, then its extra fields as entries
+  // (DXN.md §1.2).
+  const items = struct.fields.values.map((v) => print(v, opts));
+  return `${head}[${[...items, ...extra].join(',')}]`;
+}
+
+/**
+ * One extra field as an entry: a name is written like a field name, any
+ * other map key as itself (`DXN.md` §1.2).
+ * @param {unknown} key
+ * @param {unknown} value
+ * @param {{[k: string]: unknown}} opts
+ * @returns {string}
+ */
+function printExtraEntry(key, value, opts) {
+  if (typeof key === 'string') return printKeywordEntry(key, value, opts);
+  return `${print(key, opts)}=>${print(value, opts)}`;
+}
+
+/**
+ * How `struct` opens when it is written: `%Name(3)` with the latest
+ * loaded version of its schema, or with its own when there is no schema
+ * (`DXN.md` §4.8). The formatter writes the same head.
+ * @param {DXNStruct} struct
+ * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @returns {string}
+ */
+function writtenHead(struct, opts) {
+  const written = opts.registry ? opts.registry.asWritten(struct) : struct;
+  return DXNStruct.head(written.name, written.version);
 }
 
 /** @param {unknown} value */
@@ -259,4 +304,4 @@ function describeForError(value) {
   }
 }
 
-module.exports = { print, isBareIdentifier, quoteString, keywordEntryName };
+module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead };

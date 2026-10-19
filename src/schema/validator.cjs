@@ -2,7 +2,7 @@
 
 /**
  * @fileoverview Checks a value's fields against a `Compiled` schema
- * (required/closed/forbidden/refine) — shared by decode (`materialize`,
+ * (required fields and their types) — shared by decode (`materialize`,
  * which also produces a materialized result) and encode-time
  * validation (`validateForEncode`/`validateTreeForEncode`), mirroring
  * `Dextrin.Schema.Validator`. Both directions reuse the exact same
@@ -11,25 +11,19 @@
  * uses, via `wrapAndCheck`, so there's one type-checking
  * implementation, not two that could drift.
  *
- * **One genuine difference from `Dextrin.Schema.Validator`**: encode
- * here can *transform* `value`, not just answer ok/error —
- * `resolveFields`'s `coerce` option (see `coercion.cjs`) may replace a
- * field's value with its coerced form (a plain `number` becoming a
- * `DXNRational` for a `:rational` field, say), and that coerced value
- * has to actually reach the printer/binary encoder, not just pass a
- * check and be discarded. `wrapAndCheck` therefore rebuilds every
- * container it walks from its (possibly-coerced) children rather than
- * returning `value` unchanged, the way `Dextrin.Schema.Validator`'s
- * own `wrap_and_check/2` does today (it has nothing to transform).
+ * **Nothing is converted to make a value match** (`DXN.md` §4.7): a
+ * schema accepts or rejects a value, and never changes what it means.
+ * `wrapAndCheck` rebuilds every container it walks from its children,
+ * so a checked struct reaches the printer/binary encoder wrapped.
  *
  * Enforcement is decode-time and fail-fast, with no lenient escape
  * hatch to get the materialized value anyway — a violation is always
  * a thrown error.
  */
 
+const DXNMap = require('../values/map.cjs');
 const Field = require('./field.cjs');
 const TypeExpr = require('./type-expr.cjs');
-const Coercion = require('./coercion.cjs');
 const Validated = require('./validated.cjs');
 const DXNList = require('../values/list.cjs');
 const DXNTuple = require('../values/tuple.cjs');
@@ -41,34 +35,42 @@ const DXNKeyword = require('../values/keyword.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
 
 class SchemaValidationError extends Error {
-  /** @param {string} message */
-  constructor(message) {
+  /**
+   * @param {string} message
+   * @param {string | null} [category] the violation's `DXN.md` §5 category.
+   */
+  constructor(message, category = null) {
     super(message);
     this.name = 'SchemaValidationError';
+    /** Which violation this is (`schema/missing-field`, ...), passed on unchanged by every channel. */
+    this.category = category;
   }
 }
 
+/** What `resolveField` answers for an optional field that was not given and has no default. */
+const ABSENT = Symbol('absent');
+
 /**
- * Validates and materializes `fields` against `compiled`, using
- * `materializer` if given. On success, the result is wrapped in a
- * `Validated` (name: `compiled.name`) — internal bookkeeping so an
- * *outer* schema's `{form: 'reference', name}` field can verify this
- * value's origin even after materialization; callers that aren't
- * another schema check must call `Validated.strip` on the final result.
+ * `fields` checked against `compiled`: every declared field, in the
+ * schema's own order, as `[name, value]` pairs. A required field that is
+ * missing, or a value that does not match its declared type, is an
+ * error; an optional field that is missing takes its default, or stays
+ * absent when it has none — DXN tells an absent field from one written
+ * `nil`. What is built from the result is `schema/reader.cjs`'s job.
  * @param {import('./compiled.cjs')} compiled
  * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
- * @param {((resolved: {[k: string]: unknown}) => unknown) | null} materializer
  * @param {import('../registry.cjs')} registry
- * @returns {Validated}
+ * @returns {Array<[string, unknown]>}
  */
-function materialize(compiled, fields, materializer, registry) {
+function resolve(compiled, fields, registry) {
   const given = toNameMap(compiled, fields);
-  checkForbidden(compiled, given);
-  checkClosed(compiled, given);
-  const resolved = resolveFields(compiled, given, registry, { coerce: false });
-  runRefineFn(compiled, resolved);
-  const result = materializer ? materializer(resolved) : Object.fromEntries(Object.entries(resolved));
-  return new Validated(/** @type {string} */ (compiled.name), result);
+  /** @type {Array<[string, unknown]>} */
+  const pairs = [];
+  for (const field of compiled.fields) {
+    const value = resolveField(field, given, registry, {});
+    if (value !== ABSENT) pairs.push([field.name, value]);
+  }
+  return pairs;
 }
 
 /**
@@ -80,37 +82,26 @@ function toNameMap(compiled, fields) {
   if (fields.type === 'keyed') return Object.fromEntries(fields.pairs);
   const names = compiled.fieldNames();
   if (names.length !== fields.values.length) {
-    throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`);
+    throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`, 'schema/field-count');
   }
   return Object.fromEntries(names.map((name, i) => [name, fields.values[i]]));
-}
-
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} given */
-function checkForbidden(compiled, given) {
-  const hit = compiled.forbidden.find((name) => Object.prototype.hasOwnProperty.call(given, name));
-  if (hit) throw new SchemaValidationError(`field ${JSON.stringify(hit)} is forbidden`);
-}
-
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} given */
-function checkClosed(compiled, given) {
-  if (!compiled.closed) return;
-  const allowed = new Set(compiled.fieldNames());
-  const extra = Object.keys(given).find((name) => !allowed.has(name));
-  if (extra) throw new SchemaValidationError(`unknown field ${JSON.stringify(extra)} (schema is closed)`);
 }
 
 /**
  * @param {import('./compiled.cjs')} compiled
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {{[k: string]: unknown}}
  */
 function resolveFields(compiled, given, registry, opts) {
   /** @type {{[k: string]: unknown}} */
   const resolved = {};
   for (const field of compiled.fields) {
-    resolved[field.name] = resolveField(field, given, registry, opts);
+    // An absent optional field stays absent: null is not a stand-in for
+    // it (DXN.md §4.3), and each writer decides what absent means there.
+    const value = resolveField(field, given, registry, opts);
+    if (value !== ABSENT) resolved[field.name] = value;
   }
   return resolved;
 }
@@ -119,16 +110,16 @@ function resolveFields(compiled, given, registry, opts) {
  * @param {import('./field.cjs')} field
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
- * @returns {unknown}
+ * @param {{[k: string]: unknown}} opts
+ * @returns {unknown} the checked value, or `ABSENT`.
  */
 function resolveField(field, given, registry, opts) {
   if (Object.prototype.hasOwnProperty.call(given, field.name)) {
     return checkType(field.name, given[field.name], field.type, registry, opts);
   }
   if (field.default !== Field.NO_DEFAULT) return field.default;
-  if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`);
-  return null;
+  if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`, 'schema/missing-field');
+  return ABSENT;
 }
 
 /**
@@ -136,7 +127,7 @@ function resolveField(field, given, registry, opts) {
  * @param {unknown} value
  * @param {import('./type-expr.cjs').TypeExpr} type
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function checkType(name, value, type, registry, opts) {
@@ -148,21 +139,7 @@ function checkType(name, value, type, registry, opts) {
     return Validated.strip(value);
   }
 
-  if (opts.coerce) {
-    const coerced = Coercion.tryCoerce(type, value);
-    if (coerced !== undefined && TypeExpr.matches(type, coerced, registry)) {
-      return Validated.strip(coerced);
-    }
-  }
-
-  throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`);
-}
-
-/** @param {import('./compiled.cjs')} compiled @param {{[k: string]: unknown}} resolved */
-function runRefineFn(compiled, resolved) {
-  if (!compiled.refineFn) return;
-  const result = compiled.refineFn(resolved);
-  if (result !== true) throw new SchemaValidationError(typeof result === 'string' ? result : 'refine-fn rejected this value');
+  throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`, 'schema/type-mismatch');
 }
 
 // ---- encode-time validation -------------------------------------------------
@@ -170,10 +147,8 @@ function runRefineFn(compiled, resolved) {
 // The mirror image of `materialize`, for data on its way *out*:
 // `value` here is ordinary JS data about to be encoded — a
 // `DXNStruct` (the one shape that round-trips to `%Name{...}` wire
-// syntax), a plain `Map`, or a real application class instance — and
-// (unlike Elixir's equivalent) *may* come back transformed if
-// `opts.coerce` lets a field's value be coerced toward its declared
-// type; see this module's own doc for why.
+// syntax), a plain `Map`, or a real application class instance; it is
+// checked, never converted.
 //
 // The one structural difference from decode: decode's nested structs
 // arrive *already* `Validated`-wrapped, bottom-up, as a natural
@@ -185,16 +160,15 @@ function runRefineFn(compiled, resolved) {
 
 /**
  * Checks `value` — ordinary JS data about to be encoded — against
- * `compiled`. Returns the checked (and, if `opts.coerce`, possibly
- * coerced) value, `Validated`-wrapped.
+ * `compiled`. Returns the checked value, `Validated`-wrapped.
  * @param {import('./compiled.cjs')} compiled
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {Validated}
  */
 function validateForEncode(compiled, value, registry, opts = {}) {
-  return checkCompiled(compiled, value, registry, { coerce: opts.coerce ?? true });
+  return checkCompiled(compiled, value, registry, opts);
 }
 
 /**
@@ -202,37 +176,41 @@ function validateForEncode(compiled, value, registry, opts = {}) {
  * application class instance anywhere in the tree and checks each one
  * against its own schema, if the registry has one — regardless of
  * what any enclosing field's declared type is, recursing fully into
- * whatever it finds. Returns the (possibly-coerced) tree.
+ * whatever it finds. Returns the checked tree.
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateTreeForEncode(value, registry, opts = {}) {
-  return wrapAndCheck(value, registry, { coerce: opts.coerce ?? true });
+  return wrapAndCheck(value, registry, opts);
 }
 
 /**
  * @param {import('./compiled.cjs')} compiled
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {Validated}
  */
 function checkCompiled(compiled, value, registry, opts) {
+  // An extra field never shadows a declared one (DXN.md §4.7), on the
+  // way out as on the way in.
+  if (value instanceof DXNStruct) {
+    const declared = new Set(compiled.fieldNames());
+    const shadowing = value.extra.find(([key]) => typeof key === 'string' && declared.has(key));
+    if (shadowing) throw new SchemaValidationError(`extra field ${JSON.stringify(shadowing[0])} shadows a declared field`, 'schema/shadowed-field');
+  }
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
-  checkForbidden(compiled, wrappedGiven);
-  checkClosed(compiled, wrappedGiven);
   const resolved = resolveFields(compiled, wrappedGiven, registry, opts);
-  runRefineFn(compiled, resolved);
   return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved));
 }
 
 /**
  * Rebuilds `value` in its *original* shape (a `DXNStruct`, or a real
- * application class instance) with `resolved`'s checked — and, if
- * `opts.coerce` applied, coerced — field values written back in.
+ * application class instance) with `resolved`'s checked field values
+ * written back in.
  * Without this, `checkCompiled` would hand the printer/binary encoder
  * a bare `{[name]: value}` field map instead of something it actually
  * knows how to encode (a plain object has no name of its own to
@@ -255,9 +233,9 @@ function checkCompiled(compiled, value, registry, opts) {
 function rebuildChecked(value, compiled, resolved) {
   if (value instanceof DXNStruct) {
     if (value.fields.type === 'keyed') {
-      return DXNStruct.keyed(value.name, value.fields.pairs.map(([k]) => [k, resolved[k]]));
+      return value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k]) => [k, resolved[k]]) });
     }
-    return DXNStruct.positional(value.name, compiled.fieldNames().map((name) => resolved[name]));
+    return value.withFields({ type: 'positional', values: compiled.fieldNames().map((name) => resolved[name]) });
   }
   if (value !== null && typeof value === 'object' && !(value instanceof Map) && value.constructor && value.constructor !== Object) {
     const rebuilt = Object.create(Object.getPrototypeOf(value));
@@ -265,7 +243,10 @@ function rebuildChecked(value, compiled, resolved) {
     for (const [name, v] of Object.entries(resolved)) rebuilt[name] = v;
     return rebuilt;
   }
-  return DXNStruct.keyed(/** @type {string} */ (compiled.name), compiled.fieldNames().map((name) => [name, resolved[name]]));
+  return DXNStruct.keyed(
+    /** @type {string} */ (compiled.name),
+    compiled.fieldNames().filter((name) => Object.prototype.hasOwnProperty.call(resolved, name)).map((name) => [name, resolved[name]]),
+  );
 }
 
 /**
@@ -279,15 +260,16 @@ function toNameMapForEncode(compiled, value) {
     if (fields.type === 'keyed') return Object.fromEntries(fields.pairs);
     const names = compiled.fieldNames();
     if (names.length !== fields.values.length) {
-      throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`);
+      throw new SchemaValidationError(`expected ${names.length} positional field(s), got ${fields.values.length}`, 'schema/field-count');
     }
     return Object.fromEntries(names.map((name, i) => [name, fields.values[i]]));
   }
   if (value instanceof Map) return Object.fromEntries(Array.from(value.entries(), stringifyEntry));
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value));
+    // A property held as undefined is one the object does not have.
+    return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   }
-  throw new SchemaValidationError(`expected a map/struct/object to validate against a schema, got ${String(value)}`);
+  throw new SchemaValidationError(`expected a map/struct/object to validate against a schema, got ${String(value)}`, 'schema/type-mismatch');
 }
 
 /**
@@ -310,13 +292,13 @@ function stringifyEntry([k, v]) {
  * `wrapAndCheck` is the recursive core: for any value that's a named
  * struct with a registered schema, check it (`checkCompiled`) and
  * wrap the result in `Validated`; otherwise recurse into whatever
- * container it is, reconstructing it from the (possibly-coerced,
- * possibly-wrapped) results so a wrapped/coerced grandchild survives
+ * container it is, reconstructing it from the (possibly-wrapped)
+ * results so a wrapped grandchild survives
  * all the way up to whichever ancestor's field type actually needs to
  * see it.
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function wrapAndCheck(value, registry, opts) {
@@ -325,7 +307,10 @@ function wrapAndCheck(value, registry, opts) {
     try {
       return checkCompiled(found.compiled, value, registry, opts);
     } catch (err) {
-      throw new SchemaValidationError(`struct ${JSON.stringify(found.name)} violates its schema: ${errorMessage(err)}`);
+      throw new SchemaValidationError(
+        `struct ${JSON.stringify(found.name)} violates its schema: ${errorMessage(err)}`,
+        err instanceof SchemaValidationError ? err.category : null,
+      );
     }
   }
   return wrapChildren(value, registry, opts);
@@ -353,7 +338,7 @@ function schemaNameFor(value, registry) {
 /**
  * @param {{[k: string]: unknown}} given
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {{[k: string]: unknown}}
  */
 function wrapGiven(given, registry, opts) {
@@ -363,7 +348,7 @@ function wrapGiven(given, registry, opts) {
 /**
  * @param {unknown} value
  * @param {import('../registry.cjs')} registry
- * @param {{coerce: boolean}} opts
+ * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
 function wrapChildren(value, registry, opts) {
@@ -377,12 +362,12 @@ function wrapChildren(value, registry, opts) {
   if (value instanceof DXNSortedSet) return DXNSortedSet.fromArray(value.items.map((v) => wrapAndCheck(v, registry, opts)));
   if (value instanceof DXNStruct) {
     return value.fields.type === 'keyed'
-      ? DXNStruct.keyed(value.name, value.fields.pairs.map(([k, v]) => [k, wrapAndCheck(v, registry, opts)]))
-      : DXNStruct.positional(value.name, value.fields.values.map((v) => wrapAndCheck(v, registry, opts)));
+      ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, wrapAndCheck(v, registry, opts)]) })
+      : value.withFields({ type: 'positional', values: value.fields.values.map((v) => wrapAndCheck(v, registry, opts)) });
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, wrapAndCheck(value.value, registry, opts));
   if (value instanceof Map) {
-    return new Map(Array.from(value.entries(), ([k, v]) => [k, wrapAndCheck(v, registry, opts)]));
+    return new DXNMap(Array.from(value.entries(), ([k, v]) => [k, wrapAndCheck(v, registry, opts)]));
   }
   // Every other DXN* leaf/composite wrapper (DXNChar, DXNSymbol,
   // DXNKeyword, DXNDecimal, DXNRational, DXNDate, DXNTime,
@@ -420,4 +405,4 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { materialize, validateForEncode, validateTreeForEncode, SchemaValidationError };
+module.exports = { resolve, validateForEncode, validateTreeForEncode, SchemaValidationError };

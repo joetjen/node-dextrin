@@ -16,6 +16,7 @@
  * forward.
  */
 
+const { checkPairs } = require('../map-key.cjs');
 const Printer = require('./printer.cjs');
 
 const DXNList = require('../values/list.cjs');
@@ -58,16 +59,22 @@ function render(value, depth, opts) {
     return value.length === 0 ? '@array[]' : `@array${bracketed('[', value, ']', depth, opts)}`;
   }
   if (value instanceof DXNOrderedMap) {
+    checkPairs(value.pairs);
     return value.pairs.length === 0 ? '@ordered %{}' : `@ordered ${bracketedEntries('%{', value.pairs, '}', depth, opts)}`;
   }
   if (value instanceof Map && value.size > 0) {
+    checkPairs(value.entries());
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
-  if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length > 0) {
-    return `%${value.name}${bracketedKeywordEntries('{', value.fields.pairs, '}', depth, opts)}`;
+  if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length + value.extra.length > 0) {
+    const lines = value.fields.pairs.map(([name, field]) => (/** @type {number} */ d) => renderKeywordEntry(name, field, d, opts));
+    return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
   }
-  if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length > 0) {
-    return `%${value.name}${bracketed('[', value.fields.values, ']', depth, opts)}`;
+  if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length + value.extra.length > 0) {
+    // A positional struct's items, then its extra fields as entries, one
+    // per line like the items (DXN.md §1.2).
+    const lines = value.fields.values.map((item) => (/** @type {number} */ d) => render(item, d, opts));
+    return `${Printer.writtenHead(value, opts)}${bracketedLines('[', [...lines, ...extraLines(value, opts)], ']', depth, opts)}`;
   }
 
   // A registered application class instance — rebuilt as the
@@ -81,7 +88,7 @@ function render(value, depth, opts) {
   if (registry && value !== null && typeof value === 'object' && !(value instanceof DXNStruct)) {
     const name = registry.fetchSchemaNameForModule(value.constructor);
     const found = name && registry.fetchStructSchema(name);
-    if (found) return render(DXNStruct.keyed(name, found.compiled.fieldValues(value)), depth, opts);
+    if (found) return render(found.compiled.structOf(value), depth, opts);
   }
 
   // Every scalar, every empty collection, and any struct-shaped
@@ -93,6 +100,35 @@ function render(value, depth, opts) {
 /** @param {{indent?: number}} opts */
 function indentUnit(opts) {
   return ' '.repeat(opts.indent ?? DEFAULT_INDENT);
+}
+
+/**
+ * A struct's extra fields as lines to render: a name like a field name,
+ * any other map key as itself.
+ * @param {DXNStruct} value
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @returns {Array<(depth: number) => string>}
+ */
+function extraLines(value, opts) {
+  return value.extra.map(([key, field]) =>
+    typeof key === 'string'
+      ? (/** @type {number} */ d) => renderKeywordEntry(key, field, d, opts)
+      : (/** @type {number} */ d) => renderEntry(key, field, d, opts)
+  );
+}
+
+/**
+ * @param {string} open
+ * @param {Array<(depth: number) => string>} lines each renders itself at a depth.
+ * @param {string} close
+ * @param {number} depth
+ * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ */
+function bracketedLines(open, lines, close, depth, opts) {
+  const innerDepth = depth + 1;
+  const unit = indentUnit(opts);
+  const body = lines.map((line) => unit.repeat(innerDepth) + line(innerDepth)).join('\n');
+  return `${open}\n${body}\n${unit.repeat(depth)}${close}`;
 }
 
 /**

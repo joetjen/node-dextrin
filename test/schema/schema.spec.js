@@ -5,7 +5,7 @@ import { parse } from '../../src/text/parser.cjs';
 import DXNStruct from '../../src/values/struct.js';
 
 describe('schema.cjs (top-level API)', () => {
-  const doc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer } } }');
+  const doc = parse('%{ P: %schema{ x: :integer } }');
 
   describe('compile', () => {
     it('is the same as schema/compiler.cjs\'s compile', () => {
@@ -47,12 +47,11 @@ describe('schema.cjs (top-level API)', () => {
       expect(Schema.validateEncode(struct, registry, 'P')).to.deep.equal(struct);
     });
 
-    it('coerces by default', () => {
-      const rationalDoc = parse('%{ P: %schema{ fields: @ordered %{ amount: :rational } } }');
+    it('never converts a mismatched field to its declared type (DXN.md §4.7)', () => {
+      const rationalDoc = parse('%{ P: %schema{ amount: :rational } }');
       const registry = Schema.compile(rationalDoc, new Registry());
       const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
-      const result = Schema.validateEncode(struct, registry, 'P');
-      expect(result.fields.pairs[0][1].toNumber()).to.equal(0.5);
+      expect(() => Schema.validateEncode(struct, registry, 'P')).to.throw(/does not match/);
     });
 
     it('throws when no schema is registered for schemaName', () => {
@@ -77,7 +76,7 @@ describe('schema.cjs (top-level API)', () => {
     it('is the same as schema/provider.cjs\'s registerProvider', () => {
       class Point {}
       const registry = Schema.registerProvider(new Registry(), {
-        dxnSchema: () => '%{ Point: %schema{ fields: @ordered %{ x: :integer } } }',
+        dxnSchema: () => '%{ Point: %schema{ x: :integer } }',
         dxnSchemaName: () => 'Point',
         dxnClass: () => Point
       });

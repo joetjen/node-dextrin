@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * @fileoverview `dextrin` CLI — one executable, four subcommands
- * (`decode`, `encode`, `format`, `validate`), the JS analog of
+ * @fileoverview `dextrin` CLI — one executable, six subcommands
+ * (`decode`, `encode`, `format`, `validate`, `compat`, `conformance`), the JS analog of
  * `dextrin`'s `mix dextrin.*` tasks. One bin with subcommands rather
  * than a separate script per task, matching how Node CLIs are
  * conventionally shaped (`git <subcommand>`), not a mechanical
@@ -24,9 +24,10 @@
  * yet (decode-only for now, see `src/binary/encoder.cjs`'s own note).
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
-import { decode, encode, decodeBinary, encodeBinary, DXNError, Schema, Registry } from '../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document } from '../src/dextrin.js';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -37,6 +38,8 @@ Commands:
                                                 Reformat a .dxn file
   validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                 Validate a .dxn/.dxnb file, optionally against a schema
+  compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+  conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
 
@@ -52,6 +55,10 @@ function main(argv) {
       return run(() => cmdFormat(rest));
     case 'validate':
       return run(() => cmdValidate(rest));
+    case 'compat':
+      return run(() => cmdCompat(rest));
+    case 'conformance':
+      return run(() => cmdConformance(rest));
     default:
       console.log(USAGE);
       process.exitCode = command === undefined ? 0 : 1;
@@ -159,9 +166,11 @@ function cmdFormat(argv) {
   if (mode !== 'pretty' && mode !== 'condense') {
     throw new Error(`unrecognized --mode ${JSON.stringify(mode)} — expected "pretty" or "condense"`);
   }
-  const source = readFileSync(path, 'utf8');
-  const value = decode(source);
-  const text = encode(value, { pretty: mode === 'pretty' });
+  // Pretty lays the document out and keeps its comments; condensed
+  // output is one line, which no comment fits on, so it reprints the
+  // value.
+  const doc = Document.parse(readFileSync(path, 'utf8'));
+  const text = mode === 'pretty' ? Document.format(doc) : encode(Document.toValue(doc));
   if (flags['in-place']) writeFileSync(path, `${text}\n`);
   else console.log(text);
 }
@@ -221,3 +230,67 @@ function detectFormat(path, forced) {
 }
 
 main(process.argv.slice(2));
+
+/**
+ * `dextrin compat OLD NEW` — the version discipline check
+ * (`Schema.compat`, DXN.md §4.8), for CI against the previous release's
+ * schema files. Lists what the latest versions' materializers have to
+ * upgrade; a version whose content changed without a new version, or a
+ * version that went down, is reported and exits non-zero.
+ * @param {string[]} args
+ */
+function cmdCompat(args) {
+  if (args.length !== 2) throw new Error('usage: dextrin compat OLD NEW (each a .dxns file or a directory)');
+  const { problems, upgrades } = Schema.compat(loadedSchemas(args[0]), loadedSchemas(args[1]));
+  for (const { schema, from, to, added, removed, changed } of upgrades) {
+    const changes = Object.entries({ added, removed, changed })
+      .filter(([, fields]) => fields.length > 0)
+      .map(([what, fields]) => `${what} ${fields.join(', ')}`)
+      .join('; ');
+    console.log(`${schema} ${from} -> ${to}: ${changes || 'no field changes'}`);
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      problems
+        .map((p) => (p.problem === 'version-went-down' ? `${p.schema} went down from version ${p.from} to ${p.to}` : `${p.schema} version ${p.version} changed without a new version`))
+        .join('\n'),
+    );
+  }
+  console.log('OK: no version discipline problems');
+}
+
+/**
+ * Every `.dxns` document under `path` (or `path` itself, a file),
+ * compiled into one registry -- so several versions of a schema, each
+ * in its own document, sit side by side.
+ * @param {string} path
+ */
+function loadedSchemas(path) {
+  const files = statSync(path).isDirectory()
+    ? /** @type {string[]} */ (readdirSync(path, { recursive: true }))
+        .filter((file) => file.endsWith('.dxns'))
+        .sort()
+        .map((file) => join(path, file))
+    : [path];
+  return files.reduce((registry, file) => {
+    try {
+      return Schema.compile(decode(readFileSync(file, 'utf8')), registry);
+    } catch (err) {
+      throw new Error(`${file}: ${describeError(err)}`);
+    }
+  }, new Registry());
+}
+
+/**
+ * `dextrin conformance REQUEST ANSWER` — this implementation's adapter
+ * for the Dextrin Conformance Suite: reads the JSON request, answers every
+ * case, writes the JSON answer. It fails only when the adapter itself
+ * cannot work, never because a case did: a failed case is an answer, and
+ * the suite judges it.
+ * @param {string[]} args
+ */
+function cmdConformance(args) {
+  if (args.length !== 2) throw new Error('usage: dextrin conformance REQUEST ANSWER');
+  const [request, response] = args;
+  writeFileSync(response, JSON.stringify(answer(JSON.parse(readFileSync(request, 'utf8')))));
+}

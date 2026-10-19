@@ -126,11 +126,15 @@ function matches(type, value, registry = null) {
 function matchesReference(name, value, registry) {
   if (value instanceof DXNStruct) return value.name === name;
   if (value instanceof Validated) return value.name === name;
+  // A struct is matched only by a struct (DXN.md §4.7): past a struct or
+  // checked value of the right name, only the class registered for
+  // `name` is one. A `Map`, or any other value, is not a struct, however
+  // much it looks like one -- nothing is converted to make it match.
   if (registry && value !== null && typeof value === 'object' && value.constructor) {
     const registered = registry.fetchStructModule(name);
     if (registered) return value.constructor === registered;
   }
-  return true;
+  return false;
 }
 
 // ---- primitives (DXN.md §1.3's 28 non-header types) ------------------------
@@ -177,7 +181,8 @@ function primitiveMatches(name, value) {
     case 'time':
       return value instanceof DXNTime;
     case 'timestamp':
-      return value instanceof DXNTimestamp;
+      // A native `Date` is an instant, so it always means a timestamp.
+      return value instanceof DXNTimestamp || value instanceof Date;
     case 'datetime':
       return value instanceof DXNDateTime;
     case 'duration':

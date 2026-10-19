@@ -5,26 +5,21 @@ import Registry from '../../src/registry.js';
 
 describe('schema/compiler', () => {
   it('compiles a %schema{} entry into a registered Compiled schema', () => {
-    const doc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+    const doc = parse('%{ Point: %schema{ x: :float, y: :float } }');
     const registry = compile(doc, new Registry());
     const found = registry.fetchStructSchema('Point');
     expect(found?.compiled.name).to.equal('Point');
     expect(found?.compiled.fieldNames()).to.deep.equal(['x', 'y']);
   });
 
-  it('preserves field order from the @ordered fields map', () => {
-    const doc = parse('%{ P: %schema{ fields: @ordered %{ c: :integer, a: :integer, b: :integer } } }');
+  it('preserves field order from the schema body', () => {
+    const doc = parse('%{ P: %schema{ c: :integer, a: :integer, b: :integer } }');
     const registry = compile(doc, new Registry());
     expect(registry.fetchStructSchema('P')?.compiled.fieldNames()).to.deep.equal(['c', 'a', 'b']);
   });
 
-  it('rejects fields: that is not an @ordered map', () => {
-    const doc = parse('%{ P: %schema{ fields: %{ x: :integer } } }');
-    expect(() => compile(doc, new Registry())).to.throw(SchemaCompileError, /@ordered/);
-  });
-
   it('a "?"-suffixed field key is optional; every other key is required', () => {
-    const doc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer, y?: :integer } } }');
+    const doc = parse('%{ P: %schema{ x: :integer, y?: :integer } }');
     const registry = compile(doc, new Registry());
     const fields = registry.fetchStructSchema('P')?.compiled.fields ?? [];
     expect(fields.find((f) => f.name === 'x')?.required).to.equal(true);
@@ -32,32 +27,13 @@ describe('schema/compiler', () => {
   });
 
   it('%field{} escape hatch supplies default/description alongside type', () => {
-    const doc = parse('%{ P: %schema{ fields: @ordered %{ x: %field{type: :integer, default: 0, description: "the x coordinate"} } } }');
+    const doc = parse('%{ P: %schema{ x: %field{type: :integer, default: 0, description: "the x coordinate"} } }');
     const registry = compile(doc, new Registry());
     const field = registry.fetchStructSchema('P')?.compiled.fields[0];
     expect(field?.default).to.equal(0n);
     expect(field?.description).to.equal('the x coordinate');
   });
 
-  it('closed/forbidden/refine-fn compile onto Compiled', () => {
-    const doc = parse('%{ P: %schema{ closed: true, forbidden: [:legacy], fields: @ordered %{ x: :integer } } }');
-    const registry = compile(doc, new Registry());
-    const compiled = registry.fetchStructSchema('P')?.compiled;
-    expect(compiled?.closed).to.equal(true);
-    expect(compiled?.forbidden).to.deep.equal(['legacy']);
-  });
-
-  it('refine-fn: resolves against the predicates map', () => {
-    const doc = parse('%{ P: %schema{ refine-fn: my-check, fields: @ordered %{ x: :integer } } }');
-    const predicate = (resolved) => (resolved.x > 0 ? true : 'x must be positive');
-    const registry = compile(doc, new Registry(), { 'my-check': predicate });
-    expect(registry.fetchStructSchema('P')?.compiled.refineFn).to.equal(predicate);
-  });
-
-  it('refine-fn: with no matching predicate throws', () => {
-    const doc = parse('%{ P: %schema{ refine-fn: missing, fields: @ordered %{ x: :integer } } }');
-    expect(() => compile(doc, new Registry())).to.throw(SchemaCompileError, /missing/);
-  });
 
   it('a non-%schema{} entry becomes a named type_expr alias', () => {
     const doc = parse('%{ Age: {:refine :integer %{min: 0, max: 150}} }');
@@ -114,13 +90,13 @@ describe('schema/compiler', () => {
   });
 
   it('rejects an unrecognized primitive type name', () => {
-    const doc = parse('%{ P: %schema{ fields: @ordered %{ x: :not-a-real-type } } }');
+    const doc = parse('%{ P: %schema{ x: :not-a-real-type } }');
     expect(() => compile(doc, new Registry())).to.throw(SchemaCompileError);
   });
 
   it('normalizes keywords regardless of whether the .dxns source itself was decoded trusted or not', () => {
-    const trustedDoc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer } } }', { trusted: true });
-    const untrustedDoc = parse('%{ P: %schema{ fields: @ordered %{ x: :integer } } }', { trusted: false });
+    const trustedDoc = parse('%{ P: %schema{ x: :integer } }', { trusted: true });
+    const untrustedDoc = parse('%{ P: %schema{ x: :integer } }', { trusted: false });
     const r1 = compile(trustedDoc, new Registry());
     const r2 = compile(untrustedDoc, new Registry());
     expect(r1.fetchStructSchema('P')?.compiled.fieldNames()).to.deep.equal(r2.fetchStructSchema('P')?.compiled.fieldNames());

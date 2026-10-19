@@ -17,10 +17,9 @@ encodeBinary(value, opts = {})     //=> Buffer, throws DXNError
 `opts`: `registry:` (a `Registry`, both directions), `schema:` (encode
 only — validate the top-level value against one named schema),
 `validate:` (encode only, default `true` — set `false` to skip the
-automatic whole-tree schema check), `coerce:` (encode only, default
-`true` — let a mismatched field be coerced toward its declared type
-via that DXN type's `fromX` conversion helper before failing
-validation; no Elixir `dextrin` equivalent), `pretty:` (`encode` only,
+automatic whole-tree schema check; nothing is ever converted to match
+a field's type, `DXN.md` §4.7), `strict:` (decode only — refuse extra
+fields on schema-backed structs), `pretty:` (`encode` only,
 default `false` — multi-line, indented output instead of
 single-line/compact), `indent:` (`encode` only, meaningful with
 `pretty: true` — spaces per nesting level, default 2), `trusted:`
@@ -57,6 +56,19 @@ only changes rendering, never what the value decodes back to.
 
 ```sh
 dextrin format data.dxn --mode pretty|condense [--in-place]
+```
+
+## Documents: keeping comments
+
+```js
+let doc = Document.parse(source, opts);                 // decode's opts and errors
+Document.toValue(doc);                                  // what decode gives
+Document.render(doc);                                   // the source, byte for byte
+Document.format(doc);                                   // laid out, comments kept
+doc = Document.replace(doc, [Symbol.for('version')], '2.0.0');
+doc = Document.delete(doc, [Symbol.for('deps'), 0]);    // with its own comments
+doc = Document.insert(doc, [Symbol.for('deps')], -1, 'new');  // index, or a map's new key
+const { doc: updated, changes } = Document.update(doc, newValue, { onAmbiguity: 'safe' });
 ```
 
 ## Value-type cheatsheet
@@ -105,15 +117,20 @@ registry
 ## Registry: schemas
 
 ```js
-const registry = Schema.compile(schemaDoc, baseRegistry = new Registry(), predicates = {});
+const registry = Schema.compile(schemaDoc, baseRegistry = new Registry());
 
 registry
-  .putStructMaterializer(name, (fieldMap) => term)
+  .addStructSchema(name, compiled)      // a new version; throws schema/duplicate-version if loaded
+  .replaceStructSchema(name, compiled)  // hot-swap a loaded version; throws schema/not-loaded otherwise
+  .putStructMaterializer(name, (name, version, fields) => term)   // every version; result checked against the latest
   .putStructModule(name, klass)          // for {form: 'reference', name} checks on hand-built instances
   .putResolver((name) => compiled | undefined);   // lazy/on-demand schema loading
 ```
 
-`FileResolver.forPaths(paths, predicates = {})` builds a ready-made
+`registry.fetchStructSchema(name)` answers the latest version, and
+`fetchStructSchema(name, version)` exactly that one.
+
+`FileResolver.forPaths(paths)` builds a ready-made
 resolver for `Namespace/Name -> paths/Namespace.dxns`.
 
 ## Registry: third-party classes (`DXNSchemaProvider`)
@@ -128,7 +145,7 @@ const registry = Schema.registerProvider(registry, someLibMoneyProvider, Schema.
 
 `someLibMoneyProvider` implements the `DXNSchemaProvider` shape
 (`dxnSchema()`, `dxnSchemaName()`, `dxnClass()`, and optionally
-`dxnMaterialize()`) — a plain, duck-typed object, not a formal
+`dxnMaterialize(name, version, fields)`) — a plain, duck-typed object, not a formal
 interface, since Node has no ahead-of-time-compilation concern to
 guard against the way Mix does.
 
@@ -136,8 +153,8 @@ guard against the way Mix does.
 
 ```js
 Schema.validate(value, registry, schemaName);              //=> true, throws on failure
-Schema.validateEncode(value, registry, schemaName, opts);   // one named schema, encode-side — may coerce and return a new value
-Schema.validateEncodeTree(value, registry, opts);           // automatic whole-tree walk, encode-side — may coerce and return a new value
+Schema.validateEncode(value, registry, schemaName);   // one named schema, encode-side — checks, never converts
+Schema.validateEncodeTree(value, registry);           // automatic whole-tree walk, encode-side — checks, never converts
 ```
 
 ## `.dxns` type_expr forms, at a glance
@@ -155,7 +172,7 @@ Address                        bare symbol — a struct name or a named type
 {:all-of A B}                  intersection — matches all
 {:nilable T}                   sugar for {:one-of :nil T}
 {:refine T %{constraints}}     base type + refine constraints (below)
-%schema{fields: @ordered %{}}  struct/record shape
+%schema(N){field: T, ...}      struct/record shape, version N (1 without a header)
 ```
 
 ## `refine` constraints
@@ -166,20 +183,33 @@ min-length / max-length / pattern                          -- string
 min-count / max-count                                      -- list/set/tuple
 ```
 
-## Struct schema options
+## Struct schemas
 
 ```
-%schema{
-  closed:    true              # no field outside `fields` may be present at all
-  forbidden: [legacy_field]    # explicit deny-list, reported by name
-  refine-fn: ns/predicate-name # cross-field/whole-value check, resolved from `predicates`
-  fields: @ordered %{
-    required_field:  :integer
-    optional_field?: :string             # trailing `?` = optional
-    with_default:    %field{type: :integer, default: 0, description: "..."}
-  }
+%schema(2){
+  required_field:  :integer
+  optional_field?: :string             # trailing `?` = optional
+  with_default:    %field{type: :integer, default: 0, description: "..."}
 }
 ```
+
+The body is the fields, in order — that order is the positional order.
+`(2)` is the version; a schema without one is version 1. A struct can
+say which version it was written with: `%Name(2){...}`.
+
+## Versions and extra fields
+
+```text
+%Point(2){x: 1, y: 2}            written with version 2; encoding always writes the latest
+%Point{x: 1, y: 2}               no version: read as the latest
+%Point[1 2 label: "a"]           extra fields after a positional struct's items
+%Point{x: 1, y: 2, label: "a"}   an undeclared name is an extra field
+```
+
+Newer than loaded: read against the latest (text by name, `.dxnb` by
+position). Older and loaded: the materializer upgrades it, else
+`schema/no-materializer`. Older and not loaded: `schema/unknown-version`.
+Reordering fields misreads silently in older `.dxnb` readers: append only.
 
 ## Standard named types (`Std`)
 
@@ -200,7 +230,8 @@ NonEmptyList, NonEmptySet
 dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
-dextrin format data.dxn [--mode pretty|condense] [--in-place]
+dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps comments
+dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 ```
 
 No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.unicode`: the

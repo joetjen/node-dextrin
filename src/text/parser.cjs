@@ -9,8 +9,8 @@
  * hand-rolled port with no grammar-compiler step.
  *
  * A `struct` decodes against a compiled schema when `opts.registry`
- * has one for that name (`Validator.materialize`, same as the binary
- * decoder); with no registry, or no schema registered for that name,
+ * has one for that name (`schema/reader.cjs`, which picks the schema by
+ * the struct's version, same as the binary decoder); with no registry, or no schema registered for that name,
  * it falls back to an opaque `DXNStruct` — never a hard failure,
  * mirroring `Dextrin.Text.Actions`'s own "no registry" fallback
  * exactly. Same story for a non-built-in tag against `registry.tags`,
@@ -30,13 +30,17 @@ const DXNOrderedMap = require('../values/ordered-map.cjs');
 const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
+const DXNMap = require('../values/map.cjs');
+const { checkPairs } = require('../map-key.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
-const Validator = require('../schema/validator.cjs');
+const Reader = require('../schema/reader.cjs');
+const { SchemaValidationError } = require('../schema/validator.cjs');
+const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
 const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'datetime', 'duration']);
@@ -50,19 +54,54 @@ class ParseError extends Error {
     super(message);
     this.name = 'ParseError';
     this.offset = offset;
+    /** `DXN.md` §5's category for text that does not parse. */
+    this.category = 'syntax';
   }
 }
 
 class Parser {
   /**
    * @param {import('./lexer.cjs').Token[]} tokens
-   * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
+   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs'), recordTree?: boolean}} opts
    */
   constructor(tokens, opts) {
     this.tokens = tokens;
     this.pos = 0;
     this.trusted = opts.trusted ?? true;
-    this.registry = opts.registry ?? null;
+    this.registry = strictly(opts.registry ?? null, opts.strict);
+    /**
+     * The syntax tree being recorded, when one was asked for
+     * (`parseTree`): a stack of open nodes, the document at its bottom.
+     * @type {SyntaxNode[] | null}
+     */
+    this.recording = opts.recordTree ? [{ kind: 'document', first: 0, last: -1, children: [] }] : null;
+  }
+
+  /**
+   * Opens a node of `kind` at the next token -- or at token `first` --
+   * when a tree is being recorded.
+   * @param {string} kind
+   * @param {number} [first]
+   */
+  begin(kind, first = this.pos) {
+    if (this.recording) this.recording.push({ kind, first, last: -1, children: [] });
+  }
+
+  /** Closes the innermost open node at the last token consumed, under its parent. */
+  end() {
+    if (!this.recording) return;
+    const node = /** @type {SyntaxNode} */ (this.recording.pop());
+    node.last = this.pos - 1;
+    this.recording[this.recording.length - 1].children.push(node);
+  }
+
+  /**
+   * Notes on the innermost open node that the last token consumed is its
+   * `field` -- an opening bracket, a key, a tag's name.
+   * @param {'open' | 'key' | 'arrow' | 'name'} field
+   */
+  mark(field) {
+    if (this.recording) this.recording[this.recording.length - 1][field] = this.pos - 1;
   }
 
   peek() {
@@ -89,13 +128,16 @@ class Parser {
     this.tryConsumeHeader();
     const value = this.parseValue();
     this.next('EOF');
+    if (this.recording) this.recording[0].last = this.pos - 1;
     return value;
   }
 
   tryConsumeHeader() {
     const save = this.pos;
     if (this.at('AT') && this.tokens[this.pos + 1]?.type === 'IDENTIFIER' && this.tokens[this.pos + 1].value === 'dxn' && this.tokens[this.pos + 2]?.type === 'STRING') {
+      this.begin('header');
       this.pos += 3;
+      this.end();
     } else {
       this.pos = save;
     }
@@ -107,12 +149,19 @@ class Parser {
    * @returns {unknown}
    */
   parseValue() {
+    this.begin('value');
     while (this.at('AT') && this.isDiscard()) {
+      this.begin('discard');
       this.pos += 1; // AT
       this.pos += 1; // IDENTIFIER "_"
       this.parseValue(); // parse and throw away
+      this.end();
     }
-    return this.parseValueBody();
+    this.begin('body');
+    const value = this.parseValueBody();
+    this.end();
+    this.end();
+    return value;
   }
 
   isDiscard() {
@@ -231,95 +280,224 @@ class Parser {
 
   /** @returns {DXNList} */
   parseList() {
+    this.begin('list');
     this.next('LBRACKET');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACKET')) items.push(this.parseValue());
     this.next('RBRACKET');
+    this.end();
     return new DXNList(items);
   }
 
   /** @returns {DXNTuple} */
   parseTuple() {
+    this.begin('tuple');
     this.next('LBRACE');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACE')) items.push(this.parseValue());
     this.next('RBRACE');
+    this.end();
     return new DXNTuple(items);
   }
 
-  /** @returns {Set<unknown>} */
-  parseSet() {
+  /**
+   * @param {number} at the index of the set's `@`, already consumed.
+   * @returns {Set<unknown>}
+   */
+  parseSet(at) {
+    this.begin('set', at);
     this.next('LBRACE');
+    this.mark('open');
     /** @type {unknown[]} */
     const items = [];
     while (!this.at('RBRACE')) items.push(this.parseValue());
     this.next('RBRACE');
+    this.end();
     return new Set(items);
   }
 
   /**
-   * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct).
+   * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct), the struct
+   * optionally carrying the version it was written with: `%Name(3){...}`.
    * @returns {Map<unknown, unknown> | DXNStruct | Validated}
    */
   parsePercent() {
+    const at = this.pos;
     this.next('PERCENT');
     if (this.at('LBRACE')) {
-      return new Map(this.parseEntries());
+      this.begin('map', at);
+      const pairs = this.parseEntries(false);
+      this.end();
+      checkPairs(pairs);
+      return new DXNMap(pairs);
     }
+    this.begin('struct', at);
+    try {
+      return this.parseStructBody();
+    } finally {
+      this.end();
+    }
+  }
+
+  /**
+   * The rest of a struct after its `%`: its name, its version, and its
+   * keyed or positional body.
+   * @returns {DXNStruct | Validated}
+   */
+  parseStructBody() {
     const name = this.next('IDENTIFIER').value;
+    const version = this.parseStructVersion();
     if (this.at('LBRACE')) {
+      // Entries keyed by a name are the struct's fields; any other map
+      // key (DXN.md §1.6) is an extra field's (§4.7).
+      const entries = this.parseEntries(true);
+      checkPairs(entries);
       /** @type {Array<[string, unknown]>} */
-      const pairs = this.parseEntries().map(([key, value]) => [structFieldName(key), value]);
-      return this.materializeStruct(name, { type: 'keyed', pairs });
+      const pairs = [];
+      /** @type {Array<[unknown, unknown]>} */
+      const extra = [];
+      for (const [key, value] of entries) {
+        if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
+        else extra.push([key, value]);
+      }
+      return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra);
     }
+    const { values, extra } = this.parsePositionalBody();
+    return this.materializeStruct(name, { type: 'positional', values }, version, extra);
+  }
+
+  /**
+   * `[items... entries...]`: a positional struct's items, then its extra
+   * fields as entries (`DXN.md` §4.7). An item is a value not followed by
+   * `=>`; once an entry has begun, an item is a syntax error.
+   * @returns {{values: unknown[], extra: Array<[unknown, unknown]>}}
+   */
+  parsePositionalBody() {
+    this.begin('positional');
     this.next('LBRACKET');
+    this.mark('open');
     /** @type {unknown[]} */
     const values = [];
-    while (!this.at('RBRACKET')) values.push(this.parseValue());
+    /** @type {Array<[unknown, unknown]>} */
+    const entries = [];
+    while (!this.at('RBRACKET')) {
+      if (this.at('MAP_KEY')) {
+        this.begin('entry');
+        const key = this.keywordValue(this.next('MAP_KEY').value);
+        this.mark('key');
+        entries.push([key, this.parseValue()]);
+        this.end();
+        continue;
+      }
+      const start = this.peek().start;
+      const keyAt = this.pos;
+      const value = this.parseValue();
+      if (this.at('ARROW')) {
+        this.rewrapAsEntry(keyAt);
+        this.next('ARROW');
+        this.mark('arrow');
+        entries.push([value, this.parseValue()]);
+        this.end();
+      } else if (entries.length > 0) {
+        throw new ParseError('a positional struct\'s items come before its extra fields', start);
+      } else {
+        values.push(value);
+      }
+    }
     this.next('RBRACKET');
-    return this.materializeStruct(name, { type: 'positional', values });
+    this.end();
+    checkPairs(entries);
+    return { values, extra: entries.map(([key, value]) => [DXNStruct.extraKey(key), value]) };
+  }
+
+  /**
+   * The `(3)` of `%Name(3){...}` — the schema version a struct was
+   * written with (`DXN.md` §4.8), a positive integer — or `null` when
+   * there is none.
+   * @returns {number | null}
+   */
+  parseStructVersion() {
+    if (!this.at('LPAREN')) return null;
+    this.next('LPAREN');
+    const tok = this.next('INTEGER');
+    const version = Number(tok.value);
+    if (!Number.isSafeInteger(version) || version <= 0) {
+      throw new ParseError(`a struct version is a positive integer, got ${tok.value}`, tok.start);
+    }
+    this.next('RPAREN');
+    return version;
   }
 
   /**
    * @param {string} name
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
+   * @param {number | null} [version]
+   * @param {Array<[unknown, unknown]>} [extra]
    * @returns {DXNStruct | Validated}
    */
-  materializeStruct(name, fields) {
-    const found = this.registry?.fetchStructSchema(name);
-    if (!found) {
-      return fields.type === 'keyed' ? DXNStruct.keyed(name, fields.pairs) : DXNStruct.positional(name, fields.values);
-    }
-    this.registry = found.registry;
-    const materializer = this.registry.fetchMaterializer(name) ?? null;
+  materializeStruct(name, fields, version = null, extra = []) {
+    if (!this.registry) return new DXNStruct(name, fields, version, extra);
     try {
       // Fail-fast, decode-time enforcement — a schema violation is an
-      // ordinary parse error, same channel as bad syntax.
-      return Validator.materialize(found.compiled, fields, materializer, this.registry);
+      // ordinary parse error, same channel as bad syntax. Which schema a
+      // struct is read with depends on its version (schema/reader.cjs).
+      const read = Reader.read(this.registry, name, version, fields, extra);
+      if (!read) return new DXNStruct(name, fields, version, extra);
+      this.registry = read.registry;
+      return /** @type {Validated} */ (read.value);
     } catch (err) {
+      // A schema violation keeps its own category (DXN.md §5); it is not
+      // a syntax error for having been found while parsing.
+      if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
       throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
     }
   }
 
   /** `{ map_entry* }`, ordered pairs — used by both `map_lit` and `struct_keyed`. */
-  parseEntries() {
+  /**
+   * @param {boolean} ownNode whether the entries are a node of their own,
+   *   a struct's keyed body, rather than the map's own contents.
+   */
+  parseEntries(ownNode) {
+    if (ownNode) this.begin('keyed');
     this.next('LBRACE');
+    this.mark('open');
     /** @type {Array<[unknown, unknown]>} */
     const pairs = [];
     while (!this.at('RBRACE')) {
+      this.begin('entry');
       if (this.at('MAP_KEY')) {
         const key = this.keywordValue(this.next('MAP_KEY').value);
+        this.mark('key');
         pairs.push([key, this.parseValue()]);
       } else {
         const key = this.parseValue();
         this.next('ARROW');
+        this.mark('arrow');
         pairs.push([key, this.parseValue()]);
       }
+      this.end();
     }
     this.next('RBRACE');
+    if (ownNode) this.end();
     return pairs;
+  }
+
+  /**
+   * Makes the value just recorded, starting at token `first`, the key of
+   * a new entry: a positional struct's item turns out to be an extra
+   * field's key once `=>` follows it.
+   * @param {number} first
+   */
+  rewrapAsEntry(first) {
+    if (!this.recording) return;
+    const parent = this.recording[this.recording.length - 1];
+    const key = /** @type {SyntaxNode} */ (parent.children.pop());
+    this.recording.push({ kind: 'entry', first, last: -1, children: [key] });
   }
 
   /**
@@ -328,10 +506,17 @@ class Parser {
    * @returns {unknown}
    */
   parseAt() {
+    const at = this.pos;
     this.next('AT');
-    if (this.at('LBRACE')) return this.parseSet();
+    if (this.at('LBRACE')) return this.parseSet(at);
+    this.begin('tag', at);
     const nameTok = this.next('IDENTIFIER');
-    return this.dispatchTag(nameTok.value, nameTok.start);
+    this.mark('name');
+    try {
+      return this.dispatchTag(nameTok.value, nameTok.start);
+    } finally {
+      this.end();
+    }
   }
 
   /**
@@ -395,19 +580,6 @@ class Parser {
   }
 }
 
-/** @param {unknown} key @returns {string} */
-function structFieldName(key) {
-  if (key instanceof DXNKeyword) return key.name;
-  if (key instanceof DXNSymbol) return key.name;
-  if (typeof key === 'string') return key;
-  if (typeof key === 'symbol') {
-    const registered = Symbol.keyFor(key);
-    if (registered !== undefined) return registered;
-    if (key.description !== undefined) return key.description;
-  }
-  throw new ParseError('struct field name must be an identifier or string', 0);
-}
-
 /** @param {string} flags @returns {{i: boolean, m: boolean, s: boolean, u: boolean, x: boolean, f: boolean, r: boolean}} */
 function flagsStringToObject(flags) {
   return {
@@ -432,9 +604,42 @@ function parse(text, opts = {}) {
   return Validated.strip(parser.parseDocument());
 }
 
+/**
+ * @typedef {{kind: string, first: number, last: number, children: SyntaxNode[], open?: number, key?: number, arrow?: number, name?: number}} SyntaxNode
+ *   One node of a document's syntax tree: its kind, its first and last
+ *   token (indices into the tokens), the nodes inside it, and which of
+ *   its tokens open it, key it, or name it.
+ */
+
+/**
+ * `text` parsed the way `parse` parses it -- the same parser, the same
+ * errors -- with the syntax tree beside the value: every token, and the
+ * nodes over them. The trivia between two tokens is the text between
+ * them. What `Document.parse` reads with.
+ * @param {string} text
+ * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @returns {{value: unknown, tree: SyntaxNode, tokens: import('./lexer.cjs').Token[]}}
+ */
+function parseTree(text, opts = {}) {
+  const tokens = tokenize(text);
+  const parser = new Parser(tokens, { ...opts, recordTree: true });
+  const value = Validated.strip(parser.parseDocument());
+  return { value, tree: /** @type {SyntaxNode[]} */ (parser.recording)[0], tokens };
+}
+
 /** @param {unknown} err @returns {string} */
 function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { parse, ParseError, LexError };
+/**
+ * `registry` marked strict when `strict` is given (`Registry#putStrict`).
+ * @param {import('../registry.cjs') | null} registry
+ * @param {boolean | undefined} strict
+ * @returns {import('../registry.cjs') | null}
+ */
+function strictly(registry, strict) {
+  return registry && strict !== undefined ? registry.putStrict(strict) : registry;
+}
+
+module.exports = { parse, parseTree, ParseError, LexError };

@@ -1,20 +1,22 @@
 import { expect } from 'chai';
 import { parse } from '../../src/text/parser.cjs';
 import { compile } from '../../src/schema/compiler.cjs';
+import { SchemaValidationError } from '../../src/schema/validator.cjs';
 import Registry from '../../src/registry.js';
 import { encode } from '../../src/binary/encoder.cjs';
 import { decode } from '../../src/binary/decoder.cjs';
 import { BinaryError } from '../../src/binary/errors.cjs';
 import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
+import { fieldsOf } from '../support/decoded-fields.js';
 
 describe('.dxnb binary codec with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('decoder materializes a registered struct instead of an opaque DXNStruct', () => {
     const registry = compile(schemaDoc, new Registry());
     const bin = encode(DXNStruct.positional('Point', [1.0, 2.0]));
-    expect(decode(bin, { registry })).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(decode(bin, { registry }))).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('decoder falls back to opaque DXNStruct for an unregistered name', () => {
@@ -24,10 +26,12 @@ describe('.dxnb binary codec with a registry', () => {
     expect(value).to.be.instanceOf(DXNStruct);
   });
 
-  it('decoder throws BinaryError with the schema violation reason', () => {
+  it('decoder throws the schema violation with its own category, not as a binary error', () => {
     const registry = compile(schemaDoc, new Registry());
     const bin = encode(DXNStruct.positional('Point', [1.0])); // missing y
-    expect(() => decode(bin, { registry })).to.throw(BinaryError, /violates its schema/);
+    expect(() => decode(bin, { registry }))
+      .to.throw(SchemaValidationError, /positional field/)
+      .with.property('category', 'schema/field-count');
   });
 
   it('decoder uses a registered custom-tag decoder instead of DXNCustomTag', () => {
@@ -53,7 +57,7 @@ describe('.dxnb binary codec with a registry', () => {
     }
     const registry = compile(schemaDoc, new Registry()).putStructModule('Point', Point);
     const bin = encode(new Point(1.0, 2.0), { registry });
-    expect(decode(bin, { registry })).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(decode(bin, { registry }))).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('encoder falls back to a registered tag encoder for an unschemaed class', () => {
@@ -77,7 +81,7 @@ describe('.dxnb binary codec with a registry', () => {
       }
     }
     let registry = compile(schemaDoc, new Registry());
-    registry = registry.putStructModule('Point', Point).putStructMaterializer('Point', (f) => new Point(f.x, f.y));
+    registry = registry.putStructModule('Point', Point).putStructMaterializer('Point', (_name, _version, f) => new Point(f.x, f.y));
     const original = DXNStruct.positional('Point', [1.0, 2.0]);
     const decoded = decode(encode(original), { registry });
     expect(decoded).to.be.instanceOf(Point);

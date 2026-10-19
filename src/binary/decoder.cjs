@@ -22,6 +22,8 @@
  * the order `DXNOrderedMap` needs.
  */
 
+const DXNMap = require('../values/map.cjs');
+const { checkPairs } = require('../map-key.cjs');
 const { BinaryError } = require('./errors.cjs');
 const Tags = require('./tags.cjs');
 const { bigIntToBytes } = require('./writer.cjs');
@@ -46,7 +48,9 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
-const Validator = require('../schema/validator.cjs');
+const Reader = require('../schema/reader.cjs');
+const { SchemaValidationError } = require('../schema/validator.cjs');
+const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
 const MAGIC = 'DX';
@@ -76,13 +80,13 @@ class Decoder {
   /**
    * @param {Buffer} buf
    * @param {number} pos
-   * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
+   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} opts
    */
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
     this.trusted = opts.trusted ?? true;
-    this.registry = opts.registry ?? null;
+    this.registry = opts.registry && opts.strict !== undefined ? opts.registry.putStrict(opts.strict) : (opts.registry ?? null);
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];
     /** @type {Array<Map<number, string>>} innermost scope last. */
@@ -171,7 +175,7 @@ class Decoder {
       case 4:
         return new DXNList(this.decodeNItems(Number(arg)));
       case 5:
-        return new Map(this.decodeMapPairs(Number(arg)));
+        return this.decodeMap(Number(arg));
       case 6:
         return this.decodeTag(Number(arg));
       default:
@@ -199,6 +203,17 @@ class Decoder {
     return items;
   }
 
+  /**
+   * A map of `pairCount` pairs, every key one `DXN.md` §1.6 allows.
+   * @param {number} pairCount
+   * @returns {DXNMap<unknown>}
+   */
+  decodeMap(pairCount) {
+    const pairs = this.decodeMapPairs(pairCount);
+    checkPairs(pairs);
+    return new DXNMap(pairs);
+  }
+
   /** @param {number} pairCount @returns {Array<[unknown, unknown]>} */
   decodeMapPairs(pairCount) {
     /** @type {Array<[unknown, unknown]>} */
@@ -220,6 +235,7 @@ class Decoder {
     if (tagNumber === Tags.T_SHARED_REF) return this.decodeSharedRef();
     if (tagNumber === Tags.T_STRINGREF_NAMESPACE) return this.decodeStringrefNamespace();
     if (tagNumber === Tags.T_STRINGREF) return this.decodeStringref();
+    if (tagNumber === Tags.T_STRUCT) return this.decodeStruct();
     const payload = this.decodeItem();
     return buildTagged(tagNumber, payload, this.trusted, this.registry);
   }
@@ -286,6 +302,52 @@ class Decoder {
     return value;
   }
 
+  /**
+   * A struct's payload, `[type-name, field..., extras?]`, read item by
+   * item so its last item may be its extra fields: a tag-215 map
+   * (`DXN.md` §2.3), legal nowhere else — anywhere else it is an
+   * unrecognized tag. Read in order, so the extras keep the order they
+   * were written in.
+   * @returns {unknown}
+   */
+  decodeStruct() {
+    if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 4) {
+      throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`, this.pos);
+    }
+    const count = Number(this.readHead().arg);
+    if (count === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`, this.pos);
+    const items = this.decodeNItems(count - 1);
+    /** @type {Array<[unknown, unknown]>} */
+    let extra = [];
+    if (count > 1 && this.atTag(Tags.T_EXTRA)) {
+      this.readHead();
+      if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 5) {
+        throw new BinaryError(`extra fields (tag ${Tags.T_EXTRA}) require a map payload`, this.pos);
+      }
+      const pairs = this.decodeMapPairs(Number(this.readHead().arg));
+      checkPairs(pairs);
+      extra = pairs.map(([key, value]) => [DXNStruct.extraKey(key), value]);
+    } else {
+      items.push(this.decodeItem());
+    }
+    return buildStruct(items, extra, this.registry);
+  }
+
+  /**
+   * Whether the next item is a tag of `number`, without consuming it.
+   * @param {number} number
+   * @returns {boolean}
+   */
+  atTag(number) {
+    const start = this.pos;
+    try {
+      if (this.pos >= this.buf.length || this.buf[this.pos] >> 5 !== 6) return false;
+      return Number(this.readHead().arg) === number;
+    } finally {
+      this.pos = start;
+    }
+  }
+
   /** @param {string} text */
   registerStringref(text) {
     const scope = this.stringrefStack[this.stringrefStack.length - 1];
@@ -334,8 +396,6 @@ function buildTagged(tag, value, trusted, registry) {
       return buildFromList(value, tag, 'set', (items) => new Set(items));
     case Tags.T_SORTED_SET:
       return buildFromList(value, tag, 'sorted-set', (items) => DXNSortedSet.fromArray(items));
-    case Tags.T_STRUCT:
-      return buildStruct(value, registry);
     case Tags.T_DATE:
       return buildDate(value);
     case Tags.T_TIME:
@@ -442,21 +502,31 @@ function buildOrdered(value) {
  * against a compiled schema when `registry` has one for `name` — same
  * as the text parser's `Parser#materializeStruct` — falling back to
  * an opaque `DXNStruct` when it doesn't.
- * @param {unknown} value
+ * @param {unknown[]} items the type name, then the fields.
+ * @param {Array<[unknown, unknown]>} extra
  * @param {import('../registry.cjs') | null} registry
  */
-function buildStruct(value, registry) {
-  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
-  const [name, ...fields] = value.items;
-  if (typeof name !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
+function buildStruct(items, extra, registry) {
+  const [typeName, ...fields] = items;
+  if (typeof typeName !== 'string') throw new BinaryError(`malformed struct (tag ${Tags.T_STRUCT}) payload`);
+  // The type name carries the version the struct was written with,
+  // "User(3)" (DXN.md §2.4, §4.8).
+  const parsed = DXNStruct.parseTypeName(typeName);
+  if (!parsed) {
+    throw new BinaryError(`struct type name ${JSON.stringify(typeName)} has a version that is not a positive integer`);
+  }
+  const { name, version } = parsed;
 
-  const found = registry?.fetchStructSchema(name);
-  if (!found) return DXNStruct.positional(name, fields);
-
-  const materializer = found.registry.fetchMaterializer(name) ?? null;
+  if (!registry) return DXNStruct.positional(name, fields, version, extra);
   try {
-    return Validator.materialize(found.compiled, { type: 'positional', values: fields }, materializer, found.registry);
+    // Same fail-fast enforcement as the text parser, through the same
+    // schema/reader.cjs.
+    const read = Reader.read(registry, name, version, { type: 'positional', values: fields }, extra);
+    return read ? read.value : DXNStruct.positional(name, fields, version, extra);
   } catch (err) {
+    // A schema violation keeps its own category (DXN.md §5); it is not
+    // a binary error for having been found while decoding.
+    if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
     throw new BinaryError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`);
   }
 }
@@ -556,7 +626,7 @@ function deepClone(value) {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(deepClone);
   if (value instanceof Uint8Array) return new Uint8Array(value);
-  if (value instanceof Map) return new Map(Array.from(value.entries(), ([k, v]) => [deepClone(k), deepClone(v)]));
+  if (value instanceof Map) return new DXNMap(Array.from(value.entries(), ([k, v]) => [deepClone(k), deepClone(v)]));
   if (value instanceof Set) return new Set(Array.from(value, deepClone));
   const clone = Object.create(Object.getPrototypeOf(value));
   for (const key of Object.keys(value)) {

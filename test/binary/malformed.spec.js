@@ -87,9 +87,10 @@ describe('.dxnb malformed input', () => {
   it('never crashes with an uncaught non-BinaryError for fuzzed/random bytes', () => {
     // Mirrors dextrin's own binary/fuzz_test.exs: random bytes after a
     // valid envelope must always fail cleanly (a decoded value, or a
-    // BinaryError) — never an unrelated TypeError/RangeError escaping
-    // from an unguarded buffer read or shape assumption deep in the
-    // tag dispatch.
+    // refusal with its DXN.md §5 category -- a BinaryError, or e.g. a
+    // map key the format does not allow) — never an unrelated
+    // TypeError/RangeError escaping from an unguarded buffer read or
+    // shape assumption deep in the tag dispatch.
     const rng = () => Math.floor(Math.random() * 256);
     for (let trial = 0; trial < 500; trial += 1) {
       const length = 1 + Math.floor(Math.random() * 40);
@@ -97,7 +98,8 @@ describe('.dxnb malformed input', () => {
       try {
         decode(bytes);
       } catch (err) {
-        expect(err, `unexpected error type for fuzz input ${bytes.toString('hex')}: ${err}`).to.be.instanceOf(BinaryError);
+        const categorised = err instanceof BinaryError || typeof (/** @type {any} */ (err).category) === 'string';
+        expect(categorised, `unexpected error for fuzz input ${bytes.toString('hex')}: ${err}`).to.equal(true);
       }
     }
   });

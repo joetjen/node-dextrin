@@ -150,9 +150,42 @@ hood, which is also directly callable on its own (the CLI's `dextrin
 format --mode pretty` uses it that way, without going through
 `encode`'s own validation).
 
-Comments are never preserved by either path — `.dxn`'s lexer discards
-`#`-comments as trivia before the parser ever sees them, so there's no
-comment text left by the time a value exists to reprint.
+### Keeping comments
+
+A value has no comments: `decode` keeps the data and nothing else, so
+decoding a file, changing it and encoding it again deletes every comment
+in it. For a file people annotate, parse it as a `Document` instead,
+which keeps everything — comments, blank lines, commas — beside the
+value:
+
+```js
+const { Document } = require('dextrin');
+
+let doc = Document.parse('# the config\n%{name: "acme", version: "1.0.0" # bumped for the fix\n}\n');
+
+Document.toValue(doc);   // what decode gives
+
+Document.format(doc);
+//=> '# the config\n%{\n  name: "acme"\n  version: "1.0.0"  # bumped for the fix\n}'
+```
+
+`format` changes layout only and keeps every comment with its entry — it
+is what `dextrin format` does. Edits change exactly what they name, and
+every byte they do not touch stays as it was:
+
+```js
+doc = Document.replace(doc, [Symbol.for('version')], '2.0.0');
+Document.render(doc);
+//=> '# the config\n%{name: "acme", version: "2.0.0" # bumped for the fix\n}\n'
+```
+
+A path names a map's key as it decodes (`Symbol.for('version')`), a
+struct's field name (`'x'`) or an index. `Document.delete` takes an
+entry's own comments with it, the ones above it and the one beside it;
+`Document.insert` puts a new entry above the comments of the one it
+lands before; `Document.update` turns a whole new value into these
+edits, and refuses where guessing which edit you meant would lose a
+comment (`onAmbiguity`).
 
 ## 5. Extending: custom tags
 
@@ -197,20 +230,22 @@ const { Schema } = require('dextrin');
 
 const schemaDoc = decode(`
 %{
-  Point: %schema{
-    fields: @ordered %{ x: :integer, y: :integer }
-  }
+  Point: %schema{ x: :integer, y: :integer }
 }
 `);
 
 const registry = Schema.compile(schemaDoc, new Registry());
 
 decode('%Point{x: 1, y: 2}', { registry });
-//=> { x: 1n, y: 2n }
+//=> DXNStruct { name: 'Point', version: 1, fields: { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] } }
 ```
 
-Field enforcement (required/optional, closed/forbidden fields,
-refinements) happens automatically at decode time, in both `decode`
+With no materializer registered, a checked struct comes back as a
+generic `DXNStruct` at its schema's latest version, its fields in the
+schema's order — which encodes back to exactly the text it came from.
+
+Field enforcement (required/optional fields, refinements) happens
+automatically at decode time, in both `decode`
 and `decodeBinary` — a violation comes back as an ordinary thrown
 `DXNError`, indistinguishable by shape from a syntax error:
 
@@ -242,7 +277,7 @@ second-guess data it isn't the origin of).
 
 ## 7. Materializing real JS classes
 
-By default a struct materializes to a plain, string-keyed object.
+By default a checked struct comes back as a generic `DXNStruct`.
 Register a materializer to produce your own class instance instead:
 
 ```js
@@ -253,7 +288,10 @@ class Point {
   }
 }
 
-const registry2 = registry.putStructMaterializer('Point', ({ x, y }) => new Point(x, y));
+// One materializer per schema, called for every decoded struct of it,
+// with the schema's name, the version the struct was written with and
+// its fields; what it answers is checked against the latest schema.
+const registry2 = registry.putStructMaterializer('Point', (_name, _version, { x, y }) => new Point(x, y));
 
 decode('%Point{x: 1, y: 2}', { registry: registry2 });
 //=> Point { x: 1n, y: 2n }
@@ -272,8 +310,10 @@ hand-build a `DXNStruct` first:
 
 ```js
 encode(new Point(1n, 2n), { registry: registry3 });
-//=> '%Point{x:1,y:2}'
+//=> '%Point(1){x:1,y:2}'
 ```
+
+The `(1)` is the schema's version; §8 is about what it is for.
 
 `Registry` is updated immutable-style — every `put*` method returns a
 *new* `Registry`, never mutates the one it's called on — so build up
@@ -281,7 +321,145 @@ the registry you need through a chain of these calls (as above) or by
 reassigning, not by expecting an earlier reference to change under
 you.
 
-## 8. Named types and the standard library
+
+### Fields a schema does not declare
+
+A struct guarantees the fields its schema declares and may carry more.
+A field the schema does not know is kept as an **extra field**, in the
+struct's `extra` list, and written back with it — so a newer producer's
+fields pass through an older reader instead of being lost:
+
+```js
+decode('%Point{x: 1, y: 2, label: "origin"}', { registry });
+//=> DXNStruct { name: 'Point', version: 1, fields: { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] }, extra: [['label', 'origin']] }
+```
+
+A positional struct writes its extras as entries after its items,
+`%Point[1 2 label: "origin"]`, and `.dxnb` as one trailing map. An extra
+never shadows a declared field — `%Point{x: 1, "x" => 2}` is refused —
+and a materializer receives the extras with the declared fields. Pass
+`strict: true` to refuse every extra field instead
+(`schema/undeclared-field`): right for a config file written by hand,
+where an unknown field is a typo.
+
+A registered class instance is written the same way. An own property
+its schema does not declare is an extra field, and a field it does not
+have — or holds as `undefined` — is absent, never `nil`:
+
+```js
+encode(Object.assign(new Point(1n, 2n), { label: 'origin' }), { registry: registry3 });
+//=> '%Point(1){x:1,y:2,label:"origin"}'
+```
+
+Text leaves an absent field out. `.dxnb` has to fill every position, so
+there an absent field is written as its default, or refused
+(`schema/missing-field`) when it has none: a reader would refuse the
+`nil` that could stand in for it, unless the field is declared
+`{:nilable t}`.
+
+## 8. Evolving a schema
+
+A schema changes; data written with the old one does not. Each `.dxns`
+document describes one **version** of each schema in it — no header
+is version 1, `%schema(2){...}` is version 2 — and a registry holds as
+many versions of `Point` side by side as you load:
+
+```js
+const load = (sources) => sources.reduce((registry, source) => Schema.compile(decode(source), registry), new Registry());
+
+const v1 = '%{Point: %schema{x: :integer, y: :integer}}';
+const v2 = '%{Point: %schema(2){x: :integer, y: :integer, label?: :string}}';
+```
+
+**Every struct is written with the latest version loaded**, so a
+reader always knows which shape it is looking at:
+
+```js
+const point = decode('%Point{x: 1, y: 2, label: "origin"}', { registry: load([v2]) });
+encode(point, { registry: load([v2]) });
+//=> '%Point(2){x:1,y:2,label:"origin"}'
+```
+
+A struct written without a version, `%Point{...}` — mostly text written
+by hand — is read as the latest.
+
+### A newer writer, an older reader
+
+A reader that has only version 1 reads version 2 against what it has.
+Text matches fields by name, and a field it does not know is kept as an
+extra field (§7), so it travels on:
+
+```js
+decode('%Point(2){x: 1, y: 2, label: "origin"}', { registry: load([v1]) });
+//=> DXNStruct { name: 'Point', version: 1, fields: { type: 'keyed', pairs: [['x', 1n], ['y', 2n]] }, extra: [['label', 'origin']] }
+```
+
+`.dxnb` has no names, only positions: the reader takes as many items
+as it has fields and drops the rest, so the same point read from binary
+comes back without its `label`. Every field the reader requires must be
+there, with the right type, either way.
+
+### An older writer, a newer reader
+
+A reader whose latest is version 2 cannot read version 1 as though it
+were version 2 — that would be a guess — so it refuses, unless the
+schema has a materializer to upgrade it:
+
+```js
+decode('%Point(1){x: 1, y: 2}', { registry: load([v1, v2]) });
+// throws DXNError, category 'schema/no-materializer'
+
+const registry = load([v1, v2]).putStructMaterializer('Point', (_name, version, fields) =>
+  version === 1
+    ? DXNStruct.keyed('Point', [['x', fields.x], ['y', fields.y], ['label', 'unnamed']], 2)
+    : DXNStruct.keyed('Point', [['x', fields.x], ['y', fields.y], ['label', fields.label]], 2));
+
+decode('%Point(1){x: 1, y: 2}', { registry });
+//=> DXNStruct { name: 'Point', version: 2, fields: { type: 'keyed', pairs: [['x', 1n], ['y', 2n], ['label', 'unnamed']] } }
+```
+
+The materializer is called for every `Point`, whatever its version, and
+what it answers is checked against the latest. That is why the version
+needs loading: an older version that is not loaded is refused
+(`schema/unknown-version`), because without its schema there are no
+field names to hand the materializer.
+
+### The one thing that goes wrong silently
+
+**Reading forward in `.dxnb` trusts the positions.** Suppose version 3
+only swaps two fields:
+
+```js
+const v3 = '%{Point: %schema(3){y: :integer, x: :integer, label?: :string}}';
+
+const p3 = decode('%Point{x: 1, y: 2, label: "a"}', { registry: load([v3]) });
+decodeBinary(encodeBinary(p3, { registry: load([v3]) }), { registry: load([v2]) });
+//=> DXNStruct { name: 'Point', version: 2, fields: { type: 'keyed', pairs: [['x', 2n], ['y', 1n], ['label', 'a']] } }
+```
+
+The version 2 reader has `x` and `y` the wrong way round, and nothing
+said so: both are integers. Text, read by name, gets it right. So a
+schema whose older readers must keep working **only ever appends**
+fields; reordering, inserting or removing one is for when every reader
+has the new version — deploy readers first (`DXN.md` §4.8).
+
+### Checking a change before it ships
+
+`dextrin compat` compares the previous release's schema files with the
+current ones, for CI. It fails when a version's content changed without
+a new version, or when a version went down, and lists what the latest
+version's materializer has to upgrade from each older one:
+
+```sh
+$ npx dextrin compat schemas-v1.4.0/ schemas/
+Point 1 -> 3: added label
+Point 2 -> 3: no field changes
+OK: no version discipline problems
+```
+
+`Schema.compat(oldRegistry, newRegistry)` answers the same as data.
+
+## 9. Named types and the standard library
 
 Any `.dxns` entry that *isn't* a `%schema{}` defines a reusable named
 type instead — purely data, composing the fixed type_expr vocabulary:
@@ -290,7 +468,7 @@ type instead — purely data, composing the fixed type_expr vocabulary:
 const doc = decode(`
 %{
   PositiveInt: {:refine :integer %{min: 1}}
-  Point: %schema{ fields: @ordered %{ x: PositiveInt, y: :integer } }
+  Point: %schema{ x: PositiveInt, y: :integer }
 }
 `);
 ```
@@ -305,7 +483,7 @@ const { Std } = require('dextrin');
 const registry4 = Schema.compile(doc, Std.registry());
 ```
 
-## 9. Letting a third-party class provide its own schema
+## 10. Letting a third-party class provide its own schema
 
 Everything so far assumed you write the `.dxns` schema yourself. If
 `Point` instead came from a library that doesn't want to (and
@@ -326,10 +504,10 @@ class LibPoint {
 }
 
 const PointProvider = {
-  dxnSchema: () => '%{ Point: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }',
+  dxnSchema: () => '%{ Point: %schema{ x: :integer, y: :integer } }',
   dxnSchemaName: () => 'Point',
   dxnClass: () => LibPoint,
-  dxnMaterialize: ({ x, y }) => new LibPoint(x, y),
+  dxnMaterialize: (_name, _version, { x, y }) => new LibPoint(x, y),
 };
 ```
 
@@ -342,14 +520,14 @@ const registry5 = Schema.registerProvider(new Registry(), PointProvider, Schema.
 decode('%Point{x: 1, y: 2}', { registry: registry5 });
 //=> LibPoint { x: 1n, y: 2n }
 encode(new LibPoint(1n, 2n), { registry: registry5 });
-//=> '%Point{x:1,y:2}'
+//=> '%Point(1){x:1,y:2}'
 ```
 
 `dxnMaterialize` is optional — without it, decoding falls back to the
-same plain field object any other schema with no materializer
+same generic `DXNStruct` any other schema with no materializer
 produces.
 
-## 10. Putting it together: a small config loader
+## 11. Putting it together: a small config loader
 
 ```js
 const fs = require('node:fs');
@@ -357,11 +535,9 @@ const fs = require('node:fs');
 const schemaSource = `
 %{
   Server: %schema{
-    fields: @ordered %{
-      host:  NonEmptyString
-      port:  {:refine :integer %{min: 1, max: 65535}}
-      tags?: {:list-of :symbol}
-    }
+    host:  NonEmptyString
+    port:  {:refine :integer %{min: 1, max: 65535}}
+    tags?: {:list-of :symbol}
   }
 }
 `;
@@ -394,11 +570,11 @@ directly, not something the caller has to separately check for.
 
 ```js
 load('config.dxn');
-//=> {
-//     host: 'localhost',
-//     port: 4000n,
-//     tags: DXNList { items: [ DXNSymbol { name: 'dev' }, DXNSymbol { name: 'local' } ] }
-//   }
+//=> DXNStruct { name: 'Server', version: 1, fields: { type: 'keyed', pairs: [
+//     ['host', 'localhost'],
+//     ['port', 4000n],
+//     ['tags', DXNList { items: [ DXNSymbol { name: 'dev' }, DXNSymbol { name: 'local' } ] }]
+//   ] } }
 ```
 
 `tags` decodes as a `DXNList`, not a native `Array` — DXN's `list`
