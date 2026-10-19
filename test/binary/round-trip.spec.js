@@ -73,8 +73,8 @@ describe('.dxnb binary round-trip, by type', () => {
   });
 
   it('round-trips trusted keyword decode (global Symbol.for) through binary too', () => {
-    const value = parse(':ok');
-    const decoded = decode(encode(value));
+    const value = parse(':ok', { trusted: true });
+    const decoded = decode(encode(value), { trusted: true });
     expect(decoded).to.equal(Symbol.for('ok'));
   });
 });

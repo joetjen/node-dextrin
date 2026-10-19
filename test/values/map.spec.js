@@ -6,7 +6,7 @@ import { decode } from '../../src/dextrin.js';
 // of how it tells keys apart, as the README shows it.
 describe('a DXNMap, printed', () => {
   it('shows its entries and none of its bookkeeping', () => {
-    const shown = inspect(decode('%{x: 1, y: 2}'));
+    const shown = inspect(decode('%{x: 1, y: 2}', { trusted: true }));
     expect(shown).to.include('Symbol(x) => 1n');
     expect(shown).not.to.include('byIdentity');
   });

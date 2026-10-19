@@ -3,6 +3,7 @@ import { parse, ParseError, LexError } from '../../src/text/parser.cjs';
 import DXNChar from '../../src/values/char.js';
 import DXNSymbol from '../../src/values/symbol.js';
 import DXNKeyword from '../../src/values/keyword.js';
+import Registry from '../../src/registry.js';
 import DXNList from '../../src/values/list.js';
 import DXNTuple from '../../src/values/tuple.js';
 import DXNOrderedMap from '../../src/values/ordered-map.js';
@@ -71,10 +72,13 @@ describe('text/parser', () => {
       expect(parse('foo').equals(new DXNSymbol('foo'))).to.equal(true);
     });
 
-    it('parses a keyword as a global Symbol.for by default (trusted)', () => {
-      const kw = parse(':ok');
-      expect(typeof kw).to.equal('symbol');
-      expect(kw).to.equal(Symbol.for('ok'));
+    it('parses a keyword as a DXNKeyword by default, untrusted', () => {
+      expect(parse(':ok')).to.deep.equal(new DXNKeyword('ok'));
+    });
+
+    it('and as a global Symbol.for when trusted, by option or by registry', () => {
+      expect(parse(':ok', { trusted: true })).to.equal(Symbol.for('ok'));
+      expect(parse(':ok', { registry: new Registry().putTrusted(true) })).to.equal(Symbol.for('ok'));
     });
 
     it('parses a keyword as DXNKeyword when trusted: false', () => {

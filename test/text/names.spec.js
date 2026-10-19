@@ -14,8 +14,8 @@ describe('names', () => {
 
   it('and so may a symbol, a keyword and a map key', () => {
     expect(decode('a.b.c')).to.deep.equal(new DXNSymbol('a.b.c'));
-    expect(decode(':acme.billing/invoice')).to.equal(Symbol.for('acme.billing/invoice'));
-    expect(decode('%{a.b: 1}').get(Symbol.for('a.b'))).to.equal(1n);
+    expect(decode(':acme.billing/invoice', { trusted: true })).to.equal(Symbol.for('acme.billing/invoice'));
+    expect(decode('%{a.b: 1}', { trusted: true }).get(Symbol.for('a.b'))).to.equal(1n);
   });
 
   it('each is written back as it was', () => {

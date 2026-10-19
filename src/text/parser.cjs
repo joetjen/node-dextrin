@@ -68,7 +68,9 @@ class Parser {
   constructor(tokens, opts) {
     this.tokens = tokens;
     this.pos = 0;
-    this.trusted = opts.trusted ?? true;
+    // The option, else the registry's own (`putTrusted`), else untrusted:
+    // a keyword is a global `Symbol.for` only when the caller says so.
+    this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
     this.registry = strictly(opts.registry ?? null, opts.strict);
     /**
      * The syntax tree being recorded, when one was asked for

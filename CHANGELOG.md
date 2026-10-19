@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Decoding is untrusted by default**, as the reference's (dextrin
+  1ee60d7): `decode`, `decodeBinary` and `Document` decode a keyword as
+  `DXNKeyword`, so no input can fill the never-collected global symbol
+  registry; `trusted: true` (or `registry.putTrusted(true)`) is the opt-in
+  for a source you control. Breaking for callers that relied on
+  `Symbol.for` keys from the default. A `Document` path's keyword names a
+  keyword key either way.
 - **A field typed with a namespaced reference takes a struct of that
   name** (DXN.md §4.7): a field typed `geo/Address` accepts
   `%geo/Address{...}` and refuses `%Address{...}` -- the other way round
@@ -49,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A registry's own `putTrusted` was never consulted: the text and binary
+  decoders defaulted `trusted` from their options alone. They take the
+  option, else the registry's, else untrusted.
 - A `DXNMap` prints as the map it is: its entries, without the
   `byIdentity` bookkeeping it keeps to compare keys by value. The README
   and the tutorial show `decode`'s result as it is, a `DXNMap` (they said

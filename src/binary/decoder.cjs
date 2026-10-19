@@ -86,7 +86,8 @@ class Decoder {
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
-    this.trusted = opts.trusted ?? true;
+    // The option, else the registry's own (`putTrusted`), else untrusted.
+    this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
     this.registry = opts.registry && opts.strict !== undefined ? opts.registry.putStrict(opts.strict) : (opts.registry ?? null);
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];

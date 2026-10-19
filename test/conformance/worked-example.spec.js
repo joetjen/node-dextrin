@@ -28,7 +28,8 @@ const SOURCE = `
 `;
 
 describe('DXN.md §3 worked example', () => {
-  const value = decode(SOURCE);
+  // Trusted, so its keywords are the Symbol.for keys the assertions use.
+  const value = decode(SOURCE, { trusted: true });
 
   it('decodes the header without surfacing it in the result', () => {
     expect(value).to.be.instanceOf(Map);

@@ -4,9 +4,9 @@ const { dxnEquals, dxnCompare } = require('./equality.cjs');
 
 /**
  * DXN `keyword` (`:name` in value position), **untrusted-decode**
- * shape. The trusted-decode shape (the default) is a real, global
+ * shape -- the default. The trusted-decode shape is a real, global
  * `Symbol.for(name)` instead — see the top-level `decode`/`decodeBinary`
- * `trusted:` option, once the text/binary codecs land.
+ * `trusted:` option.
  *
  * `Symbol.for` is a genuine JS primitive, globally interned by string —
  * the closest native analog to a BEAM atom (which is why the trusted

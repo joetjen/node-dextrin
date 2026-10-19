@@ -3,15 +3,17 @@ import Registry from '../../src/registry.js';
 import Compiled from '../../src/schema/compiled.cjs';
 
 describe('Registry', () => {
-  it('defaults to trusted: true', () => {
-    expect(new Registry().trusted).to.equal(true);
+  // Untrusted by default: a keyword is a global Symbol.for only when the
+  // caller says the input is trusted.
+  it('defaults to trusted: false', () => {
+    expect(new Registry().trusted).to.equal(false);
   });
 
   it('every put* method returns a new Registry, never mutates the receiver', () => {
     const original = new Registry();
-    const updated = original.putTrusted(false);
-    expect(original.trusted).to.equal(true);
-    expect(updated.trusted).to.equal(false);
+    const updated = original.putTrusted(true);
+    expect(original.trusted).to.equal(false);
+    expect(updated.trusted).to.equal(true);
     expect(updated).to.not.equal(original);
   });
 

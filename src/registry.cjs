@@ -42,7 +42,7 @@ class Registry {
     /** @type {Map<string, Function>} struct name -> JS class. */
     this.structModules = new Map();
     /** @type {boolean} */
-    this.trusted = true;
+    this.trusted = false;
     /** @type {boolean} refuse extra fields on schema-backed structs (`putStrict`). */
     this.strict = false;
   }
@@ -78,12 +78,13 @@ class Registry {
   }
 
   /**
-   * Marks (or unmarks) this registry as decoding a *trusted* source —
-   * the default. Currently the one thing this affects is `keyword`:
-   * trusted (the default) decodes it as a real, global `Symbol.for`;
-   * untrusted decodes it as `DXNKeyword` instead, so no decode path is
-   * ever forced through the global symbol registry's own
-   * never-garbage-collected interning for attacker-controlled text.
+   * Marks (or unmarks) this registry as decoding a *trusted* source, vs.
+   * an untrusted one -- the default. Currently the one thing this
+   * affects is `keyword`: untrusted (the default) decodes it as
+   * `DXNKeyword`, so no decode path is ever forced through the global
+   * symbol registry's never-garbage-collected interning by the input;
+   * trusted decodes it as a real, global `Symbol.for`. A decode's own
+   * `trusted:` option wins over this.
    * `symbol` is deliberately unaffected either way.
    * @param {boolean} trusted
    * @returns {Registry}

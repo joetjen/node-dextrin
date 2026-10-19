@@ -27,7 +27,7 @@ JS-API-level) examples.
 const fs = require('node:fs');
 const { decode } = require('@joetjen/dextrin');
 
-const config = decode(fs.readFileSync('config.dxn', 'utf8'));
+const config = decode(fs.readFileSync('config.dxn', 'utf8'), { trusted: true });
 config.get(Symbol.for('db')).get(Symbol.for('host'));
 //=> 'db.internal'
 config.get(Symbol.for('features')).has(Symbol.for('billing'));
@@ -35,13 +35,14 @@ config.get(Symbol.for('features')).has(Symbol.for('billing'));
 ```
 
 Shorthand keys (`db:`, `features:`) are DXN `keyword`s, which decode as
-real, global `Symbol.for(name)`s by default (`trusted: true`) — that's
-what makes the `.get(Symbol.for(...))` lookups above work directly. A
+real, global `Symbol.for(name)`s when the input is trusted (`trusted:
+true`, for your own config file) — that's what makes the
+`.get(Symbol.for(...))` lookups above work directly. A
 plain DXN `map` (`%{ ... }`) decodes as a native JS `Map`, and a `set`
 (`@{ ... }`) as a native `Set` — both already the closest native fit,
-no wrapper class needed. Pass `trusted: false` for a config file you
-don't fully trust the contents of, and match against `DXNKeyword`
-instances instead.
+no wrapper class needed. Without `trusted: true` -- the default, and
+what any file you don't fully control gets -- keywords decode as
+`DXNKeyword`s; match against those instead.
 
 ## An API payload with an explicit schema
 
@@ -125,18 +126,18 @@ registry = registry.putStructMaterializer('Money', (_name, _version, { amount, c
 }));
 
 decode('%Money{amount: 19.99M, currency: :usd}', { registry });
-//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: Symbol(usd) }
+//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: DXNKeyword { name: 'usd' } }
 ```
 
 What a materializer answers is checked against the latest schema, so it
 has to stay a value of the schema's own shape: answering
-`currency: currency.description` (the string `'usd'`) would be refused
+`currency: currency.name` (the string `'usd'`) would be refused
 (`schema/materializer`), because the schema declares
 `{:enum :usd :eur :gbp}`, not a string.
 
-`currency` decodes as a trusted `keyword` (`Symbol.for('usd')`) —
-`.description` reads the interned name back out, the native-`Symbol`
-equivalent of Elixir's `Atom.to_string/1`.
+`currency` decodes as a `keyword` -- a `DXNKeyword` by default, whose
+`.name` is `'usd'`, or `Symbol.for('usd')` when decoded with `trusted:
+true`, whose `.description` is.
 
 ## A schema, version by version
 
