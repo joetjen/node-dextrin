@@ -74,6 +74,7 @@ module.exports = {
   DXNList: require('./list.cjs'),
   DXNTuple: require('./tuple.cjs'),
   DXNOrderedMap: require('./ordered-map.cjs'),
+  DXNMap: require('./map.cjs'),
   DXNSortedSet: require('./sorted-set.cjs'),
   DXNStruct: require('./struct.cjs'),
   DXNDecimal: require('./decimal.cjs'),

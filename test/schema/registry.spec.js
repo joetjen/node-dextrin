@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import Registry from '../../src/registry.js';
+import Compiled from '../../src/schema/compiled.cjs';
 
 describe('Registry', () => {
   it('defaults to trusted: true', () => {
@@ -29,19 +30,19 @@ describe('Registry', () => {
   });
 
   it('putStructSchema/fetchStructSchema round-trip a compiled schema by name', () => {
-    const compiled = { name: 'Point' };
-    const registry = new Registry().putStructSchema('Point', /** @type {any} */ (compiled));
+    const compiled = new Compiled({ name: 'Point' });
+    const registry = new Registry().putStructSchema('Point', compiled);
     const found = registry.fetchStructSchema('Point');
     expect(found?.compiled).to.equal(compiled);
     expect(found?.registry).to.equal(registry);
   });
 
   it('fetchStructSchema falls back to the resolver on a miss, caching the result', () => {
-    const compiled = { name: 'Lazy' };
+    const compiled = new Compiled({ name: 'Lazy' });
     let calls = 0;
     const registry = new Registry().putResolver((name) => {
       calls += 1;
-      return name === 'Lazy' ? /** @type {any} */ (compiled) : undefined;
+      return name === 'Lazy' ? compiled : undefined;
     });
 
     const found = registry.fetchStructSchema('Lazy');

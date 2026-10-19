@@ -55,6 +55,8 @@ class LexError extends Error {
     super(message);
     this.name = 'LexError';
     this.offset = offset;
+    /** `DXN.md` §5's category for text that does not lex. */
+    this.category = 'syntax';
   }
 }
 
@@ -204,6 +206,10 @@ function tokenize(src) {
       tokens.push({ type: 'LBRACE', value: '{', start, end: ++i });
     } else if (c === '}') {
       tokens.push({ type: 'RBRACE', value: '}', start, end: ++i });
+    } else if (c === '(') {
+      tokens.push({ type: 'LPAREN', value: '(', start, end: ++i });
+    } else if (c === ')') {
+      tokens.push({ type: 'RPAREN', value: ')', start, end: ++i });
     } else if (c === '"') {
       tokens.push(readString());
     } else if (c === '?') {

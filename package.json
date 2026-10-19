@@ -1,8 +1,8 @@
 {
-  "name": "dextrin",
-  "version": "0.1.0",
+  "name": "@joetjen/dextrin",
+  "version": "0.2.0",
   "private": false,
-  "author": "Jan Oetjen <oetjenj@gmail.com> (http://phexter.net)",
+  "author": "Jan Oetjen <joetjen.riveting388@passmail.net> (http://joetjen.net)",
   "description": "DXN (Data eXchange Notation) for Node.js -- .dxn text, .dxnb binary, and .dxns schema documents.",
   "homepage": "https://github.com/joetjen/node-dextrin",
   "type": "module",
@@ -22,13 +22,15 @@
     "priv",
     "bin"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "directories": {
     "src": "./src"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "auto-changelog": "^2.6.0",
     "chai": "^6.2.2",
     "fast-check": "^3.23.0",
     "mocha": "^11.7.6",
@@ -44,8 +46,7 @@
     "autotest": "npx mocha --recursive --watch test/",
     "typecheck": "npx tsc --checkJs --noEmit",
     "precommit": "npm run typecheck && npm test",
-    "docs": "npx typedoc",
-    "version": "npx auto-changelog --package --template keepachangelog && git add CHANGELOG.md"
+    "docs": "npx typedoc"
   },
   "repository": {
     "type": "git",
@@ -53,7 +54,7 @@
   },
   "bugs": {
     "url": "https://github.com/joetjen/node-dextrin/issues",
-    "email": "oetjenj@gmail.com"
+    "email": "joetjen.riveting388@passmail.net"
   },
   "keywords": [
     "dxn",

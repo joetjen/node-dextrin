@@ -14,11 +14,11 @@ class Point {
 }
 
 describe('text print/pretty with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('print() serializes a registered class instance as its named struct form', () => {
     const registry = compile(schemaDoc, new Registry()).putStructModule('Point', Point);
-    expect(print(new Point(1.0, 2.0), { registry })).to.equal('%Point{x:1.0,y:2.0}');
+    expect(print(new Point(1.0, 2.0), { registry })).to.equal('%Point(1){x:1.0,y:2.0}');
   });
 
   it('print() throws for an unregistered class instance, same as before', () => {
@@ -37,6 +37,6 @@ describe('text print/pretty with a registry', () => {
 
   it('pretty() renders a registered class instance multi-line, like an equivalent keyed struct', () => {
     const registry = compile(schemaDoc, new Registry()).putStructModule('Point', Point);
-    expect(pretty(new Point(1.0, 2.0), { registry })).to.equal('%Point{\n  x: 1.0\n  y: 2.0\n}');
+    expect(pretty(new Point(1.0, 2.0), { registry })).to.equal('%Point(1){\n  x: 1.0\n  y: 2.0\n}');
   });
 });

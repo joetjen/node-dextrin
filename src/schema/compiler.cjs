@@ -45,15 +45,18 @@ class SchemaCompileError extends Error {
   constructor(message) {
     super(message);
     this.name = 'SchemaCompileError';
+    /** The `DXN.md` §5 category every compile refusal carries. */
+    this.category = 'schema/compile';
   }
 }
 
 /**
  * Compiles every entry of a decoded `.dxns` document into
- * `baseRegistry` — a struct schema for each `%schema{}` entry, a
- * named type_expr for every other entry. `predicates` resolves
- * `refine-fn:` names — a plain object, not the struct registry
- * itself, since a refine-fn is a validity check, not a decoder.
+ * `baseRegistry` — a struct schema for each `%schema(N){}` entry, a
+ * named type_expr for every other entry. A refusal is a
+ * `SchemaCompileError` (category `schema/compile`), or a `DXNError` of
+ * category `schema/duplicate-version` for a version the registry has
+ * loaded already (`DXN.md` §4.8).
  *
  * Named types defined in *this* document may reference any type
  * already known to `baseRegistry` (from an earlier `compile` call),
@@ -64,11 +67,10 @@ class SchemaCompileError extends Error {
  *
  * @param {unknown} schemaDoc a decoded `.dxns` document (see `decode`).
  * @param {import('../registry.cjs')} baseRegistry
- * @param {{[name: string]: import('./compiled.cjs').RefineFn}} [predicates]
  * @returns {import('../registry.cjs')}
  * @throws {SchemaCompileError}
  */
-function compile(schemaDoc, baseRegistry, predicates = {}) {
+function compile(schemaDoc, baseRegistry) {
   if (!(schemaDoc instanceof Map)) {
     throw new SchemaCompileError(`expected a .dxns document (a map), got ${describe(schemaDoc)}`);
   }
@@ -87,9 +89,14 @@ function compile(schemaDoc, baseRegistry, predicates = {}) {
 
   let registry = compileAliases(aliasEntries, baseRegistry);
   for (const [name, entry] of schemaEntries) {
-    const compiled = compileEntry(entry, predicates, registry.typeAliases);
+    let compiled;
+    try {
+      compiled = compileEntry(entry, registry.typeAliases);
+    } catch (err) {
+      throw new SchemaCompileError(`schema ${JSON.stringify(name)}: ${errorMessage(err)}`);
+    }
     compiled.name = name;
-    registry = registry.putStructSchema(name, compiled);
+    registry = registry.addStructSchema(name, compiled);
   }
   return registry;
 }
@@ -129,53 +136,44 @@ function entryName(key) {
 }
 
 /**
+ * One `%schema(N){field: type, ...}` entry: the body is the fields, in
+ * the order they are written; the header is the version, 1 when there
+ * is none.
  * @param {unknown} entry
- * @param {{[name: string]: import('./compiled.cjs').RefineFn}} predicates
  * @param {Map<string, unknown>} aliases
  * @returns {Compiled}
  */
-function compileEntry(entry, predicates, aliases) {
-  if (!(entry instanceof DXNStruct) || entry.name !== 'schema' || entry.fields.type !== 'keyed') {
-    throw new SchemaCompileError(`expected a %schema{} entry, got ${describe(entry)}`);
+function compileEntry(entry, aliases) {
+  if (!(entry instanceof DXNStruct) || entry.name !== 'schema') {
+    throw new SchemaCompileError(`expected a %schema(N){...} entry, got ${describe(entry)}`);
   }
-  const pairs = entry.fields.pairs;
-  const fieldsValue = getField(pairs, 'fields');
-  const closed = Boolean(getField(pairs, 'closed', false));
-  const forbiddenValue = getField(pairs, 'forbidden', null);
-  const forbidden = forbiddenValue instanceof DXNList ? forbiddenValue.items.map(literalName) : [];
-  const refineFnName = getField(pairs, 'refine-fn', null);
-
-  const fields = compileFields(fieldsValue, aliases);
-  const refineFn = resolveRefineFn(refineFnName, predicates);
-  return new Compiled({ fields, closed, forbidden, refineFn });
+  if (entry.fields.type !== 'keyed') {
+    throw new SchemaCompileError('a schema lists its fields by name: %schema(N){field: type, ...}');
+  }
+  const fields = entry.fields.pairs.map(([key, value]) => {
+    try {
+      return compileField(key, value, aliases);
+    } catch (err) {
+      throw new SchemaCompileError(`field ${JSON.stringify(key)}: ${errorMessage(err)}`);
+    }
+  });
+  const seen = new Set();
+  for (const field of fields) {
+    if (seen.has(field.name)) throw new SchemaCompileError(`field ${JSON.stringify(field.name)} is named twice`);
+    seen.add(field.name);
+  }
+  return new Compiled({ version: entry.version ?? 1, fields });
 }
 
 /**
- * @param {unknown} value
- * @param {Map<string, unknown>} aliases
- * @returns {Field[]}
- */
-function compileFields(value, aliases) {
-  if (!(value instanceof DXNOrderedMap)) {
-    throw new SchemaCompileError(
-      `expected fields: to be an @ordered %{...} (field order is load-bearing for .dxnb's positional encoding), got ${describe(value)}`
-    );
-  }
-  return value.pairs.map(([key, val]) => compileField(key, val, aliases));
-}
-
-/**
- * @param {unknown} key
+ * @param {string} key a field name as a struct's keyed pairs hold it.
  * @param {unknown} value
  * @param {Map<string, unknown>} aliases
  * @returns {Field}
  */
 function compileField(key, value, aliases) {
-  if (!(key instanceof DXNKeyword)) {
-    throw new SchemaCompileError(`expected a field name (keyword), got ${describe(key)}`);
-  }
-  const optional = key.name.endsWith('?');
-  const name = optional ? key.name.slice(0, -1) : key.name;
+  const optional = key.endsWith('?');
+  const name = optional ? key.slice(0, -1) : key;
 
   if (value instanceof DXNStruct && value.name === 'field' && value.fields.type === 'keyed') {
     const fieldPairs = value.fields.pairs;
@@ -267,19 +265,6 @@ function literalName(value) {
 }
 
 /**
- * @param {unknown} nameValue
- * @param {{[name: string]: import('./compiled.cjs').RefineFn}} predicates
- * @returns {import('./compiled.cjs').RefineFn | null}
- */
-function resolveRefineFn(nameValue, predicates) {
-  if (nameValue === null) return null;
-  const name = literalName(nameValue);
-  const fn = predicates[name];
-  if (!fn) throw new SchemaCompileError(`refine-fn ${JSON.stringify(name)} not found in the predicates given to compile()`);
-  return fn;
-}
-
-/**
  * Normalizes a decoded `.dxns` document to one canonical internal
  * shape: every keyword becomes `DXNKeyword`, regardless of whether
  * the caller decoded the document `trusted: true` (global `Symbol.for`)
@@ -304,8 +289,8 @@ function normalizeKeywords(value) {
   if (value instanceof Set) return new Set(Array.from(value, normalizeKeywords));
   if (value instanceof DXNStruct) {
     return value.fields.type === 'keyed'
-      ? DXNStruct.keyed(value.name, value.fields.pairs.map(([k, v]) => [k, normalizeKeywords(v)]))
-      : DXNStruct.positional(value.name, value.fields.values.map(normalizeKeywords));
+      ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, normalizeKeywords(v)]) })
+      : value.withFields({ type: 'positional', values: value.fields.values.map(normalizeKeywords) });
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, normalizeKeywords(value.value));
   return value;

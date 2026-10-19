@@ -1,34 +1,28 @@
 'use strict';
 
 /**
- * @fileoverview The result of compiling one `%schema{}` entry from a
+ * @fileoverview The result of compiling one `%schema(N){}` entry from a
  * `.dxns` document (`schema/compiler.cjs`) — enough to both validate
  * a decoded value and convert it both directions between `.dxnb`'s
  * always-positional wire shape and a named field map. Mirrors
  * `Dextrin.Schema.Compiled`.
  *
  * `fields` is ordered — that order is the canonical position <-> name
- * mapping `.dxnb`'s positional struct encoding needs, which is
- * exactly why a schema's own `fields:` has to be an `@ordered %{...}`
- * in the source document, not a plain `map` (`.dxn`'s `map` type
- * makes no ordering guarantee, but field order here is semantically
- * load-bearing, not incidental).
+ * mapping `.dxnb`'s positional struct encoding needs, and it is the
+ * order the fields are written in the `%schema(N){...}` body.
  *
- * @typedef {(resolved: {[k: string]: unknown}) => true | string} RefineFn
- * `resolved` is this schema's own already-type-checked field values;
- * return `true` to accept the value, or a `string` describing why not.
+ * `version` is which version of `name` this is (`DXN.md` §4.8), 1 for
+ * a schema written without a header.
  */
 
 class Compiled {
   /**
-   * @param {{name?: string | null, fields?: import('./field.cjs')[], closed?: boolean, forbidden?: string[], refineFn?: RefineFn | null}} spec
+   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[]}} spec
    */
-  constructor({ name = null, fields = [], closed = false, forbidden = [], refineFn = null } = {}) {
+  constructor({ name = null, version = 1, fields = [] } = {}) {
     this.name = name;
+    this.version = version;
     this.fields = fields;
-    this.closed = closed;
-    this.forbidden = forbidden;
-    this.refineFn = refineFn;
   }
 
   /** @returns {string[]} */
@@ -37,17 +31,28 @@ class Compiled {
   }
 
   /**
-   * Reads `instance`'s fields (an arbitrary registered JS class
-   * instance, not a `DXNStruct`) out in this schema's own canonical
-   * field order — the same order `.dxnb`'s positional wire encoding
-   * needs. A field this schema declares but `instance` doesn't have
-   * is `undefined`, same as any other absent field; extra instance
-   * properties the schema doesn't know about are simply not included.
+   * `instance` -- a registered application class instance -- as the
+   * keyed struct it is written as (DXN.md §4.3, §4.7). A field it does
+   * not have, or holds as `undefined`, is absent, never null: a reader
+   * refuses null unless the type admits it. An own property the schema
+   * does not declare is an extra field, written back with the struct,
+   * as an Elixir struct's undeclared keys are.
    * @param {object} instance
-   * @returns {Array<[string, unknown]>}
+   * @returns {import('../values/struct.cjs')}
    */
-  fieldValues(instance) {
-    return this.fieldNames().map((name) => [name, (/** @type {{[k: string]: unknown}} */ (instance))[name]]);
+  structOf(instance) {
+    const DXNStruct = require('../values/struct.cjs');
+    const declared = new Set(this.fieldNames());
+    const own = /** @type {{[k: string]: unknown}} */ (instance);
+    /** @type {Array<[string, unknown]>} */
+    const pairs = this.fieldNames()
+      .filter((name) => own[name] !== undefined)
+      .map((name) => [name, own[name]]);
+    /** @type {Array<[unknown, unknown]>} */
+    const extra = Object.keys(own)
+      .filter((key) => !declared.has(key) && own[key] !== undefined)
+      .map((key) => [key, own[key]]);
+    return DXNStruct.keyed(/** @type {string} */ (this.name), pairs, null, extra);
   }
 }
 

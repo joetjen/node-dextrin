@@ -22,21 +22,21 @@
 const DXNStruct = require('./values/struct.cjs');
 const Compiler = require('./schema/compiler.cjs');
 const Validator = require('./schema/validator.cjs');
+const Reader = require('./schema/reader.cjs');
 const Validated = require('./schema/validated.cjs');
 const Provider = require('./schema/provider.cjs');
+const Compat = require('./schema/compat.cjs');
 
 /**
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
- * schema for each `%schema{}` entry, and a reusable named type for
- * every other entry. `predicates` resolves any `refine-fn:` names
- * used in the document.
+ * schema for each `%schema(N){}` entry, and a reusable named type for
+ * every other entry.
  * @param {unknown} schemaDoc
  * @param {import('./registry.cjs')} baseRegistry
- * @param {{[name: string]: (resolved: {[k: string]: unknown}) => true | string}} [predicates]
  * @returns {import('./registry.cjs')}
  */
-function compile(schemaDoc, baseRegistry, predicates = {}) {
-  return Compiler.compile(schemaDoc, baseRegistry, predicates);
+function compile(schemaDoc, baseRegistry) {
+  return Compiler.compile(schemaDoc, baseRegistry);
 }
 
 /**
@@ -53,12 +53,12 @@ function compile(schemaDoc, baseRegistry, predicates = {}) {
  */
 function validate(value, registry, schemaName) {
   if (!(value instanceof DXNStruct) || value.name !== schemaName) {
-    throw new Validator.SchemaValidationError(`expected a DXNStruct named ${JSON.stringify(schemaName)}, got ${describe(value)}`);
+    throw new Validator.SchemaValidationError(`expected a DXNStruct named ${JSON.stringify(schemaName)}, got ${describe(value)}`, 'schema/type-mismatch');
   }
-  const found = registry.fetchStructSchema(schemaName);
-  if (!found) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
-  const materializer = registry.fetchMaterializer(schemaName) ?? null;
-  Validator.materialize(found.compiled, value.fields, materializer, registry);
+  // Read exactly as a decode would read it, version and materializer
+  // included (schema/reader.cjs).
+  const read = Reader.read(registry, schemaName, value.version, value.fields);
+  if (!read) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
   return true;
 }
 
@@ -66,13 +66,13 @@ function validate(value, registry, schemaName) {
  * Encode-time schema validation: checks `value` — ordinary JS data
  * you're about to encode — against a named, compiled schema *before*
  * encoding produces any output. The mirror image of `validate`, for
- * data on its way out rather than in. Returns the checked value
- * (possibly coerced — see `schema/validator.cjs`'s own doc), stripped
- * of internal bookkeeping.
+ * data on its way out rather than in. Returns the checked value,
+ * stripped of internal bookkeeping; nothing is converted (`DXN.md`
+ * §4.7).
  * @param {unknown} value
  * @param {import('./registry.cjs')} registry
  * @param {string} schemaName
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateEncode(value, registry, schemaName, opts = {}) {
@@ -87,10 +87,10 @@ function validateEncode(value, registry, schemaName, opts = {}) {
  * anywhere in it against its own schema, wherever it turns out to be.
  * Symmetric to how decode checks every named struct unconditionally.
  * `encode`/`encodeBinary` call this automatically by default (opt out
- * with `validate: false`). Returns the (possibly-coerced) tree.
+ * with `validate: false`). Returns the checked tree.
  * @param {unknown} value
  * @param {import('./registry.cjs')} registry
- * @param {{coerce?: boolean}} [opts]
+ * @param {{[k: string]: unknown}} [opts]
  * @returns {unknown}
  */
 function validateEncodeTree(value, registry, opts = {}) {
@@ -118,4 +118,17 @@ function describe(value) {
   }
 }
 
-module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider };
+/**
+ * The version discipline check (`schema/compat.cjs`, DXN.md §4.8):
+ * `oldRegistry`'s schemas against `newRegistry`'s, as the problems -- a
+ * version whose content changed without a new version, a version that
+ * went down -- and what the latest versions' materializers have to
+ * upgrade.
+ * @param {import('./registry.cjs')} oldRegistry
+ * @param {import('./registry.cjs')} newRegistry
+ */
+function compat(oldRegistry, newRegistry) {
+  return Compat.check(oldRegistry, newRegistry);
+}
+
+module.exports = { compile, validate, validateEncode, validateEncodeTree, registerProvider, compat };

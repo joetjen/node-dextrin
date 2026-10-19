@@ -1,23 +1,25 @@
 import { expect } from 'chai';
 import { parse, ParseError } from '../../src/text/parser.cjs';
 import { compile } from '../../src/schema/compiler.cjs';
+import { SchemaValidationError } from '../../src/schema/validator.cjs';
 import Registry from '../../src/registry.js';
 import DXNStruct from '../../src/values/struct.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
+import { fieldsOf } from '../support/decoded-fields.js';
 
 describe('text/parser with a registry', () => {
-  const schemaDoc = parse('%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
+  const schemaDoc = parse('%{ Point: %schema{ x: :float, y: :float } }');
 
   it('materializes a registered struct instead of an opaque DXNStruct', () => {
     const registry = compile(schemaDoc, new Registry());
     const value = parse('%Point{x: 1.0, y: 2.0}', { registry });
-    expect(value).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('materializes a positional struct the same way', () => {
     const registry = compile(schemaDoc, new Registry());
     const value = parse('%Point[1.0, 2.0]', { registry });
-    expect(value).to.deep.equal({ x: 1, y: 2 });
+    expect(fieldsOf(value)).to.deep.equal({ x: 1, y: 2 });
   });
 
   it('falls back to an opaque DXNStruct for an unregistered name, registry or not', () => {
@@ -27,9 +29,11 @@ describe('text/parser with a registry', () => {
     expect(value.name).to.equal('Other');
   });
 
-  it('throws ParseError with the schema violation reason for a bad struct', () => {
+  it('throws the schema violation with its own category, not as a syntax error', () => {
     const registry = compile(schemaDoc, new Registry());
-    expect(() => parse('%Point{x: 1.0}', { registry })).to.throw(ParseError, /missing required field "y"/);
+    expect(() => parse('%Point{x: 1.0}', { registry }))
+      .to.throw(SchemaValidationError, /missing required field "y"/)
+      .with.property('category', 'schema/missing-field');
   });
 
   it('uses a registered custom-tag decoder instead of DXNCustomTag', () => {
@@ -58,12 +62,12 @@ describe('text/parser with a registry', () => {
   it('a nested struct field resolves against the same registry, enabling {reference} checks', () => {
     const doc = parse(`
       %{
-        Address: %schema{ fields: @ordered %{ city: :string } }
-        Person: %schema{ fields: @ordered %{ name: :string, address: Address } }
+        Address: %schema{ city: :string }
+        Person: %schema{ name: :string, address: Address }
       }
     `);
     const registry = compile(doc, new Registry());
     const value = parse('%Person{name: "Ada", address: %Address{city: "London"}}', { registry });
-    expect(value).to.deep.equal({ name: 'Ada', address: { city: 'London' } });
+    expect(fieldsOf(value)).to.deep.equal({ name: 'Ada', address: { city: 'London' } });
   });
 });

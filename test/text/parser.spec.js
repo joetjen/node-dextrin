@@ -107,10 +107,10 @@ describe('text/parser', () => {
       expect(Array.from(v)).to.deep.equal([1n, 2n, 3n]);
     });
 
-    it('parses a map literal as native Map, both shorthand and arrow forms', () => {
+    it('parses a map literal as a Map keyed by value, both shorthand and arrow forms', () => {
       const v = parse('%{x: 1, :y => 2}', { trusted: false });
       expect(v).to.be.instanceOf(Map);
-      expect(v.get(new DXNKeyword('x'))).to.equal(undefined); // Map itself: reference equality
+      expect(v.get(new DXNKeyword('x'))).to.equal(1n); // a DXNMap: an equal key finds the entry (DXN.md §1.6)
       expect(Array.from(v.entries())).to.deep.equal([
         [new DXNKeyword('x'), 1n],
         [new DXNKeyword('y'), 2n]

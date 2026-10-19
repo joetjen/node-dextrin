@@ -13,6 +13,9 @@ const binaryDecoder = require('./binary/decoder.cjs');
 const Schema = require('./schema.cjs');
 const Std = require('./schema/std.cjs');
 const FileResolver = require('./schema/file-resolver.cjs');
+const { canonical } = require('./canonical.cjs');
+const { answer } = require('./conformance.cjs');
+const Document = require('./document.cjs');
 
 /** @param {string} text @param {{trusted?: boolean, registry?: Registry}} [opts] @returns {unknown} */
 function decode(text, opts = {}) {
@@ -25,7 +28,7 @@ function decode(text, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, registry?: Registry, validate?: boolean, schema?: string}} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {
@@ -48,7 +51,7 @@ function decodeBinary(bytes, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string, [k: string]: unknown}} [opts]
+ * @param {{registry?: Registry, validate?: boolean, schema?: string, [k: string]: unknown}} [opts]
  * @returns {Buffer}
  */
 function encodeBinary(value, opts = {}) {
@@ -62,24 +65,23 @@ function encodeBinary(value, opts = {}) {
 
 /**
  * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, coerce?: boolean, schema?: string}} opts
+ * @param {{registry?: Registry, validate?: boolean, schema?: string}} opts
  * @returns {unknown}
  */
 function maybeValidateEncode(value, opts) {
   const registry = opts.registry ?? new Registry();
-  const coerceOpts = { coerce: opts.coerce ?? true };
 
   let result = value;
   if (opts.validate ?? true) {
-    result = Schema.validateEncodeTree(result, registry, coerceOpts);
+    result = Schema.validateEncodeTree(result, registry);
   }
   if (opts.schema !== undefined) {
-    result = Schema.validateEncode(result, registry, opts.schema, coerceOpts);
+    result = Schema.validateEncode(result, registry, opts.schema);
   }
   return result;
 }
 
-export { version, decode, encode, decodeBinary, encodeBinary, DXNError, Registry, Schema, Std, FileResolver };
+export { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document };
 export * from './values/index.js';
 
-export default { version, decode, encode, decodeBinary, encodeBinary, DXNError, Registry, Schema, Std, FileResolver, ...values };
+export default { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };

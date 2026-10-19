@@ -25,7 +25,7 @@ JS-API-level) examples.
 
 ```js
 const fs = require('node:fs');
-const { decode } = require('dextrin');
+const { decode } = require('@joetjen/dextrin');
 
 const config = decode(fs.readFileSync('config.dxn', 'utf8'));
 config.get(Symbol.for('db')).get(Symbol.for('host'));
@@ -46,19 +46,16 @@ instances instead.
 ## An API payload with an explicit schema
 
 ```js
-const { decode, Schema, Std } = require('dextrin');
+const { decode, Schema, Std } = require('@joetjen/dextrin');
 
 const schemaSource = `
 %{
   User: %schema{
-    closed: true
-    fields: @ordered %{
-      id:       :uuid
-      email:    NonEmptyString
-      role:     {:enum :admin :member :guest}
-      created:  :timestamp
-      note?:    :string
-    }
+    id:       :uuid
+    email:    NonEmptyString
+    role:     {:enum :admin :member :guest}
+    created:  :timestamp
+    note?:    :string
   }
 }
 `;
@@ -76,18 +73,9 @@ const payload = `
 `;
 
 decode(payload, { registry });
-//=> { id: DXNUUID {...}, email: 'ada@example.com', role: Symbol(admin), created: DXNTimestamp {...}, note: null }
-```
-
-A response body accidentally including a legacy field is rejected
-loudly, not silently dropped:
-
-```js
-decode(
-  '%User{id: @uuid "550e8400-e29b-41d4-a716-446655440000", email: "a@b.co", role: :admin, created: ~U[2024-01-01 00:00:00Z], legacy_id: 1}',
-  { registry },
-);
-//=> throws DXNError: struct "User" violates its schema: unknown field "legacy_id" (schema is closed)
+//=> DXNStruct { name: 'User', version: 1, fields: { type: 'keyed', pairs: [
+//     ['id', DXNUUID {...}], ['email', 'ada@example.com'], ['role', Symbol(admin)], ['created', DXNTimestamp {...}]
+//   ] } }
 ```
 
 An optional field with no value supplied (`note?:`) materializes as
@@ -97,7 +85,7 @@ present, matching how every other decoded field is looked up.
 ## An event log, streamed to `.dxnb` for storage
 
 ```js
-const { decode, encodeBinary, decodeBinary } = require('dextrin');
+const { decode, encodeBinary, decodeBinary } = require('@joetjen/dextrin');
 
 const events = [
   decode('%{type: :login, user_id: 1, at: ~U[2024-01-01 08:00:00Z]}'),
@@ -118,65 +106,68 @@ an app-level convention.
 ## Money: `struct` + `refine`, combined
 
 ```js
-const { decode, Schema, Registry } = require('dextrin');
+const { decode, Schema, Registry } = require('@joetjen/dextrin');
 
 const schemaSource = `
 %{
   Money: %schema{
-    fields: @ordered %{
-      amount:   :decimal
-      currency: {:enum :usd :eur :gbp}
-    }
+    amount:   :decimal
+    currency: {:enum :usd :eur :gbp}
   }
 }
 `;
 
 const doc = decode(schemaSource);
 let registry = Schema.compile(doc, new Registry());
-registry = registry.putStructMaterializer('Money', ({ amount, currency }) => ({
+registry = registry.putStructMaterializer('Money', (_name, _version, { amount, currency }) => ({
   amount,
-  currency: currency.description,
+  currency,
 }));
 
 decode('%Money{amount: 19.99M, currency: :usd}', { registry });
-//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: 'usd' }
+//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: Symbol(usd) }
 ```
+
+What a materializer answers is checked against the latest schema, so it
+has to stay a value of the schema's own shape: answering
+`currency: currency.description` (the string `'usd'`) would be refused
+(`schema/materializer`), because the schema declares
+`{:enum :usd :eur :gbp}`, not a string.
 
 `currency` decodes as a trusted `keyword` (`Symbol.for('usd')`) —
 `.description` reads the interned name back out, the native-`Symbol`
 equivalent of Elixir's `Atom.to_string/1`.
 
-## Cross-field validation with `refine-fn`
+## A schema, version by version
 
-A `type_expr` can only describe shape, not "field A implies field B" —
-`refine-fn:` names a predicate resolved from a `predicates` object
-passed to `compile`. A predicate returns `true` on success or a
-`string` error message on failure — JS's analog of Elixir's `:ok |
-{:error, reason}`:
+Each `.dxns` document describes one version of a schema, in its
+header; the body is the fields, in order. Without a header it is
+version 1:
 
 ```js
-const { decode, Schema, Registry } = require('dextrin');
+const { decode, Schema, Registry } = require('@joetjen/dextrin');
 
-const schemaSource = `
-%{
-  DateRange: %schema{
-    refine-fn: date-range/valid
-    fields: @ordered %{ starts: :date, ends: :date }
-  }
-}
-`;
+let registry = Schema.compile(decode('%{ User: %schema{ name: :string } }'), new Registry());
+registry = Schema.compile(decode('%{ User: %schema(2){ name: :string, email?: :string } }'), registry);
 
-const predicates = {
-  'date-range/valid': ({ starts, ends }) =>
-    starts.compare(ends) <= 0 ? true : 'starts must not be after ends',
-};
+registry.fetchStructSchema('User').compiled.version;      //=> 2, the latest
+registry.fetchStructSchema('User', 1).compiled.fieldNames(); //=> ['name']
 
-const doc = decode(schemaSource);
-const registry = Schema.compile(doc, new Registry(), predicates);
-
-decode('%DateRange{starts: ~D[2024-06-01], ends: ~D[2024-01-01]}', { registry });
-//=> throws DXNError: struct "DateRange" violates its schema: starts must not be after ends
+Schema.compile(decode('%{ User: %schema(2){ name: :string } }'), registry);
+//=> throws DXNError, category 'schema/duplicate-version'
 ```
+
+Loading the same version twice is a mistake rather than an update;
+`registry.replaceStructSchema(name, compiled)` swaps a loaded version
+on purpose. A struct can say which version it was written with, and is
+written back with it:
+
+```js
+decode('%User(2){name: "Ada"}').version;   //=> 2
+encode(decode('%User(2){name: "Ada"}'));   //=> '%User(2){name:"Ada"}'
+```
+
+A version must be a positive integer: `%User(0){...}` is a syntax error.
 
 ## A third-party class provider, end to end
 
@@ -206,14 +197,12 @@ const LatLngProvider = {
   dxnSchema: () => `
     %{
       Degrees: {:refine :float %{min: -180.0, max: 180.0}}
-      LatLng: %schema{
-        fields: @ordered %{ lat: Degrees, lng: Degrees }
-      }
+      LatLng: %schema{ lat: Degrees, lng: Degrees }
     }
   `,
   dxnSchemaName: () => 'LatLng',
   dxnClass: () => LatLng,
-  dxnMaterialize: ({ lat, lng }) => new LatLng(lat, lng),
+  dxnMaterialize: (_name, _version, { lat, lng }) => new LatLng(lat, lng),
 };
 
 module.exports = { LatLng, LatLngProvider };
@@ -224,7 +213,7 @@ The application depends on both `geo-lib` and `dextrin`. It composes
 registry, exactly like chaining any other base registry:
 
 ```js
-const { decode, encode, Schema, Std } = require('dextrin');
+const { decode, encode, Schema, Std } = require('@joetjen/dextrin');
 const { LatLng, LatLngProvider } = require('geo-lib/lat-lng-dxn');
 
 const registry = Schema.registerProvider(Std.registry(), LatLngProvider, Schema.compile);
@@ -233,7 +222,7 @@ decode('%LatLng{lat: 51.05, lng: 13.74}', { registry });
 //=> LatLng { lat: 51.05, lng: 13.74 }
 
 encode(new LatLng(51.05, 13.74), { registry });
-//=> '%LatLng{lat:51.05,lng:13.74}'
+//=> '%LatLng(1){lat:51.05,lng:13.74}'
 
 // Degrees' own refine constraint is enforced automatically, same as
 // any other schema -- no special handling needed on either side:
@@ -253,21 +242,17 @@ Given `schemas/Address.dxns` and `schemas/Person.dxns` on disk:
 ```
 # schemas/Address.dxns
 %{
-  Address: %schema{
-    fields: @ordered %{ street: :string }
-  }
+  Address: %schema{ street: :string }
 }
 
 # schemas/Person.dxns
 %{
-  Person: %schema{
-    fields: @ordered %{ name: :string, home: Address }
-  }
+  Person: %schema{ name: :string, home: Address }
 }
 ```
 
 ```js
-const { decode, Schema, Registry, FileResolver } = require('dextrin');
+const { decode, Schema, Registry, FileResolver } = require('@joetjen/dextrin');
 const fs = require('node:fs');
 
 const doc = decode(fs.readFileSync('schemas/Person.dxns', 'utf8'));
@@ -275,7 +260,9 @@ const resolver = FileResolver.forPaths(['schemas']);
 const registry = Schema.compile(doc, new Registry().putResolver(resolver));
 
 decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', { registry });
-//=> { name: 'Ada', home: { street: '1 Main St' } }
+//=> DXNStruct { name: 'Person', version: 1, fields: { type: 'keyed', pairs: [
+//     ['name', 'Ada'], ['home', DXNStruct { name: 'Address', version: 1, ... }]
+//   ] } }
 ```
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with

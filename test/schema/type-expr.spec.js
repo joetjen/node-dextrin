@@ -81,8 +81,9 @@ describe('schema/type-expr matches()', () => {
       expect(matches({ form: 'reference', name: 'Point' }, new Other(), registry)).to.equal(false);
     });
 
-    it('trusts an unregistered name or a value with no provenance at all', () => {
-      expect(matches({ form: 'reference', name: 'Whatever' }, { x: 1 })).to.equal(true);
+    it('refuses a value that is not a struct, however much it looks like one (DXN.md §4.7)', () => {
+      expect(matches({ form: 'reference', name: 'Whatever' }, { x: 1 })).to.equal(false);
+      expect(matches({ form: 'reference', name: 'Whatever' }, new Map([['x', 1n]]))).to.equal(false);
     });
   });
 

@@ -11,8 +11,8 @@ describe('schema/file-resolver', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'dextrin-file-resolver-'));
-    writeFileSync(join(dir, 'Shapes.dxns'), '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }');
-    writeFileSync(join(dir, 'Solo.dxns'), '%{ Solo: %schema{ fields: @ordered %{ n: :integer } } }');
+    writeFileSync(join(dir, 'Shapes.dxns'), '%{ Point: %schema{ x: :float, y: :float } }');
+    writeFileSync(join(dir, 'Solo.dxns'), '%{ Solo: %schema{ n: :integer } }');
   });
 
   afterEach(() => {
@@ -45,7 +45,7 @@ describe('schema/file-resolver', () => {
   it('searches multiple paths in order, returning the first match', () => {
     const otherDir = mkdtempSync(join(tmpdir(), 'dextrin-file-resolver-2-'));
     try {
-      writeFileSync(join(otherDir, 'Shapes.dxns'), '%{ Point: %schema{ fields: @ordered %{ z: :integer } } }');
+      writeFileSync(join(otherDir, 'Shapes.dxns'), '%{ Point: %schema{ z: :integer } }');
       const resolver = forPaths([dir, otherDir]);
       // dir's Shapes.dxns (x/y) comes first, otherDir's (z) never reached
       expect(resolver('Shapes/Point')?.fieldNames()).to.deep.equal(['x', 'y']);
@@ -58,12 +58,5 @@ describe('schema/file-resolver', () => {
     const registry = new Registry().putResolver(forPaths([dir]));
     const found = registry.fetchStructSchema('Shapes/Point');
     expect(found?.compiled.name).to.equal('Point');
-  });
-
-  it('forwards predicates for refine-fn: in the loaded file', () => {
-    writeFileSync(join(dir, 'Checked.dxns'), '%{ P: %schema{ refine-fn: check, fields: @ordered %{ x: :integer } } }');
-    const predicate = (r) => (r.x > 0 ? true : 'must be positive');
-    const resolver = forPaths([dir], { check: predicate });
-    expect(resolver('Checked/P')?.refineFn).to.equal(predicate);
   });
 });

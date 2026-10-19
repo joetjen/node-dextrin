@@ -50,7 +50,7 @@ class DXNDecimal {
   /** @returns {string} canonical `[-]digits(.digits)?` form. */
   toString() {
     const digits = this.unscaledValue.toString();
-    const negative = this.sign < 0 && this.unscaledValue !== 0n;
+    const negative = this.sign < 0;
     const prefix = negative ? '-' : '';
 
     if (this.exponent === 0) return prefix + digits;
@@ -82,7 +82,8 @@ class DXNDecimal {
     if (!match) throw new TypeError(`DXNDecimal.fromString: invalid decimal literal ${JSON.stringify(str)}`);
     const [, negative, intPart, fracPart = ''] = match;
     const unscaledValue = BigInt(intPart + fracPart);
-    const sign = negative && unscaledValue !== 0n ? -1 : 1;
+    // Nothing is normalised (DXN.md §1.5): `-0.0` keeps its sign.
+    const sign = negative ? -1 : 1;
     return new DXNDecimal(sign, unscaledValue, -fracPart.length);
   }
 

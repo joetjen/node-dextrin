@@ -4,6 +4,7 @@ import DXNKeyword from './keyword.js';
 import DXNList from './list.js';
 import DXNTuple from './tuple.js';
 import DXNOrderedMap from './ordered-map.js';
+import DXNMap from './map.js';
 import DXNSortedSet from './sorted-set.js';
 import DXNStruct from './struct.js';
 import DXNDecimal from './decimal.js';
@@ -27,6 +28,7 @@ export {
   DXNList,
   DXNTuple,
   DXNOrderedMap,
+  DXNMap,
   DXNSortedSet,
   DXNStruct,
   DXNDecimal,

@@ -5,6 +5,214 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.2.0] - 2026-10-19
+
+Versioned schemas, extra fields, the conformance suite's adapter and a
+document that keeps its comments. Breaking: the package is now
+`@joetjen/dextrin`, a 0.1.x `.dxns` file has to be rewritten, and
+decoding a checked struct answers a `DXNStruct`.
+
+### Migrating from 0.1.x
+
+- **The package is `@joetjen/dextrin`.** `npm uninstall dextrin && npm
+  install @joetjen/dextrin`, and `require('dextrin')` becomes
+  `require('@joetjen/dextrin')` (or `import ... from
+  '@joetjen/dextrin'`).
+- **`.dxns` files.** The body lists the fields directly, in the order
+  `fields: @ordered %{...}` gave them, and a schema without a version
+  is version 1:
+
+  ```text
+  # 0.1.x
+  User: %schema{closed: true, fields: @ordered %{name: :string, email?: :string}}
+  # 0.2.0
+  User: %schema{name: :string, email?: :string}
+  ```
+
+  An unconverted file is refused by `Schema.compile` (`schema/compile`:
+  `field "fields": unrecognized type expression`), never read as
+  something else.
+- **`closed:`, `forbidden:` and `refine-fn:` are gone.** A struct may
+  carry fields its schema does not declare. Where `closed: true` refused
+  them, decode with `{ strict: true }` (or `registry.putStrict(true)`),
+  which refuses every undeclared field as `schema/undeclared-field`. A
+  `forbidden:` list or a refine predicate becomes a check in the
+  schema's materializer (`registry.putStructMaterializer`), which may
+  throw.
+- **A checked struct decodes to a `DXNStruct`**, not a plain object. A
+  materializer that answers its fields keeps the old shape:
+  `registry = registry.putStructMaterializer('User', (_name, _version,
+  fields) => fields)` -- the registry's methods answer a new registry.
+- **`.dxnb` written by 0.1.x still reads**, and so does text: its structs
+  carry no version, and a struct without a version is read as the latest
+  version loaded. Proven against bytes 0.1.0 wrote, in
+  `test/binary/v0_1_0.spec.js`.
+- **Rewrite stored 0.1.x data before you load a version 2.** Once a
+  version 2 is loaded, an unversioned struct is read as version 2, and a
+  `.dxnb` struct with version 1's fields no longer matches it
+  (`schema/field-count`). Decoded and encoded again with 0.2.0, the same
+  value is written as `User(1)`, and from then on it is read as version 1
+  and handed to the materializer to upgrade.
+
+### Added
+
+- `Document` -- a `.dxn` document with everything it holds, its comments,
+  blank lines and commas as well as its value, mirroring
+  `Dextrin.Document`: `parse` (`decode`'s options and errors), `toValue`,
+  `render` (the source, byte for byte, when nothing was edited), `format`
+  (laid out, every comment kept), the edits `replace`, `delete` and
+  `insert` by path, and `update`, which makes a new value by the fewest
+  edits and refuses where guessing would lose a comment. The parser
+  records the tree as it parses, so it is the same parser as `decode`'s.
+- **`dextrin format` keeps comments** (`--mode pretty`, the default);
+  `--mode condense` still drops them, a comment ending its line.
+- `dextrin conformance` answers `format` and `edit` cases.
+- The tutorial's §8, "Evolving a schema": a worked example of versions,
+  reading across them, the materializer, the positional risk and
+  `dextrin compat`. The cheatsheet gains versions and extra fields.
+- `Schema.compat(oldRegistry, newRegistry)` and `dextrin compat OLD NEW`
+  -- the version discipline check (`DXN.md` §4.8), for CI against the
+  previous release's schema files: a version whose content changed
+  without a new version, or a version that went down, fails; what the
+  latest version's materializer has to upgrade is listed either way.
+- `canonical(value)` -- the canonical form of a value (`DXN.md` §1.5):
+  one rendering fixed down to the byte, with maps and sets in canonical
+  order (by code point, not UTF-16 order), floats by one exact algorithm
+  and one fixed set of string escapes, so values from different
+  implementations compare as text.
+- `DXNError#category` -- the error's kind as `DXN.md` §5 names it
+  (`'syntax'`, `'binary'`, `'encode/unsupported'`, ...), so errors
+  compare across implementations without comparing messages.
+- `answer(request)` and `dextrin conformance REQUEST ANSWER` -- this
+  implementation's adapter for the Dextrin Conformance Suite.
+- `DXNMap` -- a `Map` whose keys are compared by value: two keys are the
+  same key exactly when their canonical forms are (`DXN.md` §1.6). Every
+  decoded map is one.
+
+- **Versioned schemas** (`DXN.md` §4.8). `%schema(3){...}` is version 3
+  of its name, and one with no header is version 1. A registry keeps every
+  loaded version side by side: `addStructSchema` refuses a version that is
+  already loaded (`schema/duplicate-version`), `replaceStructSchema`
+  hot-swaps one that is loaded and refuses one that is not
+  (`schema/not-loaded`), and `fetchStructSchema(name)` answers the latest,
+  `fetchStructSchema(name, version)` exactly that one.
+- **A struct literal carries its version**: `%User(3){...}` and
+  `%User(3)[...]` decode to a `DXNStruct` whose `version` is 3, and are
+  written back with it. A version of zero or less is refused.
+- `DXNStruct.head` and `DXNStruct#withFields`.
+- **Every struct written against a schema carries the latest loaded
+  version of it**, in text (`%User(3){...}`, and `%User(1){...}` when
+  version 1 is the only one) and in `.dxnb`, where the type name becomes
+  `"User(3)"`. A struct with no schema keeps its own version, or none.
+  `Registry#asWritten` decides; `DXNStruct.typeName` and
+  `DXNStruct.parseTypeName` spell it. A `.dxnb` type name whose version
+  is not a positive integer is a `binary` error.
+- **A struct is read according to the version it was written with**
+  (`DXN.md` §4.8, `src/schema/reader.cjs`), in text and binary alike. The
+  latest version, or none, is read exactly. A newer version is read
+  against the latest: text by name, binary by position, dropping items
+  beyond the reader's fields and leaving missing optional fields absent.
+  An older version that is loaded is read with its own schema and handed
+  to the materializer, and refused as `schema/no-materializer` without
+  one; an older version that is not loaded is refused as
+  `schema/unknown-version`.
+- **One materializer per schema, for every version** (`DXN.md` §4.8).
+  `Registry#putStructMaterializer` takes a function of
+  `(schemaName, version, fields)`; it is called for every decoded struct
+  of its schema, upgrades older versions, and its result is checked
+  against the latest schema — a throw or a rejected result is
+  `schema/materializer`. A provider's `dxnMaterialize` takes the same
+  arguments.
+- **Without a materializer, a checked struct decodes to a `DXNStruct`**
+  at its schema's latest version, fields in the schema's order, instead
+  of a plain object — so it encodes back to the text it came from. An
+  optional field that was absent stays absent instead of becoming `null`.
+- `schema/validator.cjs`'s `materialize` is replaced by `resolve`;
+  building the value is `schema/reader.cjs`'s job.
+- **A struct may carry extra fields** (`DXN.md` §4.7), kept in
+  `DXNStruct`'s new `extra` list and written back with it: in text as
+  entries — after a positional struct's items,
+  `%User(3)["a" "a@x" nick: "b"]` — and in `.dxnb` as one trailing map
+  under the new private tag 215. A keyed struct's undeclared names, and
+  any entry keyed by something other than a name, are extras. An extra
+  never shadows a declared field (`schema/shadowed-field`); the
+  materializer receives extras with the declared fields (a non-name key
+  by its canonical text); `strict: true` refuses them
+  (`schema/undeclared-field`, `Registry#putStrict`).
+- A keyed struct entry whose key is not a name — `%Point{1 => 2}` — is an
+  extra field instead of an error.
+- **A struct is matched only by a struct** (`DXN.md` §4.7). A field
+  typed `User` accepts a `DXNStruct` named `User`, or the class
+  registered for `User`; a `Map`, a plain object, any other value, and a
+  class registered for no schema or another are type errors. Until now
+  every non-struct value was accepted.
+- **Nothing is converted to make a value match its type.** The
+  schema-driven coercion and the `coerce:` option are removed
+  (`src/schema/coercion.cjs` is gone): a `number` for a `:rational` or
+  `:decimal` field, a string for `:uuid`, `:uri` or `:char`, a `Date` for
+  `:date` or `:datetime` and an array for `:list` or `:tuple` are now
+  refused. A host value always means the same DXN type, schema or not.
+- A native `Date` always means a `timestamp`: `encode`, `encodeBinary`
+  and `canonical` write it as one, and a `:timestamp` field accepts it.
+
+### Changed
+
+- **Published as `@joetjen/dextrin`** (the unscoped npm `dextrin` is
+  deprecated in its favour): `npm install @joetjen/dextrin`,
+  `require('@joetjen/dextrin')`. The `dextrin` command keeps its name.
+- Licensed under the Apache License 2.0 (`Apache-2.0`); it was MIT.
+- **A registered class instance carries extra fields**: an own property
+  its schema does not declare is written as an extra field (text entries,
+  the trailing tag-215 map in `.dxnb`), as an Elixir struct's undeclared
+  keys are. It was dropped.
+- **An absent field is never written as `nil`** (`DXN.md` §4.3): a field
+  an instance does not have, or holds as `undefined`, is left out of
+  text, and in `.dxnb`, which fills every position, written as its
+  default or refused (`schema/missing-field`). Both writers wrote `nil`,
+  which the same schema then refused to read back.
+- **Every schema violation carries its `DXN.md` §5 category**:
+  `schema/field-count`, `schema/missing-field`, `schema/type-mismatch`
+  and `schema/shadowed-field`, decoding text or binary and encoding
+  alike. They came back as `syntax` from text, `binary` from binary,
+  and with no category from an encode. `SchemaValidationError` gains a
+  `category`.
+- `dextrin conformance` loads a case's `schemas` and honours `strict`.
+
+- **A map key must be one of the eight types of `DXN.md` §1.6**
+  (`string`, keyword, integer, uuid, date, bytes, symbol, char). Any other
+  key -- a float, `null`, a boolean, a time, a collection, ... -- is
+  refused as `key/not-allowed` when decoding text or binary and when
+  encoding, in maps and ordered maps alike.
+- A repeated key such as `?c` merges into one entry, the last one, and a
+  lookup with an equal key finds it: a plain `Map` compared object keys
+  by identity, so `%{?c => 1, ?c => 2}` had two entries.
+- **A schema's body is its fields, in order**:
+  `User: %schema(3){name: :string, email: :string, id?: :uuid}`. The
+  `fields: @ordered %{...}` wrapper is gone, and so are `closed:`,
+  `forbidden:` and `refine-fn:`; `Schema.compile` and
+  `FileResolver.forPaths` lose their `predicates` argument. A failed
+  compile throws an error of category `schema/compile`.
+
+### Fixed
+
+- A symbol whose name is not an identifier is refused by the text
+  writers (`encode/unsupported`): `encode`, the pretty printer and
+  `canonical` wrote its name verbatim, which read back as something else,
+  or as nothing (`''`). `.dxnb` keeps any name.
+
+- A keyed struct written to `.dxnb` went on the wire in the order of its
+  keys rather than its schema's field order, so it came back with its
+  fields swapped.
+- A negative-zero decimal keeps its sign: `-0.0M` decoded as `0.0M`.
+  Nothing is normalised (`DXN.md` §1.5); a value is written as it was
+  given.
+- A walk over a struct's fields — stripping the schema marker, the
+  check on the way out, and the schema compiler's own normalising —
+  rebuilt the struct from its name and fields; it now changes only the
+  fields, so nothing else the struct carries is lost.
+
 ## [0.1.0] - 2026-08-14
 
 ### Added
