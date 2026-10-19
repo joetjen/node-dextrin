@@ -92,13 +92,27 @@ function tokenize(src) {
   function readIdentifierRun() {
     let start = i;
     i += 1; // first char already validated by caller
-    while (i < len && ID_CONTINUE.test(src[i])) i += 1;
+    readSegmentsRest();
+    // A name is segments joined by "." with at most one "/" between a
+    // namespace and a name (DXN.md §1.1): Foo.Bar/Baz.
     if (src[i] === '/' && ID_START.test(src[i + 1] ?? '')) {
-      i += 1;
-      i += 1;
-      while (i < len && ID_CONTINUE.test(src[i])) i += 1;
+      i += 2;
+      readSegmentsRest();
     }
     return src.slice(start, i);
+  }
+
+  /**
+   * The rest of a run of segments joined by ".", the first character of
+   * the first one already read. A "." not followed by a segment's start
+   * is left where it is, and refused by whatever reads it next.
+   */
+  function readSegmentsRest() {
+    while (i < len && ID_CONTINUE.test(src[i])) i += 1;
+    while (src[i] === '.' && ID_START.test(src[i + 1] ?? '')) {
+      i += 2;
+      while (i < len && ID_CONTINUE.test(src[i])) i += 1;
+    }
   }
 
   function readNumber() {
