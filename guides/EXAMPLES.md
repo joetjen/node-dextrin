@@ -25,7 +25,7 @@ JS-API-level) examples.
 
 ```js
 const fs = require('node:fs');
-const { decode } = require('dextrin');
+const { decode } = require('@joetjen/dextrin');
 
 const config = decode(fs.readFileSync('config.dxn', 'utf8'));
 config.get(Symbol.for('db')).get(Symbol.for('host'));
@@ -46,7 +46,7 @@ instances instead.
 ## An API payload with an explicit schema
 
 ```js
-const { decode, Schema, Std } = require('dextrin');
+const { decode, Schema, Std } = require('@joetjen/dextrin');
 
 const schemaSource = `
 %{
@@ -85,7 +85,7 @@ present, matching how every other decoded field is looked up.
 ## An event log, streamed to `.dxnb` for storage
 
 ```js
-const { decode, encodeBinary, decodeBinary } = require('dextrin');
+const { decode, encodeBinary, decodeBinary } = require('@joetjen/dextrin');
 
 const events = [
   decode('%{type: :login, user_id: 1, at: ~U[2024-01-01 08:00:00Z]}'),
@@ -106,7 +106,7 @@ an app-level convention.
 ## Money: `struct` + `refine`, combined
 
 ```js
-const { decode, Schema, Registry } = require('dextrin');
+const { decode, Schema, Registry } = require('@joetjen/dextrin');
 
 const schemaSource = `
 %{
@@ -145,7 +145,7 @@ header; the body is the fields, in order. Without a header it is
 version 1:
 
 ```js
-const { decode, Schema, Registry } = require('dextrin');
+const { decode, Schema, Registry } = require('@joetjen/dextrin');
 
 let registry = Schema.compile(decode('%{ User: %schema{ name: :string } }'), new Registry());
 registry = Schema.compile(decode('%{ User: %schema(2){ name: :string, email?: :string } }'), registry);
@@ -213,7 +213,7 @@ The application depends on both `geo-lib` and `dextrin`. It composes
 registry, exactly like chaining any other base registry:
 
 ```js
-const { decode, encode, Schema, Std } = require('dextrin');
+const { decode, encode, Schema, Std } = require('@joetjen/dextrin');
 const { LatLng, LatLngProvider } = require('geo-lib/lat-lng-dxn');
 
 const registry = Schema.registerProvider(Std.registry(), LatLngProvider, Schema.compile);
@@ -252,7 +252,7 @@ Given `schemas/Address.dxns` and `schemas/Person.dxns` on disk:
 ```
 
 ```js
-const { decode, Schema, Registry, FileResolver } = require('dextrin');
+const { decode, Schema, Registry, FileResolver } = require('@joetjen/dextrin');
 const fs = require('node:fs');
 
 const doc = decode(fs.readFileSync('schemas/Person.dxns', 'utf8'));

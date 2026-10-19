@@ -11,7 +11,7 @@ API around it.
 ## 1. Decoding and encoding text
 
 ```js
-const { decode, encode } = require('dextrin');
+const { decode, encode } = require('@joetjen/dextrin');
 
 const value = decode('%{name: "Ada", active: true, score: 19.99M}');
 //=> Map(3) {
@@ -104,7 +104,7 @@ native JS equivalent, where one exists.
 ## 3. Round-tripping through `.dxnb`
 
 ```js
-const { decodeBinary, encodeBinary } = require('dextrin');
+const { decodeBinary, encodeBinary } = require('@joetjen/dextrin');
 
 const bytes = encodeBinary(value);
 const back = decodeBinary(bytes);
@@ -159,7 +159,7 @@ which keeps everything — comments, blank lines, commas — beside the
 value:
 
 ```js
-const { Document } = require('dextrin');
+const { Document } = require('@joetjen/dextrin');
 
 let doc = Document.parse('# the config\n%{name: "acme", version: "1.0.0" # bumped for the fix\n}\n');
 
@@ -194,7 +194,7 @@ with no field structure. Register a decoder and (optionally) an
 encoder on a `Registry`:
 
 ```js
-const { Registry } = require('dextrin');
+const { Registry } = require('@joetjen/dextrin');
 
 class Money {
   constructor(cents) {
@@ -226,7 +226,7 @@ y: 2}` decodes to an opaque `DXNStruct`. A `.dxns` schema document is
 itself just DXN data — no new grammar, no new parser:
 
 ```js
-const { Schema } = require('dextrin');
+const { Schema } = require('@joetjen/dextrin');
 
 const schemaDoc = decode(`
 %{
@@ -264,7 +264,7 @@ anywhere in the value you're encoding gets checked against its own
 schema before anything is written:
 
 ```js
-const { DXNStruct } = require('dextrin');
+const { DXNStruct } = require('@joetjen/dextrin');
 
 const bad = DXNStruct.keyed('Point', [['x', 1n]]);
 encode(bad, { registry });
@@ -478,7 +478,7 @@ const doc = decode(`
 registry as `compile`'s base registry to use them:
 
 ```js
-const { Std } = require('dextrin');
+const { Std } = require('@joetjen/dextrin');
 
 const registry4 = Schema.compile(doc, Std.registry());
 ```
