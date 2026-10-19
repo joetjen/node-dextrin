@@ -19,13 +19,13 @@
  *     const compiled = compile(value, registry);
  */
 
-const fs = require('node:fs');
-const path = require('node:path');
 const parser = require('../text/parser.cjs');
 const Compiler = require('./compiler.cjs');
 const Registry = require('../registry.cjs');
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'priv', 'schema', 'std.dxns'), 'utf8');
+// The text of priv/schema/std.dxns, as a module so that a bundled copy of
+// this package still has it (scripts/std-source.cjs).
+const SOURCE = require('./std-source.cjs');
 
 /** The standard library's own `.dxns` source. @returns {string} */
 function source() {

@@ -7,8 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **TypeScript declarations**, written from the JSDoc by `npm run types`
+  (and on `prepack`) into `types/` and named by `package.json`'s `types`
+  and `exports`, for `import` and `require` alike. A TypeScript program
+  using the package is typechecked against them in `npm run precommit`.
+
 ### Fixed
 
+- **The package survives a bundler.** The standard library's schemas
+  were read off disk next to the source at load, and the ES module entry
+  reached the implementation through `import.meta.url`; bundled into one
+  CommonJS file (as the DXN VS Code extension does), both failed at load.
+  The standard library's text is now a module written from
+  `priv/schema/std.dxns` (`npm run std`; a test fails when it is out of
+  date), and the ES module entry re-exports the CommonJS one instead of
+  keeping a second copy of `decode`, `encode`, `decodeBinary` and
+  `encodeBinary`.
 - **A value written well that is not one is a `syntax` error** at the
   token it began with (`DXN.md` §5), as the reference answers: an
   impossible date or time, a uuid or datetime that is not one, an unknown
