@@ -1,6 +1,7 @@
-import { createRequire } from 'node:module';
+// The ES module face of equality.cjs, as every other `.js` here is its
+// `.cjs`: an `import` of it, which Node and every bundler resolve alike.
+// It reached the module through `createRequire(import.meta.url)`, which a
+// bundle written as CommonJS has no value for.
+import equality from './equality.cjs';
 
-const require = createRequire(import.meta.url);
-const { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK } = require('./equality.cjs');
-
-export { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK };
+export const { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK } = equality;
