@@ -110,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Licensed under the Apache License 2.0 (`Apache-2.0`); it was MIT.
 - **A registered class instance carries extra fields**: an own property
   its schema does not declare is written as an extra field (text entries,
   the trailing tag-215 map in `.dxnb`), as an Elixir struct's undeclared
