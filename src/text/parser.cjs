@@ -169,9 +169,36 @@ class Parser {
     return next?.type === 'IDENTIFIER' && next.value === '_';
   }
 
-  /** @returns {unknown} */
+  /**
+   * One value, read off the tokens.
+   *
+   * **A value written well that is not one** -- an impossible date, a
+   * uuid that is not one, an unknown escape -- is text that does not
+   * parse: the error the value's own constructor throws becomes a
+   * `syntax` error at the token the value began with, as the reference
+   * answers. One with a category of its own (a map key not allowed, a
+   * schema violation) or a parser's own error is passed on as it is.
+   *
+   * @returns {unknown}
+   */
   parseValueBody() {
     const tok = this.peek();
+    try {
+      return this.parseValueToken(tok);
+    } catch (err) {
+      if (err instanceof ParseError || err instanceof LexError) throw err;
+      if (err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string') throw err;
+      throw new ParseError(errorMessage(err), tok.start);
+    }
+  }
+
+  /**
+   * The value `tok` begins.
+   *
+   * @param {import('./lexer.cjs').Token} tok
+   * @returns {unknown}
+   */
+  parseValueToken(tok) {
     switch (tok.type) {
       case 'NIL':
         this.pos += 1;
@@ -193,7 +220,7 @@ class Parser {
         return DXNDecimal.fromString(tok.value.slice(0, -1));
       case 'RATIONAL':
         this.pos += 1;
-        return this.parseRationalToken(tok.value);
+        return this.parseRationalToken(tok.value, tok.start);
       case 'STRING':
         this.pos += 1;
         return decodeString(tok.value);
@@ -239,12 +266,15 @@ class Parser {
     return Number(text);
   }
 
-  /** @param {string} text */
-  parseRationalToken(text) {
+  /**
+   * @param {string} text
+   * @param {number} offset where the rational starts
+   */
+  parseRationalToken(text, offset) {
     const slash = text.indexOf('/');
     const numerator = BigInt(text.slice(0, slash));
     const denominator = BigInt(text.slice(slash + 1));
-    if (denominator === 0n) throw new ParseError(`rational denominator must not be zero: ${text}`, 0);
+    if (denominator === 0n) throw new ParseError(`rational denominator must not be zero: ${text}`, offset);
     return new DXNRational(numerator, denominator);
   }
 
@@ -337,7 +367,7 @@ class Parser {
     }
     this.begin('struct', at);
     try {
-      return this.parseStructBody();
+      return this.parseStructBody(this.tokens[at].start);
     } finally {
       this.end();
     }
@@ -346,9 +376,10 @@ class Parser {
   /**
    * The rest of a struct after its `%`: its name, its version, and its
    * keyed or positional body.
+   * @param {number} start where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
-  parseStructBody() {
+  parseStructBody(start) {
     const name = this.next('IDENTIFIER').value;
     const version = this.parseStructVersion();
     if (this.at('LBRACE')) {
@@ -364,10 +395,10 @@ class Parser {
         if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
         else extra.push([key, value]);
       }
-      return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra);
+      return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra, start);
     }
     const { values, extra } = this.parsePositionalBody();
-    return this.materializeStruct(name, { type: 'positional', values }, version, extra);
+    return this.materializeStruct(name, { type: 'positional', values }, version, extra, start);
   }
 
   /**
@@ -437,9 +468,10 @@ class Parser {
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
    * @param {number | null} [version]
    * @param {Array<[unknown, unknown]>} [extra]
+   * @param {number} [start] where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
-  materializeStruct(name, fields, version = null, extra = []) {
+  materializeStruct(name, fields, version = null, extra = [], start = 0) {
     if (!this.registry) return new DXNStruct(name, fields, version, extra);
     try {
       // Fail-fast, decode-time enforcement — a schema violation is an
@@ -453,7 +485,7 @@ class Parser {
       // A schema violation keeps its own category (DXN.md §5); it is not
       // a syntax error for having been found while parsing.
       if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
-      throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
+      throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, start);
     }
   }
 
