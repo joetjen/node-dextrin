@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A value written well that is not one is a `syntax` error** at the
+  token it began with (`DXN.md` §5), as the reference answers: an
+  impossible date or time, a uuid or datetime that is not one, an unknown
+  string escape. They came back with no category and no offset.
+- A rational with a zero denominator is refused at the rational, not at
+  offset 0; a struct's refusal is placed at its `%`, not at a token
+  index.
 - `Document.format` wrote the header without its space (`@dxn"1.0"`);
   it writes the tag, one space and the version, however they were
   spaced.
