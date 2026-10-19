@@ -9,12 +9,14 @@ const value: unknown = decode('%{a: 1}');
 const text: string = encode(value, { pretty: true });
 const doc = Document.parse('%{a: 1} # one\n');
 const laidOut: string = Document.format(doc);
-const registry: InstanceType<typeof Registry> = Schema.compile(decode('%{U: %schema{a: :string}}'), Std.registry());
+const registry: Registry = Schema.compile(decode('%{U: %schema{a: :string}}'), Std.registry());
 
 try {
   decode('%{1.5 => 1}', { registry });
 } catch (err) {
   if (err instanceof DXNError) {
+    const refusal: DXNError = err;
+    void refusal;
     const where: number | undefined = err.offset;
     const category: string | null = err.category;
     void where;

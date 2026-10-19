@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (and on `prepack`) into `types/` and named by `package.json`'s `types`
   and `exports`, for `import` and `require` alike. A TypeScript program
   using the package is typechecked against them in `npm run precommit`.
+  Every class is a type as well as a value there (`err: DXNError`,
+  `registry: Registry`, `x: DXNStruct`): the entry and `values/` export
+  name by name, which `tsc` declares so.
 
 ### Fixed
 

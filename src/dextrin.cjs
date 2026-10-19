@@ -13,7 +13,34 @@
  */
 
 const version = require('./version.cjs');
-const values = require('./values/index.cjs');
+const {
+  DXNChar,
+  DXNSymbol,
+  DXNKeyword,
+  DXNList,
+  DXNTuple,
+  DXNOrderedMap,
+  DXNMap,
+  DXNSortedSet,
+  DXNStruct,
+  DXNDecimal,
+  DXNRational,
+  DXNDate,
+  DXNTime,
+  DXNTimestamp,
+  DXNDateTime,
+  DXNDuration,
+  DXNUUID,
+  DXNURI,
+  DXNBytes,
+  DXNRegex,
+  DXNCustomTag,
+  dxnEquals,
+  dxnCompare,
+  canonicalKey,
+  kindOf,
+  KIND_RANK,
+} = require('./values/index.cjs');
 const DXNError = require('./error.cjs');
 const Registry = require('./registry.cjs');
 const Schema = require('./schema.cjs');
@@ -157,16 +184,47 @@ const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
 const Document = require('./document.cjs');
 
-// The names the declarations of `Document` and `Schema` use, in scope
-// here too: `tsc` writes those modules' types out inline in this one's
-// declarations, by these names (`npm run types`).
-/**
- * @typedef {import('./document.cjs').Options} Options
- * @typedef {import('./document.cjs').Doc} Doc
- * @typedef {import('./document.cjs').Path} Path
- * @typedef {import('./document.cjs').Change} Change
- * @typedef {import('./schema/compat.cjs').Problem} Problem
- * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
- */
+// One name at a time, not one object: `tsc` declares a class exported
+// this way as a type as well as a value -- `err: DXNError`, `r: Registry`
+// -- and a module as itself (`npm run types`); an object's members are
+// values only.
+module.exports.version = version;
+module.exports.decode = decode;
+module.exports.encode = encode;
+module.exports.decodeBinary = decodeBinary;
+module.exports.encodeBinary = encodeBinary;
+module.exports.canonical = canonical;
+module.exports.answer = answer;
+module.exports.DXNError = DXNError;
+module.exports.Registry = Registry;
+module.exports.Schema = Schema;
+module.exports.Std = Std;
+module.exports.FileResolver = FileResolver;
+module.exports.Document = Document;
+module.exports.DXNChar = DXNChar;
+module.exports.DXNSymbol = DXNSymbol;
+module.exports.DXNKeyword = DXNKeyword;
+module.exports.DXNList = DXNList;
+module.exports.DXNTuple = DXNTuple;
+module.exports.DXNOrderedMap = DXNOrderedMap;
+module.exports.DXNMap = DXNMap;
+module.exports.DXNSortedSet = DXNSortedSet;
+module.exports.DXNStruct = DXNStruct;
+module.exports.DXNDecimal = DXNDecimal;
+module.exports.DXNRational = DXNRational;
+module.exports.DXNDate = DXNDate;
+module.exports.DXNTime = DXNTime;
+module.exports.DXNTimestamp = DXNTimestamp;
+module.exports.DXNDateTime = DXNDateTime;
+module.exports.DXNDuration = DXNDuration;
+module.exports.DXNUUID = DXNUUID;
+module.exports.DXNURI = DXNURI;
+module.exports.DXNBytes = DXNBytes;
+module.exports.DXNRegex = DXNRegex;
+module.exports.DXNCustomTag = DXNCustomTag;
+module.exports.dxnEquals = dxnEquals;
+module.exports.dxnCompare = dxnCompare;
+module.exports.canonicalKey = canonicalKey;
+module.exports.kindOf = kindOf;
+module.exports.KIND_RANK = KIND_RANK;
 
-module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };
