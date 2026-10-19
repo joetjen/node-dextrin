@@ -488,7 +488,9 @@ class Parser {
       // a syntax error for having been found while parsing. It is placed
       // at this struct's `%` unless a struct inside it was already where
       // it was found -- the innermost place wins, as the reference's.
-      if (err instanceof DXNError || err instanceof SchemaValidationError) {
+      // So does any refusal that names its own category -- a resolver's
+      // `schema/compile` for a schema file it cannot use, say.
+      if (err instanceof DXNError || err instanceof SchemaValidationError || hasCategory(err)) {
         if (typeof (/** @type {any} */ (err).offset) !== 'number') /** @type {any} */ (err).offset = start;
         throw err;
       }
@@ -712,6 +714,17 @@ function errorMessage(err) {
  */
 function strictly(registry, strict) {
   return registry && strict !== undefined ? registry.putStrict(strict) : registry;
+}
+
+
+/**
+ * Whether `err` names its own DXN.md §5 category, which is then its own
+ * rather than a parser's `syntax`.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function hasCategory(err) {
+  return err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string';
 }
 
 module.exports = { parse, parseTree, ParseError, LexError };

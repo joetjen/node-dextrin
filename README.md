@@ -290,8 +290,8 @@ Also included, each mirroring its `Dextrin.Schema.*` counterpart:
 without depending on `dextrin`, see `src/schema/provider.cjs`),
 `Std.registry()`'s standard library of common named types
 (`PositiveInteger`, `NonEmptyString`, ...), and
-`FileResolver.forPaths([...])`'s `Namespace/Name` → `.dxns`-file
-resolver for `Registry#putResolver`:
+`FileResolver.forPaths([...])`'s resolver from names to `.dxns` files,
+by DXN.md §4.6's convention, for `Registry#putResolver`:
 
 ```js
 const { decode, Schema, Registry, Std, FileResolver } = require('@joetjen/dextrin');

@@ -1,46 +1,52 @@
 'use strict';
 
 /**
- * @fileoverview An optional convenience `struct_resolver`
- * (`Registry#putResolver`) resolving `Namespace/Name` references to
- * `.dxns` files on disk, mirroring `Dextrin.Schema.FileResolver`.
+ * @fileoverview A resolver (`Registry#putResolver`) finding a struct's
+ * schema in `.dxns` files on disk, by the convention DXN.md §4.6 states
+ * for every implementation -- so one set of schema files serves them all.
+ * Mirrors `Dextrin.Schema.FileResolver`. Swappable like any resolver:
+ * anyone with another convention writes their own.
  *
- * Composing multiple compiled schemas into one registry needs no
- * special mechanism at all — `schema.compile`'s `baseRegistry`
- * parameter threads across repeated calls. What genuinely needs a
- * policy decision is *automatically* resolving a bare `Namespace/Name`
- * reference to a file path, and this module is *one* reasonable,
- * swappable answer to that — not a mandated convention baked into
- * `Registry`/`schema.cjs` itself. Anyone with a different convention
- * writes their own resolver function directly against
- * `Registry#putResolver`; this module exists only because the
- * convention below is a common, unsurprising default.
+ * **The convention.** A name is segments joined by `.`, with at most one
+ * `/` between a namespace and a name (`Foo.Bar/Baz`); every segment is a
+ * directory but the last, which names the file. A schema of version `N`
+ * named `Foo.Bar/Baz` is looked for, on each search path in order, in
  *
- * **Convention**: `Namespace/Name` resolves to
- * `<searchPath>/Namespace.dxns`, read for the specific entry named
- * `Name` — a `.dxns` file is already a map of possibly-many schema
- * names, so "Namespace" names the *file*, "Name" one schema defined
- * inside it. A bare reference with no `/` (`Name`) resolves to
- * `<searchPath>/Name.dxns`, read for the entry also named `Name`.
+ * - `Foo/Bar/Baz-vN.dxns` (version 1 also `Foo/Bar/Baz.dxns`),
+ * - `Foo/Bar/Baz/vN.dxns`,
+ * - `Foo.Bar.Baz-vN.dxns` (version 1 also `Foo.Bar.Baz.dxns`),
+ * - and the entry `Baz` in `Foo.Bar.dxns`, by its `%schema(N)`;
+ *
+ * a name with no `/` is its own namespace: `Money` in `Money.dxns`.
+ *
+ * - **The first search path that has the name at all decides.**
+ * - **A file's version is its schema's**, or the file is refused.
+ * - **One version is found once**: two files holding the same version
+ *   are refused, naming both.
+ * - **Every version found is loaded**, so an older struct reaches the
+ *   materializer.
+ *
+ * A refusal is a thrown `SchemaCompileError` (`schema/compile`).
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const parser = require('../text/parser.cjs');
 const Compiler = require('./compiler.cjs');
+const Compiled = require('./compiled.cjs');
 const Registry = require('../registry.cjs');
 
+const { SchemaCompileError } = Compiler;
+
 /**
- * Builds a `struct_resolver` searching `searchPaths` in order,
- * returning the first match.
+ * A resolver searching `searchPaths` in order.
  * @param {string[]} searchPaths
- * @returns {(name: string) => import('./compiled.cjs') | undefined}
+ * @returns {(name: string) => Compiled[] | undefined}
  */
 function forPaths(searchPaths) {
   return (name) => {
-    const [fileStem, entryName] = splitName(name);
     for (const dir of searchPaths) {
-      const found = resolveIn(dir, fileStem, entryName);
+      const found = inPath(dir, name);
       if (found) return found;
     }
     return undefined;
@@ -48,29 +54,119 @@ function forPaths(searchPaths) {
 }
 
 /**
+ * Every version of `name` `dir` holds, each under the name asked for, or
+ * undefined when it holds none, so the next search path is asked.
  * @param {string} dir
- * @param {string} fileStem
- * @param {string} entryName
- * @returns {import('./compiled.cjs') | undefined}
+ * @param {string} name
+ * @returns {Compiled[] | undefined}
  */
-function resolveIn(dir, fileStem, entryName) {
-  const filePath = path.join(dir, `${fileStem}.dxns`);
-  try {
-    if (!fs.statSync(filePath).isFile()) return undefined;
-    const source = fs.readFileSync(filePath, 'utf8');
-    const doc = parser.parse(source);
-    const registry = Compiler.compile(doc, new Registry());
-    const found = registry.fetchStructSchema(entryName);
-    return found ? found.compiled : undefined;
-  } catch {
-    return undefined;
+function inPath(dir, name) {
+  const { entry, candidates } = candidatesFor(dir, name);
+  const found = candidates.flatMap(({ file, expected }) => load(file, entry, expected));
+  if (found.length === 0) return undefined;
+  /** @type {Map<number, string[]>} */
+  const holders = new Map();
+  for (const { version, file } of found) holders.set(version, [...(holders.get(version) ?? []), file]);
+  for (const [version, files] of holders) {
+    if (files.length > 1) {
+      throw new SchemaCompileError(
+        `${name} version ${version} is in two files, ${[...files].sort().join(' and ')}; it is found once (DXN.md §4.6)`
+      );
+    }
   }
+  return found.map(({ compiled }) => new Compiled({ name, version: compiled.version, fields: compiled.fields }));
 }
 
-/** @param {string} name @returns {[string, string]} */
-function splitName(name) {
+/**
+ * The entry a file holds the schema under -- the name after its `/`, or
+ * the whole name when it has none -- and every file that may hold it,
+ * with the version its name says (`'any'` for the namespace file).
+ * @param {string} dir
+ * @param {string} name
+ * @returns {{entry: string, candidates: Array<{file: string, expected: number | 'any'}>}}
+ */
+function candidatesFor(dir, name) {
   const slash = name.indexOf('/');
-  return slash === -1 ? [name, name] : [name.slice(0, slash), name.slice(slash + 1)];
+  const namespace = slash === -1 ? null : name.slice(0, slash);
+  const entry = slash === -1 ? name : name.slice(slash + 1);
+  const segments = name.split(/[/.]/);
+  const stem = /** @type {string} */ (segments[segments.length - 1]);
+  const nested = path.join(dir, ...segments.slice(0, -1));
+  const flat = path.join(dir, segments.join('.'));
+
+  /** @type {Array<{file: string, expected: number | 'any'}>} */
+  const all = [
+    // One file, one candidate: a name without a namespace is both its own
+    // version-1 file and its namespace file, and is read as the latter.
+    { file: path.join(dir, `${namespace ?? entry}.dxns`), expected: 'any' },
+    { file: path.join(nested, `${stem}.dxns`), expected: 1 },
+    { file: `${flat}.dxns`, expected: 1 },
+    ...numbered(nested, `${stem}-v`),
+    ...numbered(path.join(nested, stem), 'v'),
+    ...numbered(path.dirname(flat), `${path.basename(flat)}-v`),
+  ];
+  const seen = new Set();
+  const candidates = all.filter(({ file }) => {
+    const key = path.resolve(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { entry, candidates };
+}
+
+/**
+ * The files in `dir` named `<prefix>N.dxns`, each with its version `N`.
+ * @param {string} dir
+ * @param {string} prefix
+ * @returns {Array<{file: string, expected: number}>}
+ */
+function numbered(dir, prefix) {
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const shape = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)\\.dxns$`);
+  return names.flatMap((file) => {
+    const m = shape.exec(file);
+    const version = m ? Number(m[1]) : 0;
+    return version > 0 ? [{ file: path.join(dir, file), expected: version }] : [];
+  });
+}
+
+/**
+ * The versions of `entry` in the file `file`: none when the file is not
+ * there or holds no such entry. A file that does not compile, or holds
+ * another version than its name says, is refused.
+ * @param {string} file
+ * @param {string} entry
+ * @param {number | 'any'} expected
+ * @returns {Array<{version: number, compiled: Compiled, file: string}>}
+ */
+function load(file, entry, expected) {
+  let source;
+  try {
+    if (!fs.statSync(file).isFile()) return [];
+    source = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  let registry;
+  try {
+    registry = Compiler.compile(parser.parse(source), new Registry());
+  } catch (err) {
+    throw new SchemaCompileError(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const versions = registry.structs.get(entry);
+  if (!versions || versions.size === 0) return [];
+  if (expected !== 'any' && !(versions.size === 1 && versions.has(expected))) {
+    throw new SchemaCompileError(
+      `${file} holds ${entry} as version ${[...versions.keys()].join(', ')}, but its name says version ${expected} (DXN.md §4.6)`
+    );
+  }
+  return [...versions].map(([version, compiled]) => ({ version, compiled, file }));
 }
 
 module.exports = { forPaths };
