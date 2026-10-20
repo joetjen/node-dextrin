@@ -219,7 +219,9 @@ function resolved(type, known, path) {
         otherwise: type.otherwise === null ? null : resolved(type.otherwise, known, path)
       };
     case 'refine':
-      return { ...type, base: resolved(type.base, known, path) };
+      return { ...type, base: resolved(type.base, known, path), constraints: resolvedContains(type.constraints, known, path) };
+    case 'list-items':
+      return { ...type, particles: resolvedParticles(type.particles, known, path) };
     case 'tuple-of':
       return { ...type, elems: type.elems.map((/** @type {any} */ t) => resolved(t, known, path)) };
     case 'one-of':
@@ -230,6 +232,7 @@ function resolved(type, known, path) {
     case 'set-of':
     case 'array-of':
     case 'sorted-set-of':
+    case 'tuple-of-all':
     case 'not':
     case 'nilable':
       return { ...type, elem: resolved(type.elem, known, path) };
@@ -239,6 +242,25 @@ function resolved(type, known, path) {
     default:
       return type;
   }
+}
+
+/**
+ * A refine's constraints with the type its `contains` holds resolved, as
+ * `resolved` resolves every type.
+ * @param {{[k: string]: any}} constraints @param {Map<string, any>} known @param {string[]} path
+ */
+function resolvedContains(constraints, known, path) {
+  return 'contains' in constraints ? { ...constraints, contains: resolved(constraints.contains, known, path) } : constraints;
+}
+
+/**
+ * A `{:list-items}`'s or a group's items, each type in them resolved.
+ * @param {any[]} particles @param {Map<string, any>} known @param {string[]} path @returns {any[]}
+ */
+function resolvedParticles(particles, known, path) {
+  return particles.map((p) =>
+    p.kind === 'one' ? { kind: 'one', type: resolved(p.type, known, path) } : { ...p, group: resolvedParticles(p.group, known, path) }
+  );
 }
 
 /**
@@ -532,12 +554,79 @@ function compileTypeExpr(value, aliases) {
     }
     if (tag === 'generic') throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
     if (tag === 'refine' && rest.length === 2 && rest[1] instanceof Map) {
-      const constraints = Object.fromEntries(Array.from(rest[1].entries(), ([k, v]) => [literalName(k), v]));
-      return { form: 'refine', base: compileTypeExpr(rest[0], aliases), constraints };
+      const base = compileTypeExpr(rest[0], aliases);
+      return { form: 'refine', base, constraints: refineConstraints(rest[1], aliases) };
     }
+    // `{:list-items p ...}`: a list's items in order, each `p` a type for
+    // one item or a `{:repeat ...}` (DXN.md §4.1a).
+    if (tag === 'list-items') return { form: 'list-items', particles: particles(rest, aliases) };
+    if (tag === 'tuple-of-all' && rest.length === 1) return { form: 'tuple-of-all', elem: compileTypeExpr(rest[0], aliases) };
+    if (tag === 'repeat' || tag === 'group') throw new SchemaCompileError(`a ${tag} stands only among {:list-items ...}'s items`);
   }
 
   throw new SchemaCompileError(`unrecognized type expression: ${describe(value)}`);
+}
+
+/**
+ * A `{:list-items}`'s or a group's items: `{kind: 'one', type}` for a
+ * type, `{kind: 'repeat', group, min, max}` for a repeat, `max` null when
+ * there is no upper bound.
+ * @param {unknown[]} values @param {Map<string, unknown>} aliases
+ * @returns {import('./type-expr.cjs').Particle[]}
+ */
+function particles(values, aliases) {
+  return values.map((value) => particle(value, aliases));
+}
+
+/** @param {unknown} value @param {Map<string, unknown>} aliases @returns {import('./type-expr.cjs').Particle} */
+function particle(value, aliases) {
+  const head = value instanceof DXNTuple && value.items[0] instanceof DXNKeyword ? value.items[0].name : null;
+  if (head === 'repeat') {
+    const [, inner, least, most] = /** @type {DXNTuple} */ (value).items;
+    const fits =
+      /** @type {DXNTuple} */ (value).items.length === 4 &&
+      typeof least === 'bigint' &&
+      least >= 0n &&
+      (most === null || (typeof most === 'bigint' && most >= least));
+    if (!fits) throw new SchemaCompileError('a repeat is {:repeat type min max}: 0 <= min <= max, max nil for no bound');
+    const group = inner instanceof DXNTuple && inner.items[0] instanceof DXNKeyword && inner.items[0].name === 'group' ? inner.items.slice(1) : [inner];
+    return { kind: 'repeat', group: particles(group, aliases), min: Number(least), max: most === null ? null : Number(most) };
+  }
+  if (head === 'group') throw new SchemaCompileError('a group stands only in a repeat, {:repeat {:group a b ...} min max}');
+  return { kind: 'one', type: compileTypeExpr(value, aliases) };
+}
+
+const REFINE_KEYS = new Set([
+  'min', 'max', 'exclusive-min', 'exclusive-max', 'multiple-of', 'min-length', 'max-length',
+  'pattern', 'min-count', 'max-count', 'finite', 'offsets', 'version', 'prefix', 'contains',
+  'min-contains', 'max-contains', 'unique', 'unique-by'
+]);
+
+/**
+ * A refine's constraints by name, every key one DXN.md §4.2 knows: a
+ * misspelt key would otherwise refuse every value, silently. `contains`
+ * holds a type, compiled here; `unique-by` a field's name.
+ * @param {Map<unknown, unknown>} written @param {Map<string, unknown>} aliases
+ * @returns {{[k: string]: unknown}}
+ */
+function refineConstraints(written, aliases) {
+  /** @type {{[k: string]: unknown}} */
+  const named = Object.fromEntries(Array.from(written.entries(), ([k, v]) => [literalName(k), v]));
+  const unknown = Object.keys(named)
+    .sort(byCodepoint)
+    .find((key) => !REFINE_KEYS.has(key));
+  if (unknown !== undefined) throw new SchemaCompileError(`${unknown} is no refine constraint (DXN.md §4.2)`);
+  if (!('contains' in named) && ('min-contains' in named || 'max-contains' in named)) {
+    throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
+  }
+  if ('contains' in named) named.contains = compileTypeExpr(named.contains, aliases);
+  if ('unique-by' in named) named['unique-by'] = literalName(named['unique-by']);
+  return named;
+}
+
+/** Strings in code point order, as Elixir's `Enum.sort/1` orders them. @param {string} a @param {string} b */
+function byCodepoint(a, b) {
+  return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
 }
 
 // ---- helpers -------------------------------------------------------------

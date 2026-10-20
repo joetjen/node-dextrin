@@ -312,7 +312,9 @@ function typeReferences(type) {
     case 'apply':
       return type.args.flatMap(typeReferences);
     case 'refine':
-      return typeReferences(type.base);
+      return [...typeReferences(type.base), ...('contains' in type.constraints ? typeReferences(type.constraints.contains) : [])];
+    case 'list-items':
+      return type.particles.flatMap(particleReferences);
     case 'tuple-of':
       return type.elems.flatMap(typeReferences);
     case 'one-of':
@@ -325,6 +327,11 @@ function typeReferences(type) {
     default:
       return type.elem ? typeReferences(type.elem) : [];
   }
+}
+
+/** The references a `{:list-items}`'s item makes. @param {any} particle @returns {string[]} */
+function particleReferences(particle) {
+  return particle.kind === 'one' ? typeReferences(particle.type) : particle.group.flatMap(particleReferences);
 }
 
 /** @param {string} name @param {string[]} extern */
