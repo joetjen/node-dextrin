@@ -41,7 +41,7 @@ describe('Format', () => {
     });
 
     it('after whitespace, commas, comments and a header', () => {
-      expect(Format.identifies('\n  , # a comment\n# another\n@dxn "1.1"  # the version\n\n%{a: 1}', 'text')).to.equal(true);
+      expect(Format.identifies('\n  , # a comment\n# another\n@dxn "1.0"  # the version\n\n%{a: 1}', 'text')).to.equal(true);
     });
 
     it('leaves a list or a scalar unrecognised on purpose: they overlap with JSON', () => {

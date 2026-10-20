@@ -47,9 +47,9 @@ describe('versioned schemas', () => {
       expect(categoryOf(() => compiled('%{P: %schema{fields: @ordered %{x: :integer}}}'))).to.equal('schema/compile');
     });
 
-    // Format 1.1 (DXN.md's introduction): a 1.0 schema says what changed,
-    // rather than that a field has no known type -- as the reference.
-    it('says a 1.0 schema is one, and what 1.1 writes instead', () => {
+    // A schema in Dextrin 0.1's syntax says what changed, rather than that
+    // a field has no known type -- as the reference.
+    it('says a 0.1 schema is one, and what a schema is written as now', () => {
       for (const old of [
         '%{P: %schema{fields: @ordered %{x: :integer}}}',
         '%{P: %schema{closed: true, x: :integer}}',
@@ -59,14 +59,14 @@ describe('versioned schemas', () => {
           compiled(old);
         } catch (err) {
           expect(err.category).to.equal('schema/compile');
-          expect(err.message).to.include('DXN 1.0').and.to.include('%schema(N){field: type, ...}');
+          expect(err.message).to.include('Dextrin 0.1').and.to.include('%schema(N){field: type, ...}');
           continue;
         }
         throw new Error(`expected ${old} to be refused`);
       }
     });
 
-    it('and a 1.1 schema may still have fields so named', () => {
+    it('and a schema may still have fields so named', () => {
       expect(() => compiled('%{P: %schema{fields: {:list-of :string}, closed: :boolean, forbidden?: :string}}')).not.to.throw();
     });
   });
