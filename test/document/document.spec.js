@@ -205,6 +205,12 @@ describe('Document', () => {
         expect(formatted('%{deps: ["a" "b"], at: %{x: 1, y: 2}}')).to.equal('%{\n  deps: ["a" "b"]\n  at: %{x: 1 y: 2}\n}');
       });
 
+      // A regex's flags are its tag's header (DXN.md §1.2): written
+      // against the tag, as `%Name(3)` is.
+      it("writes a regex's header against its tag", () => {
+        expect(formatted('%{a: @regex(im) "x", b: @regex (i) "y"}')).to.equal('%{\n  a: @regex(im) "x"\n  b: @regex(i) "y"\n}');
+      });
+
       it('breaks the top level however short it is', () => {
         expect(formatted('[1]')).to.equal('[\n  1\n]');
       });

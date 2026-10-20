@@ -11,7 +11,7 @@ describe('DXNDuration', () => {
       days: null,
       hours: null,
       minutes: null,
-      microseconds: null
+      nanoseconds: null
     });
   });
 
@@ -20,6 +20,14 @@ describe('DXNDuration', () => {
     expect(d.years).to.equal(1);
     expect(d.days).to.equal(3);
     expect(d.months).to.equal(null);
+  });
+
+  // Seconds and their fraction are one field, nanoseconds, a BigInt: a
+  // Number holds only some 104 days of them exactly.
+  it('holds seconds as nanoseconds, a BigInt, from a BigInt or an integer', () => {
+    expect(new DXNDuration({ nanoseconds: 1_500_000_000n }).nanoseconds).to.equal(1_500_000_000n);
+    expect(new DXNDuration({ nanoseconds: 5 }).nanoseconds).to.equal(5n);
+    expect(() => new DXNDuration({ nanoseconds: 0.5 })).to.throw(TypeError);
   });
 
   it('rejects a non-integer field', () => {

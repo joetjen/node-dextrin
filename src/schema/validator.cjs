@@ -375,11 +375,11 @@ function wrapChildren(value, registry, opts) {
   }
   // Every other DXN* leaf/composite wrapper (DXNChar, DXNSymbol,
   // DXNKeyword, DXNDecimal, DXNRational, DXNDate, DXNTime,
-  // DXNTimestamp, DXNDateTime, DXNDuration, DXNUUID, DXNURI, DXNBytes,
+  // DXNDateTime, DXNLocalDateTime, DXNDuration, DXNUUID, DXNURI, DXNBytes,
   // DXNRegex, ...) is already a complete, opaque DXN value with
   // nothing schema-checkable inside it. A native `Date`/`RegExp`/any
   // typed array (`DXNBytes`/`DXNUUID`'s own backing storage, or a
-  // plain value a coercion target like `DXNTimestamp.fromDate` needs
+  // plain value a coercion target like `DXNDateTime.fromDate` needs
   // to see *unchanged*) carries real internal slots a generic
   // property-by-property rebuild can't reconstruct — `Object.entries`
   // on a `Date` finds no enumerable properties at all, silently

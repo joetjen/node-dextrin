@@ -21,12 +21,12 @@ describe('a value that is not one', () => {
     expect(refusal('[1 @uuid "nope"]')).to.deep.equal({ category: 'syntax', offset: 3 });
   });
 
-  it('an impossible date is a syntax error at its sigil', () => {
-    expect(refusal('[~D[2020-13-45]]')).to.deep.equal({ category: 'syntax', offset: 1 });
+  it('an impossible date is a syntax error at its tag', () => {
+    expect(refusal('[@date "2020-13-45"]')).to.deep.equal({ category: 'syntax', offset: 1 });
   });
 
-  it('an impossible time is a syntax error at its sigil', () => {
-    expect(refusal('%{a: ~T[25:00:00]}')).to.deep.equal({ category: 'syntax', offset: 5 });
+  it('an impossible time is a syntax error at its tag', () => {
+    expect(refusal('%{a: @time "25:00:00"}')).to.deep.equal({ category: 'syntax', offset: 5 });
   });
 
   it('a datetime that is not one is a syntax error at its tag', () => {

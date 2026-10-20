@@ -37,7 +37,7 @@ const Field = require('./field.cjs');
 const PRIMITIVES = new Set([
   'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
   'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
-  'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex'
+  'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex'
 ]);
 
 class SchemaCompileError extends Error {
@@ -452,6 +452,11 @@ function compileTypeExpr(value, aliases) {
     if (value.name === 'any') return { form: 'any' };
     if (value.name === 'never') return { form: 'never' };
     if (PRIMITIVES.has(value.name)) return { form: 'primitive', name: value.name };
+    // DXN 0.2's timestamp type, now a datetime in UTC (DXN.md §4.2, Jan,
+    // 2026-10-20): a schema naming it keeps its meaning.
+    if (value.name === 'timestamp') {
+      return { form: 'refine', base: { form: 'primitive', name: 'datetime' }, constraints: { offsets: new DXNList(['Z']) } };
+    }
     throw new SchemaCompileError(`unrecognized primitive type name ${JSON.stringify(value.name)}`);
   }
 

@@ -97,8 +97,9 @@ Every wrapper class with a close native counterpart also has
 
 Everything else (`nil`→`null`, `boolean`, `integer`→`BigInt`, `float`
 →`number`, `DXNDecimal`, `string`, `map`→native `Map`, `set`→native
-`Set`, `date`→`DXNDate`, `time`→`DXNTime`, `timestamp`→`DXNTimestamp`,
-`datetime`→`DXNDateTime`, `regex`→`DXNRegex`) is the closest native or
+`Set`, `date`→`DXNDate`, `time`→`DXNTime`, `datetime`→`DXNDateTime`
+(a native `Date` encodes as one, in UTC), `local-datetime`→
+`DXNLocalDateTime`, `regex`→`DXNRegex`) is the closest native or
 wrapper JS shape — see the `DXNValue` typedef in
 [`src/values/index.cjs`](../src/values/index.cjs) for the full union.
 **`integer` always decodes as `BigInt`**, never `number` — the one

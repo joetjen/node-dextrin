@@ -18,11 +18,13 @@ const loaded = (...sources) =>
   sources.reduce((registry, source) => Schema.compile(decode(source), registry), new Registry());
 
 describe('.dxnb written by 0.1.0', () => {
+  // Its text is `values.dxn` as DXN writes it now, `values.respelled.dxn`:
+  // dates, times and the regex under their tags (DXN.md §1.2).
   // Compared as canonical forms (DXN.md §1.5): a set of keywords is a set
   // of JS symbols, which chai's deep equality cannot sort.
   it('reads back every value as its text decodes', () => {
     expect(canonical(decodeBinary(fixture('values.dxnb')))).to.equal(
-      canonical(decode(fixture('values.dxn').toString('utf8'))),
+      canonical(decode(fixture('values.respelled.dxn').toString('utf8'))),
     );
   });
 

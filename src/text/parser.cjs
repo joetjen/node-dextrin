@@ -44,7 +44,13 @@ const { SchemaValidationError } = require('../schema/validator.cjs');
 const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
-const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'bits', 'datetime', 'duration']);
+const BUILT_IN_TAGS = new Set([
+  'ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'bits',
+  'date', 'time', 'datetime', 'local-datetime', 'duration', 'regex'
+]);
+
+/** The letters a regex's header may hold, each once (`DXN.md` §1.2). */
+const REGEX_FLAGS = /** @type {const} */ (['i', 'm', 's', 'u', 'x', 'f', 'r']);
 
 class ParseError extends Error {
   /**
@@ -244,18 +250,6 @@ class Parser {
         return this.parsePercent();
       case 'AT':
         return this.parseAt();
-      case 'DATE_SIGIL':
-        this.pos += 1;
-        return temporal.parseDate(tok.value);
-      case 'TIME_SIGIL':
-        this.pos += 1;
-        return temporal.parseTime(tok.value);
-      case 'INSTANT_SIGIL':
-        this.pos += 1;
-        return temporal.parseInstant(tok.value);
-      case 'REGEX_SIGIL':
-        this.pos += 1;
-        return new DXNRegex(tok.value.pattern, flagsStringToObject(tok.value.flags));
       default:
         throw new ParseError(`unexpected token ${tok.type}`, tok.start);
     }
@@ -565,6 +559,11 @@ class Parser {
   /**
    * `@{...}` (set), or `@identifier value` (tag_form). Discard is
    * already stripped in `parseValue`.
+   *
+   * `@regex(im) "..."`: a regex's flags in a header against its tag, as
+   * `%Name(3)` carries a struct's version (`DXN.md` §1.2). A header on
+   * any other tag is refused. The tag node's `name` is the head's last
+   * token, its `)` when it has one, so a formatter writes the head whole.
    * @returns {unknown}
    */
   parseAt() {
@@ -575,10 +574,36 @@ class Parser {
     const nameTok = this.next('IDENTIFIER');
     this.mark('name');
     try {
-      return this.dispatchTag(nameTok.value, nameTok.start);
+      if (!this.at('LPAREN')) return this.dispatchTag(nameTok.value, nameTok.start);
+      this.next('LPAREN');
+      const flags = this.next('IDENTIFIER').value;
+      this.next('RPAREN');
+      this.mark('name');
+      if (nameTok.value !== 'regex') {
+        throw new ParseError(`@${nameTok.value} takes no (...) header; only @regex(flags) does`, nameTok.start);
+      }
+      return this.parseRegex(flags, nameTok.start);
     } finally {
       this.end();
     }
+  }
+
+  /**
+   * A regex: its pattern a string, its flags the header's letters, each
+   * once (`DXN.md` §1.2). The pattern is not compiled: PCRE's syntax and
+   * the `x`/`f`/`r` flags have no `RegExp` equivalent (see `DXNRegex`).
+   * @param {string} flags the header's letters, `''` when there is none.
+   * @param {number} offset
+   * @returns {DXNRegex}
+   */
+  parseRegex(flags, offset) {
+    const letters = Array.from(flags);
+    if (!letters.every((l) => REGEX_FLAGS.includes(/** @type {any} */ (l))) || new Set(letters).size !== letters.length) {
+      throw new ParseError(`@regex(${flags}): the flags are i m s u x f r, each once`, offset);
+    }
+    const pattern = this.parseValue();
+    if (typeof pattern !== 'string') throw new ParseError('@regex takes its pattern as a string', offset);
+    return new DXNRegex(pattern, Object.fromEntries(REGEX_FLAGS.map((f) => [f, letters.includes(f)])));
   }
 
   /**
@@ -635,10 +660,21 @@ class Parser {
           throw new ParseError(wanted, offset);
         }
       }
+      // Dates and times are ISO 8601 strings under their tag (DXN.md
+      // §1.2, Jan, 2026-10-20); a string not of the form its tag names
+      // is a syntax error.
+      case 'date':
+        return temporal.parseDate(this.parseStringValue(name, offset));
+      case 'time':
+        return temporal.parseTime(this.parseStringValue(name, offset));
       case 'datetime':
-        return temporal.parseOffsetDateTime(this.parseStringValue(name, offset));
+        return temporal.parseDateTime(this.parseStringValue(name, offset));
+      case 'local-datetime':
+        return temporal.parseLocalDateTime(this.parseStringValue(name, offset));
       case 'duration':
         return temporal.parseDuration(this.parseStringValue(name, offset));
+      case 'regex':
+        return this.parseRegex('', offset);
       default:
         throw new ParseError(`unhandled built-in tag ${name}`, offset);
     }
@@ -654,19 +690,6 @@ class Parser {
     if (typeof value !== 'string') throw new ParseError(`@${tagName} requires a string argument`, offset);
     return value;
   }
-}
-
-/** @param {string} flags @returns {{i: boolean, m: boolean, s: boolean, u: boolean, x: boolean, f: boolean, r: boolean}} */
-function flagsStringToObject(flags) {
-  return {
-    i: flags.includes('i'),
-    m: flags.includes('m'),
-    s: flags.includes('s'),
-    u: flags.includes('u'),
-    x: flags.includes('x'),
-    f: flags.includes('f'),
-    r: flags.includes('r')
-  };
 }
 
 /**

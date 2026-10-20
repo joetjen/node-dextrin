@@ -29,11 +29,6 @@ const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
-const DXNDate = require('../values/date.cjs');
-const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
-const DXNDateTime = require('../values/date-time.cjs');
-const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
@@ -97,19 +92,18 @@ function print(value, opts = {}) {
 
   if (value instanceof DXNStruct) return printStruct(value, opts);
 
-  if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
-  if (value instanceof DXNTime) return `~T[${temporal.formatTime(value)}]`;
-  if (value instanceof DXNTimestamp) return `~U[${temporal.formatInstant(value)}]`;
-  // A native `Date` is an instant: it always means a timestamp, with or
-  // without a schema (DXN.md §4.7).
-  if (value instanceof Date) return print(DXNTimestamp.fromDate(value), opts);
-  if (value instanceof DXNDateTime) return tagForm('datetime', quoteString(temporal.formatOffsetDateTime(value)), opts);
-  if (value instanceof DXNDuration) return tagForm('duration', quoteString(temporal.formatDuration(value)), opts);
+  // Dates and times are ISO 8601 strings under their tag (DXN.md §1.2,
+  // Jan, 2026-10-20), written by text/temporal.cjs. A native `Date` is an
+  // instant: it always means a datetime in UTC, with or without a schema
+  // (DXN.md §4.7).
+  const temporalForm = temporal.tagged(value);
+  if (temporalForm) return tagForm(temporalForm.tag, quoteString(temporalForm.text), opts);
 
   if (value instanceof DXNUUID) return tagForm('uuid', quoteString(value.toString()), opts);
   if (value instanceof DXNURI) return tagForm('uri', quoteString(value.value), opts);
 
-  if (value instanceof DXNRegex) return `~r/${value.pattern}/${printRegexFlags(value.flags)}`;
+  // `@regex "pattern"`, its flags in a header when it has any (DXN.md §1.2).
+  if (value instanceof DXNRegex) return regexForm(printRegexFlags(value.flags), quoteString(value.pattern));
 
   if (value instanceof DXNCustomTag) return tagForm(value.name, print(value.value, opts), opts);
 
@@ -189,10 +183,21 @@ function tagForm(name, printedValue, opts) {
 }
 
 /**
+ * The flags set, in `DXN.md` §2.3's bit order.
  * @param {{i: boolean, m: boolean, s: boolean, u: boolean, x: boolean, f: boolean, r: boolean}} flags
  */
 function printRegexFlags(flags) {
   return REGEX_FLAG_ORDER.filter((f) => flags[f]).join('');
+}
+
+/**
+ * `@regex "pattern"`, or `@regex(flags) "pattern"` (DXN.md §1.2) — what
+ * the canonical form writes too.
+ * @param {string} flags
+ * @param {string} pattern already quoted.
+ */
+function regexForm(flags, pattern) {
+  return flags === '' ? `@regex ${pattern}` : `@regex(${flags}) ${pattern}`;
 }
 
 /**
@@ -318,4 +323,4 @@ function bitsBody(bits) {
   return `{${quoteString(Buffer.from(bits.data).toString('base64'))} ${bits.bitLength}}`;
 }
 
-module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead };
+module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead, printRegexFlags, regexForm };
