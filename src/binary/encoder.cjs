@@ -5,7 +5,7 @@
  * types plus a fixed tag dispatch table, matching `DXN.md` §2.2's
  * table row order. Mirrors `Dextrin.Binary.Encoder` structurally; see
  * that module's own moduledoc for why this is hand-rolled rather than
- * built on a generic CBOR library (bignum precision, timestamp
+ * built on a generic CBOR library (bignum precision, datetime
  * integer-only encoding, the private tag block — the same reasoning
  * applies here, arguably more so, since generic JS CBOR packages are
  * no more likely to get these right by default).
@@ -44,9 +44,11 @@ const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNDate = require('../values/date.cjs');
 const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
+const DXNLocalDateTime = require('../values/local-date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
+const { daysFromCivil } = require('../values/calendar.cjs');
+const { timeNanos } = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
@@ -56,7 +58,6 @@ const DXNCustomTag = require('../values/custom-tag.cjs');
 
 const MAGIC = Buffer.from('DX', 'ascii');
 const VERSION = Buffer.from([1]);
-const EPOCH_MS = Date.UTC(1970, 0, 1);
 
 /**
  * @param {unknown} value
@@ -116,14 +117,18 @@ function encodeItem(value, opts) {
   if (value instanceof DXNStruct) return encodeStruct(value, opts);
 
   if (value instanceof DXNDate) return tag(Tags.T_DATE, integerItem(epochDays(value)));
-  if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(totalMicroseconds(value)));
-  if (value instanceof DXNTimestamp) return tag(Tags.T_TIMESTAMP, integerItem(value.epochMicroseconds));
-  // A native `Date` is an instant: it always means a timestamp, with or
-  // without a schema (DXN.md §4.7).
-  if (value instanceof Date) return encodeItem(DXNTimestamp.fromDate(value), opts);
+  // Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20): a time since
+  // midnight, a datetime since the epoch with its offset in minutes (UTC
+  // is offset 0), a local date-time since 1970-01-01T00:00 on the wall
+  // clock.
+  if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(timeNanos(value)));
+  // A native `Date` is an instant: it always means a datetime in UTC,
+  // with or without a schema (DXN.md §4.7).
+  if (value instanceof Date) return encodeItem(DXNDateTime.fromDate(value), opts);
   if (value instanceof DXNDateTime) {
-    return tag(Tags.T_DATETIME_OFFSET, arrayOf([integerItem(value.epochMicroseconds), integerItem(BigInt(value.offsetMinutes))]));
+    return tag(Tags.T_DATETIME, arrayOf([integerItem(value.epochNanoseconds), integerItem(BigInt(value.offsetMinutes))]));
   }
+  if (value instanceof DXNLocalDateTime) return tag(Tags.T_LOCAL_DATETIME, integerItem(value.localNanoseconds));
   if (value instanceof DXNDuration) return encodeDuration(value);
 
   if (value instanceof DXNUUID) return tag(Tags.T_UUID, bytesItem(value.bytes));
@@ -235,25 +240,14 @@ function positionalValues(value, registry) {
 
 /** @param {DXNDate} date @returns {bigint} */
 function epochDays(date) {
-  const ms = Date.UTC(date.year, date.month - 1, date.day) - EPOCH_MS;
-  return BigInt(ms / 86_400_000);
-}
-
-/** @param {DXNTime} time @returns {bigint} */
-function totalMicroseconds(time) {
-  return (
-    BigInt(time.hour) * 3_600_000_000n +
-    BigInt(time.minute) * 60_000_000n +
-    BigInt(time.second) * 1_000_000n +
-    BigInt(time.microsecond)
-  );
+  return BigInt(daysFromCivil(date.year, date.month, date.day));
 }
 
 /** @param {DXNDuration} d @returns {Buffer} */
 function encodeDuration(d) {
   const bitmask = Tags.durationBitmask(d);
   const fields = Tags.durationFieldsPresent(bitmask);
-  const items = [integerItem(BigInt(bitmask)), ...fields.map((f) => integerItem(BigInt(/** @type {number} */ (d[f]))))];
+  const items = [integerItem(BigInt(bitmask)), ...fields.map((f) => integerItem(BigInt(/** @type {number | bigint} */ (d[f]))))];
   return tag(Tags.T_DURATION, arrayOf(items));
 }
 

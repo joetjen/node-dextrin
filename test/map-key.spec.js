@@ -13,7 +13,7 @@ const hex = (s) => new Uint8Array(Buffer.from(s, 'hex'));
 
 describe('map keys', () => {
   it('decodes the eight allowed types', () => {
-    const m = decode('%{"a" => 1, :b => 2, 3 => 3, sym => 4, ?c => 5, ~D[2026-10-17] => 6, @bytes "AAE=" => 7}');
+    const m = decode('%{"a" => 1, :b => 2, 3 => 3, sym => 4, ?c => 5, @date "2026-10-17" => 6, @bytes "AAE=" => 7}');
     expect(m.size).to.equal(7);
   });
 

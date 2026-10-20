@@ -46,7 +46,7 @@ describe('text/formatter', () => {
 
   it('produces a value that decodes back to the same thing as the single-line form', () => {
     const src =
-      '%{id: @uuid "550e8400-e29b-41d4-a716-446655440000", tags: @{:admin :staff}, meta: @ordered %{created: ~U[1990-01-01 00:00:00Z]}, result: {:ok, 200}}';
+      '%{id: @uuid "550e8400-e29b-41d4-a716-446655440000", tags: @{:admin :staff}, meta: @ordered %{created: @datetime "1990-01-01T00:00:00Z"}, result: {:ok, 200}}';
     const val = parse(src);
     expect(print(parse(pretty(val)))).to.equal(print(val));
   });

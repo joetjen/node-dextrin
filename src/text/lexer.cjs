@@ -12,13 +12,11 @@
  * everywhere" per `DXN.md` — this lexer skips it (and `#` comments)
  * between every token rather than emitting whitespace tokens at all.
  *
- * A few sigils bind tighter than plain "insignificant whitespace
+ * A few forms bind tighter than plain "insignificant whitespace
  * everywhere" would suggest, matching `dextrin`'s own grammar/lexer
  * choices (inferred from its `Actions` module's dedicated token
  * types, e.g. `:MAP_KEY`, since `DXN.md`'s EBNF alone doesn't spell
  * out lexer-level tokenization):
- *   - `~D[`/`~T[`/`~U[`/`~r/` are each lexed as one compound token —
- *     no whitespace may appear between `~` and the letter that follows.
  *   - `identifier ":"` (the map-entry colon-shorthand key) is lexed as
  *     one `MAP_KEY` token when the `:` immediately follows the
  *     identifier with no whitespace between them; otherwise the `:`
@@ -26,6 +24,11 @@
  *     position), and the identifier is left as a separate token.
  *   - `keyword` (`:name` / `:"..."`) similarly requires no whitespace
  *     between `:` and what follows.
+ *
+ * DXN 0.2's sigils, `~D[...]`, `~T[...]`, `~U[...]` and `~r/.../`, are
+ * gone (Jan, 2026-10-20; `DXN.md` §1.2): every such value is a tag with
+ * a string, `@date "..."`, so `~` begins no token and is refused here,
+ * a `syntax` error.
  *
  * Unicode identifier characters use JS's `\p{ID_Start}`/
  * `\p{ID_Continue}` regex properties rather than `DXN.md`'s own
@@ -184,28 +187,6 @@ function tokenize(src) {
     return { type: 'STRING', value: src.slice(start + 1, i - 1), start, end: i };
   }
 
-  /**
-   * Reads a delimited sigil body up to (not including) `close`,
-   * honoring `\close` as an escaped literal delimiter (kept verbatim
-   * in the captured body — only the regex sigil actually needs this,
-   * but it's harmless for the bracket-delimited sigils too).
-   * @param {string} close
-   */
-  function readUntil(close) {
-    const start = i;
-    while (i < len && src[i] !== close) {
-      if (src[i] === '\\' && src[i + 1] === close) {
-        i += 2;
-      } else {
-        i += 1;
-      }
-    }
-    if (src[i] !== close) throw new LexError(`expected '${close}'`, start);
-    const body = src.slice(start, i);
-    i += 1; // closing delimiter
-    return body;
-  }
-
   while (true) {
     skipTrivia();
     if (i >= len) break;
@@ -246,30 +227,6 @@ function tokenize(src) {
         i += [...src.slice(i)][0].length; // one codepoint, surrogate-pair safe
       }
       tokens.push({ type: 'CHAR', value: src.slice(start + 1, i), start, end: i });
-    } else if (c === '~') {
-      if (src.startsWith('~D[', i)) {
-        i += 3;
-        tokens.push({ type: 'DATE_SIGIL', value: readUntil(']'), start, end: i });
-      } else if (src.startsWith('~T[', i)) {
-        i += 3;
-        tokens.push({ type: 'TIME_SIGIL', value: readUntil(']'), start, end: i });
-      } else if (src.startsWith('~U[', i)) {
-        i += 3;
-        tokens.push({ type: 'INSTANT_SIGIL', value: readUntil(']'), start, end: i });
-      } else if (src.startsWith('~r/', i)) {
-        i += 3;
-        const pattern = readUntil('/');
-        let flagsStart = i;
-        while (i < len && /[imsuxfr]/.test(src[i])) i += 1;
-        tokens.push({
-          type: 'REGEX_SIGIL',
-          value: { pattern, flags: src.slice(flagsStart, i) },
-          start,
-          end: i
-        });
-      } else {
-        throw new LexError(`unrecognized sigil at offset ${start}`, start);
-      }
     } else if (c === '@') {
       i += 1;
       tokens.push({ type: 'AT', value: '@', start, end: i });

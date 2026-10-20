@@ -49,8 +49,8 @@
  *   | DXNArray
  *   | import('./date.cjs')
  *   | import('./time.cjs')
- *   | import('./timestamp.cjs')
  *   | import('./date-time.cjs')
+ *   | import('./local-date-time.cjs')
  *   | import('./duration.cjs')
  *   | import('./uuid.cjs')
  *   | import('./uri.cjs')
@@ -83,8 +83,8 @@ const DXNDecimal = require('./decimal.cjs');
 const DXNRational = require('./rational.cjs');
 const DXNDate = require('./date.cjs');
 const DXNTime = require('./time.cjs');
-const DXNTimestamp = require('./timestamp.cjs');
 const DXNDateTime = require('./date-time.cjs');
+const DXNLocalDateTime = require('./local-date-time.cjs');
 const DXNDuration = require('./duration.cjs');
 const DXNUUID = require('./uuid.cjs');
 const DXNURI = require('./uri.cjs');
@@ -107,8 +107,8 @@ module.exports.DXNDecimal = DXNDecimal;
 module.exports.DXNRational = DXNRational;
 module.exports.DXNDate = DXNDate;
 module.exports.DXNTime = DXNTime;
-module.exports.DXNTimestamp = DXNTimestamp;
 module.exports.DXNDateTime = DXNDateTime;
+module.exports.DXNLocalDateTime = DXNLocalDateTime;
 module.exports.DXNDuration = DXNDuration;
 module.exports.DXNUUID = DXNUUID;
 module.exports.DXNURI = DXNURI;

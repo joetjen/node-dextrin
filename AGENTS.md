@@ -104,7 +104,7 @@ type's own module, not left implicit.
   binary codec and decimal/bignum handling are hand-rolled specifically
   to keep this boundary (see `Dextrin.Binary.Encoder`'s own moduledoc
   in the Elixir source for the full rationale — bignum precision,
-  timestamp integer-only encoding, and the private CBOR tag block
+  datetime integer-only encoding, and the private CBOR tag block
   aren't things a generic library gets right by default, and the same
   reasoning applies here).
 

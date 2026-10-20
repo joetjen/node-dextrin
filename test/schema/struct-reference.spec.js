@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import { decode, encode, decodeBinary, encodeBinary, DXNError, Registry, Schema } from '../../src/dextrin.js';
 import DXNStruct from '../../src/values/struct.js';
-import DXNTimestamp from '../../src/values/timestamp.js';
+import DXNDateTime from '../../src/values/date-time.js';
 
 // A value matches only its declared type, and nothing is converted to
 // make it match (DXN.md §4.7). A field typed `User` accepts only a
@@ -66,10 +66,10 @@ describe('representation is not conversion', () => {
     expect(() => encode(struct, { registry: rational() })).to.throw(DXNError);
   });
 
-  it('a native Date always means a timestamp, with or without a schema', () => {
+  it('a native Date always means a datetime in UTC, with or without a schema', () => {
     const at = new Date(Date.UTC(2024, 0, 2, 3, 4, 5));
-    expect(encode(at)).to.equal('~U[2024-01-02 03:04:05Z]');
-    expect(decodeBinary(encodeBinary(at))).to.deep.equal(DXNTimestamp.fromDate(at));
+    expect(encode(at)).to.equal('@datetime "2024-01-02T03:04:05Z"');
+    expect(decodeBinary(encodeBinary(at))).to.deep.equal(DXNDateTime.fromDate(at));
     const registry = Schema.compile(decode('%{E: %schema{at: :timestamp}}'), new Registry());
     expect(() => encode(DXNStruct.keyed('E', [['at', at]]), { registry })).not.to.throw();
   });

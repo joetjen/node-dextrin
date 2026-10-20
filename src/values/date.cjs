@@ -1,9 +1,10 @@
 'use strict';
 
 const { dxnEquals, dxnCompare } = require('./equality.cjs');
+const { daysFromCivil, civilFromDays } = require('./calendar.cjs');
 
 /**
- * DXN `date` (`~D[YYYY-MM-DD]`) — a bare calendar date, no time-of-day
+ * DXN `date` (`@date "YYYY-MM-DD"`) — a bare calendar date, no time-of-day
  * or timezone component. Not backed by native JS `Date` internally:
  * `Date` conflates date+time+instant into one epoch-ms value and can't
  * represent a bare calendar date distinctly from midnight-somewhere —
@@ -23,9 +24,9 @@ class DXNDate {
       throw new TypeError('DXNDate year/month/day must be integers');
     }
     if (month < 1 || month > 12) throw new RangeError(`DXNDate month out of range: ${month}`);
-    const utc = Date.UTC(year, month - 1, day);
-    const check = new Date(utc);
-    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
+    // Counted, not through `Date.UTC`, which reads a year below 100 as 19xx.
+    const [y, m, d] = civilFromDays(daysFromCivil(year, month, day));
+    if (y !== year || m !== month || d !== day) {
       throw new RangeError(`DXNDate: ${year}-${month}-${day} is not a valid calendar date`);
     }
     this.year = year;
@@ -49,7 +50,7 @@ class DXNDate {
    * its own.
    */
   toDate() {
-    return new Date(Date.UTC(this.year, this.month - 1, this.day));
+    return new Date(daysFromCivil(this.year, this.month, this.day) * 86_400_000);
   }
 
   /**

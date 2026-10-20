@@ -40,9 +40,11 @@ const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNDate = require('../values/date.cjs');
 const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
+const DXNLocalDateTime = require('../values/local-date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
+const { civilFromDays } = require('../values/calendar.cjs');
+const temporal = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
@@ -56,7 +58,13 @@ const Validated = require('../schema/validated.cjs');
 
 const MAGIC = 'DX';
 const VERSION = 1;
-const EPOCH_MS = Date.UTC(1970, 0, 1);
+// Days past which no year from -9999 to 9999 lies, a bound checked before
+// a datetime's count is turned into a date, so an absurd one is never
+// computed with.
+const MAX_DAYS = 4_000_000n;
+// The days a `date` may lie from the epoch: as far as a JS `Date` reaches,
+// what this decoder has always read.
+const MAX_DATE_DAYS = 100_000_000n;
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
 /**
@@ -374,8 +382,10 @@ function buildTagged(tag, value, trusted, registry) {
       return buildBignum(value, tag, (n) => -1n - n);
     case Tags.T_DECIMAL:
       return buildDecimal(value);
-    case Tags.T_TIMESTAMP:
-      return buildTimestamp(value);
+    // DXN 0.2's UTC timestamp, epoch microseconds (DXN.md §2.3).
+    case Tags.T_TIMESTAMP_US:
+      if (typeof value !== 'bigint') throw new BinaryError(`malformed datetime (tag ${tag}) payload`);
+      return buildDatetime(new DXNList([value * 1000n, 0n]), tag);
     case Tags.T_RATIONAL:
       return buildRational(value);
     case Tags.T_URI:
@@ -401,11 +411,26 @@ function buildTagged(tag, value, trusted, registry) {
     case Tags.T_DATE:
       return buildDate(value);
     case Tags.T_TIME:
-      return buildTime(value);
-    case Tags.T_DATETIME_OFFSET:
-      return buildDatetimeOffset(value);
+      return buildTime(value, tag);
+    case Tags.T_DATETIME:
+      return buildDatetime(value, tag);
+    case Tags.T_LOCAL_DATETIME:
+      return buildLocal(value);
     case Tags.T_DURATION:
-      return buildDuration(value);
+      return buildDuration(value, tag, 1n);
+    // DXN 0.2's microsecond encodings, read as what they meant: a tag
+    // never changes its meaning (DXN.md §2.3).
+    case Tags.T_TIME_US:
+      return buildTime(typeof value === 'bigint' ? value * 1000n : value, tag);
+    case Tags.T_DATETIME_US:
+      return buildDatetime(
+        value instanceof DXNList && value.items.length === 2 && typeof value.items[0] === 'bigint'
+          ? new DXNList([value.items[0] * 1000n, value.items[1]])
+          : value,
+        tag
+      );
+    case Tags.T_DURATION_US:
+      return buildDuration(value, tag, 1000n);
     case Tags.T_REGEX:
       return buildRegex(value);
     case Tags.T_CUSTOM:
@@ -467,12 +492,6 @@ function buildRational(value) {
     throw new BinaryError(`malformed rational (tag ${Tags.T_RATIONAL}) payload`);
   }
   return new DXNRational(num, den);
-}
-
-/** @param {unknown} value */
-function buildTimestamp(value) {
-  if (typeof value !== 'bigint') throw new BinaryError(`malformed timestamp (tag ${Tags.T_TIMESTAMP}) payload`);
-  return new DXNTimestamp(value);
 }
 
 /** @param {unknown} value */
@@ -538,41 +557,64 @@ function buildStruct(items, extra, registry) {
 /** @param {unknown} value */
 function buildDate(value) {
   if (typeof value !== 'bigint') throw new BinaryError(`malformed date (tag ${Tags.T_DATE}) payload`);
-  const ms = EPOCH_MS + Number(value) * 86_400_000;
-  const d = new Date(ms);
-  return new DXNDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  if (value < -MAX_DATE_DAYS || value > MAX_DATE_DAYS) throw new BinaryError(`date (tag ${Tags.T_DATE}) out of range`);
+  return new DXNDate(...civilFromDays(Number(value)));
 }
 
-/** @param {unknown} value */
-function buildTime(value) {
-  if (typeof value !== 'bigint' || value < 0n) throw new BinaryError(`malformed time (tag ${Tags.T_TIME}) payload`);
-  const totalMicro = value;
-  const microsecond = Number(totalMicro % 1_000_000n);
-  const totalSeconds = totalMicro / 1_000_000n;
-  const second = Number(totalSeconds % 60n);
-  const totalMinutes = totalSeconds / 60n;
-  const minute = Number(totalMinutes % 60n);
-  const hour = Number(totalMinutes / 60n);
-  return new DXNTime(hour, minute, second, microsecond);
-}
+// Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20). An integer out
+// of any calendar's range -- CBOR integers are unbounded, and a malformed
+// or adversarial document can hold one -- is refused, not left to crash
+// the decode.
 
-/** @param {unknown} value */
-function buildDatetimeOffset(value) {
-  if (!(value instanceof DXNList) || value.items.length !== 2) {
-    throw new BinaryError(`malformed datetime (tag ${Tags.T_DATETIME_OFFSET}) payload`);
+/** @param {unknown} value nanoseconds since midnight. @param {number} tag */
+function buildTime(value, tag) {
+  if (typeof value !== 'bigint' || value < 0n || value >= temporal.NANOS_PER_DAY) {
+    throw new BinaryError(`malformed time (tag ${tag}) payload`);
   }
-  const [epochMicros, offsetMinutes] = value.items;
-  if (typeof epochMicros !== 'bigint' || typeof offsetMinutes !== 'bigint') {
-    throw new BinaryError(`malformed datetime (tag ${Tags.T_DATETIME_OFFSET}) payload`);
-  }
-  return new DXNDateTime(epochMicros, Number(offsetMinutes));
+  return temporal.timeFromNanos(value);
 }
 
-/** @param {unknown} value */
-function buildDuration(value) {
-  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
+/** @param {unknown} value `[epoch-nanoseconds, offset-minutes]`. @param {number} tag */
+function buildDatetime(value, tag) {
+  const [nanos, offset] = value instanceof DXNList && value.items.length === 2 ? value.items : [];
+  if (typeof nanos !== 'bigint' || typeof offset !== 'bigint' || offset <= -1440n || offset >= 1440n) {
+    throw new BinaryError(`malformed datetime (tag ${tag}) payload`);
+  }
+  const wall = nanos + offset * 60_000_000_000n;
+  if (!inRange(nanos) || !inRange(wall)) throw new BinaryError(`datetime (tag ${tag}) out of range`);
+  return new DXNDateTime(nanos, Number(offset));
+}
+
+/** @param {unknown} value nanoseconds since 1970-01-01T00:00:00, wall clock. */
+function buildLocal(value) {
+  if (typeof value !== 'bigint') throw new BinaryError(`malformed local-datetime (tag ${Tags.T_LOCAL_DATETIME}) payload`);
+  if (!inRange(value)) throw new BinaryError(`local-datetime (tag ${Tags.T_LOCAL_DATETIME}) out of range`);
+  return new DXNLocalDateTime(value);
+}
+
+/**
+ * Whether a moment `nanos` after 1970-01-01T00:00:00 falls in a year a
+ * datetime can be written in, -9999 to 9999, as the reference's calendar
+ * bounds it.
+ * @param {bigint} nanos
+ */
+function inRange(nanos) {
+  const days = nanos / temporal.NANOS_PER_DAY;
+  if (days < -MAX_DAYS || days > MAX_DAYS) return false;
+  const year = temporal.yearOf(nanos);
+  return year >= -9999 && year <= 9999;
+}
+
+/**
+ * @param {unknown} value the bitmask, then the fields it names.
+ * @param {number} tag
+ * @param {bigint} scale what turns the seventh field into nanoseconds:
+ *   1 for tag 220, 1000 for 0.2's microseconds (tag 212).
+ */
+function buildDuration(value, tag, scale) {
+  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed duration (tag ${tag}) payload`);
   const [bitmaskItem, ...fieldItems] = value.items;
-  if (typeof bitmaskItem !== 'bigint') throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
+  if (typeof bitmaskItem !== 'bigint') throw new BinaryError(`malformed duration (tag ${tag}) payload`);
   const bitmask = Number(bitmaskItem);
   const fields = Tags.durationFieldsPresent(bitmask);
   if (fields.length !== fieldItems.length) {
@@ -582,8 +624,8 @@ function buildDuration(value) {
   const values = {};
   fields.forEach((field, i) => {
     const item = fieldItems[i];
-    if (typeof item !== 'bigint') throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
-    values[field] = Number(item);
+    if (typeof item !== 'bigint') throw new BinaryError(`malformed duration (tag ${tag}) payload`);
+    values[field] = field === 'nanoseconds' ? item * scale : Number(item);
   });
   return new DXNDuration(values);
 }

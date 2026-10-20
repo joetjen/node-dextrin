@@ -76,6 +76,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One way to write a value: every sigil is gone** (as dextrin 45d78bc,
+  Jan, 2026-10-20; DXN.md §1.2). Breaking. Dates and times are ISO 8601
+  strings under a tag -- `@date "2026-10-20"`, `@time "14:30:00.5"`,
+  `@datetime "2026-10-20T14:30:00Z"`, and the new `@local-datetime
+  "2026-10-20T14:30:00"` -- and a regex is `@regex "pattern"`, its flags
+  in a header, `@regex(im) "..."`, or inline, `@regex "(?im)..."` (a
+  different value). `~D[...]`, `~T[...]`, `~U[...]` and `~r/.../` are
+  refused, `syntax`; so are `-00:00`, a header on any other tag, and a
+  flag given twice or unknown.
+- **`timestamp` and `datetime` are one type**, `datetime`: an instant
+  with its offset, `Z` for UTC. Breaking. `DXNTimestamp` is gone: a UTC
+  instant is a `DXNDateTime` at offset 0, which `new DXNDateTime(ns)` and
+  `DXNDateTime.fromDate(date)` give by default, and a native `Date`
+  encodes as one. `:timestamp` in a schema is sugar for `{:refine
+  :datetime %{offsets: ["Z"]}}`, so a schema naming it keeps its meaning.
+  **`DXNLocalDateTime`** holds the new `local-datetime`, a wall-clock
+  date and time with no offset.
+- **Times, datetimes, local date-times and durations carry nanoseconds**
+  (DXN.md §2.2). Breaking: `DXNTime`'s fourth field is `nanosecond`
+  (was `microsecond`), `DXNDateTime` holds `epochNanoseconds` (was
+  `epochMicroseconds`), and `DXNDuration`'s seventh field is
+  `nanoseconds`, a `BigInt` (was `microseconds`). Written text drops a
+  fraction's trailing zeros, and a duration's fields may each carry a
+  sign. In `.dxnb` the nanosecond forms have new tags (218 time, 219
+  datetime, 220 duration, 217 local date-time); 0.2's microsecond tags
+  (1, 210, 211, 212) are still read, as what they meant, and never
+  written, so a tag never changes its meaning.
+- **Refine keys `finite:` and `offsets:`** (DXN.md §4.2), and **NaN lies
+  outside every range**: `min`, `max` and both exclusive bounds refuse it.
+- **The README's size table is the reference's measured again**: the
+  pretty layout and the datetime spelling both changed it.
 - **A named type sees the named types beside it** (DXN.md §4.5): a
   reference to a sibling in the same document resolves, in any order; a
   named type that reaches itself unguarded is refused.
@@ -125,6 +156,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A date in a year below 100, `@date "0050-03-01"`, was refused, and
+  `.dxnb` wrote it as the wrong day: `DXNDate` and the encoder counted
+  through `Date.UTC`, which reads a year from 0 to 99 as 19xx. Days are
+  counted in plain arithmetic now.
 - **A field naming another file's named type resolves** (DXN.md §4.6):
   `FileResolver` compiled each file on its own, so a field naming another
   file's shape or named type named a struct that never came.

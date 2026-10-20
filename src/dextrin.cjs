@@ -27,8 +27,8 @@ const {
   DXNRational,
   DXNDate,
   DXNTime,
-  DXNTimestamp,
   DXNDateTime,
+  DXNLocalDateTime,
   DXNDuration,
   DXNUUID,
   DXNURI,
@@ -225,8 +225,8 @@ module.exports.DXNDecimal = DXNDecimal;
 module.exports.DXNRational = DXNRational;
 module.exports.DXNDate = DXNDate;
 module.exports.DXNTime = DXNTime;
-module.exports.DXNTimestamp = DXNTimestamp;
 module.exports.DXNDateTime = DXNDateTime;
+module.exports.DXNLocalDateTime = DXNLocalDateTime;
 module.exports.DXNDuration = DXNDuration;
 module.exports.DXNUUID = DXNUUID;
 module.exports.DXNURI = DXNURI;

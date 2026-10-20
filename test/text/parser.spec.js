@@ -16,7 +16,8 @@ import DXNURI from '../../src/values/uri.js';
 import DXNBytes from '../../src/values/bytes.js';
 import DXNRegex from '../../src/values/regex.js';
 import DXNCustomTag from '../../src/values/custom-tag.js';
-import DXNTimestamp from '../../src/values/timestamp.js';
+import DXNDateTime from '../../src/values/date-time.js';
+import DXNLocalDateTime from '../../src/values/local-date-time.js';
 import DXNDate from '../../src/values/date.js';
 
 describe('text/parser', () => {
@@ -199,22 +200,30 @@ describe('text/parser', () => {
     });
   });
 
-  describe('sigils', () => {
-    it('~D parses a date', () => {
-      expect(parse('~D[2024-03-15]').equals(new DXNDate(2024, 3, 15))).to.equal(true);
+  describe('dates, times and regexes', () => {
+    it('@date parses a date', () => {
+      expect(parse('@date "2024-03-15"').equals(new DXNDate(2024, 3, 15))).to.equal(true);
     });
 
-    it('~T parses a time', () => {
-      const v = parse('~T[12:30:00]');
-      expect(v).to.include({ hour: 12, minute: 30, second: 0, microsecond: 0 });
+    it('@time parses a time', () => {
+      const v = parse('@time "12:30:00"');
+      expect(v).to.include({ hour: 12, minute: 30, second: 0, nanosecond: 0 });
     });
 
-    it('~U parses a UTC timestamp', () => {
-      expect(parse('~U[1990-01-01 00:00:00Z]')).to.be.instanceOf(DXNTimestamp);
+    it('@datetime parses a UTC datetime', () => {
+      const v = parse('@datetime "1990-01-01T00:00:00Z"');
+      expect(v).to.be.instanceOf(DXNDateTime);
+      expect(v.offsetMinutes).to.equal(0);
     });
 
-    it('~r parses a regex with flags', () => {
-      const v = parse('~r/^[a-z]+$/im');
+    it('@local-datetime parses a wall-clock date-time', () => {
+      const v = parse('@local-datetime "1970-01-02T00:00:00.5"');
+      expect(v).to.be.instanceOf(DXNLocalDateTime);
+      expect(v.localNanoseconds).to.equal(86_400_500_000_000n);
+    });
+
+    it('@regex parses a regex with flags in its header', () => {
+      const v = parse('@regex(im) "^[a-z]+$"');
       expect(v).to.be.instanceOf(DXNRegex);
       expect(v.pattern).to.equal('^[a-z]+$');
       expect(v.flags.i).to.equal(true);

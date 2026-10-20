@@ -57,7 +57,8 @@ const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNDate = require('../values/date.cjs');
 const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
+const DXNLocalDateTime = require('../values/local-date-time.cjs');
+const { offsetName } = require('../text/temporal.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
@@ -466,11 +467,13 @@ function primitiveMatches(name, value) {
       return value instanceof DXNDate;
     case 'time':
       return value instanceof DXNTime;
-    case 'timestamp':
-      // A native `Date` is an instant, so it always means a timestamp.
-      return value instanceof DXNTimestamp || value instanceof Date;
+    // A datetime is one type whatever its offset, UTC included (Jan,
+    // 2026-10-20). A native `Date` is an instant, so it always means a
+    // datetime in UTC.
     case 'datetime':
-      return value instanceof DXNDateTime;
+      return value instanceof DXNDateTime || value instanceof Date;
+    case 'local-datetime':
+      return value instanceof DXNLocalDateTime;
     case 'duration':
       return value instanceof DXNDuration;
     case 'uuid':
@@ -526,6 +529,9 @@ function satisfiesConstraints(value, constraints) {
  * @returns {boolean}
  */
 function satisfiesConstraint(key, arg, value) {
+  // NaN lies outside every range, as every IEEE 754 comparison with it is
+  // false -- which `<`/`>` on a `number` already answer; the infinities
+  // compare as the numbers they are (Jan, 2026-10-20).
   switch (key) {
     case 'min':
       return toComparableNumber(value) >= toComparableNumber(arg);
@@ -547,9 +553,27 @@ function satisfiesConstraint(key, arg, value) {
       return countOf(value) >= /** @type {number} */ (arg);
     case 'max-count':
       return countOf(value) <= /** @type {number} */ (arg);
+    case 'finite':
+      return arg !== true || typeof value !== 'number' || Number.isFinite(value);
+    // The datetime's offset is one of these, `Z` or `±HH:MM`.
+    case 'offsets': {
+      const offsets = arg instanceof DXNList ? arg.items : Array.isArray(arg) ? arg : [];
+      return offsets.includes(offsetName(datetimeOffset(value)));
+    }
     default:
       return false;
   }
+}
+
+/**
+ * A datetime's offset in minutes: a native `Date`'s is UTC's, 0.
+ * @param {unknown} value
+ * @returns {number}
+ */
+function datetimeOffset(value) {
+  if (value instanceof DXNDateTime) return value.offsetMinutes;
+  if (value instanceof Date) return 0;
+  throw new TypeError(`an offsets constraint applies to a datetime, not ${String(value)}`);
 }
 
 /** @param {unknown} value @returns {number} */
