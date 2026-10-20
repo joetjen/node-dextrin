@@ -62,6 +62,8 @@ const { offsetName } = require('../text/temporal.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
@@ -478,6 +480,10 @@ function primitiveMatches(name, value) {
       return value instanceof DXNDuration;
     case 'uuid':
       return value instanceof DXNUUID;
+    case 'objectid':
+      return value instanceof DXNObjectId;
+    case 'ip':
+      return value instanceof DXNIp;
     case 'uri':
       return value instanceof DXNURI;
     case 'bytes':
@@ -560,6 +566,11 @@ function satisfiesConstraint(key, arg, value) {
       const offsets = arg instanceof DXNList ? arg.items : Array.isArray(arg) ? arg : [];
       return offsets.includes(offsetName(datetimeOffset(value)));
     }
+    // An ip's family, 4 or 6, and whether it is a prefix (DXN.md §4.2).
+    case 'version':
+      return value instanceof DXNIp && (typeof arg === 'bigint' || typeof arg === 'number') && Number(arg) === value.version;
+    case 'prefix':
+      return value instanceof DXNIp && (value.prefix !== null) === (arg === true);
     default:
       return false;
   }

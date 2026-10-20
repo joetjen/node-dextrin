@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@objectid` and `@ip` are built in** (as dextrin a25c34b, Jan,
+  2026-10-20; DXN.md §1.3), like `@uuid`: readable in text, their raw
+  bytes in `.dxnb`. `@objectid "507f1f77bcf86cd799439011"` is BSON's
+  12-byte ObjectId (`DXNObjectId`, tag 221), and may be a map key.
+  `@ip "192.0.2.1"`, `"10.0.0.0/8"`, `"2001:db8::1"` and
+  `"2001:db8::/32"` are an address or a prefix (`DXNIp`), written as RFC
+  9164 says, CBOR tags 52 and 54; DXNS adds `:objectid`, `:ip` and the
+  refine keys `version:` and `prefix:`. **`.dxnb` uses the smallest
+  representation that keeps a value**, now said in DXN.md §2.2.
 - **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
   types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has
   them: a shape is a named, unversioned plain-map type that fills its
@@ -76,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`.dxnb` writes the smallest form of a float, a UTC datetime and a
+  regex without flags** (as dextrin 8927a29, Jan, 2026-10-20; DXN.md
+  §2.2): a float in the shortest of CBOR's half, single and double
+  precision that holds it exactly (NaN and the infinities in half), a
+  datetime in UTC as its bare nanoseconds, a regex without flags as its
+  bare pattern. A reader reads every form, half-precision floats
+  included, which it refused before.
 - **One way to write a value: every sigil is gone** (as dextrin 45d78bc,
   Jan, 2026-10-20; DXN.md §1.2). Breaking. Dates and times are ISO 8601
   strings under a tag -- `@date "2026-10-20"`, `@time "14:30:00.5"`,

@@ -34,6 +34,8 @@ const DXNStruct = require('./values/struct.cjs');
 const DXNDecimal = require('./values/decimal.cjs');
 const DXNRational = require('./values/rational.cjs');
 const DXNUUID = require('./values/uuid.cjs');
+const DXNObjectId = require('./values/object-id.cjs');
+const DXNIp = require('./values/ip.cjs');
 const DXNURI = require('./values/uri.cjs');
 const DXNBytes = require('./values/bytes.cjs');
 const DXNBits = require('./values/bits.cjs');
@@ -87,6 +89,8 @@ function text(value) {
   const temporalForm = temporal.tagged(value);
   if (temporalForm) return `@${temporalForm.tag} ${quoted(temporalForm.text)}`;
   if (value instanceof DXNUUID) return '@uuid ' + quoted(value.toString().toLowerCase());
+  if (value instanceof DXNObjectId) return '@objectid ' + quoted(value.toString());
+  if (value instanceof DXNIp) return '@ip ' + quoted(value.toString());
   if (value instanceof DXNURI) return '@uri ' + quoted(value.value);
   // Its flags in §2.3's bit order.
   if (value instanceof DXNRegex) return regexForm(printRegexFlags(value.flags), quoted(value.pattern));

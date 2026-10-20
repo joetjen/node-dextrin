@@ -34,6 +34,8 @@ const DXNMap = require('../values/map.cjs');
 const { check: checkKey, checkPairs } = require('../map-key.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
@@ -45,7 +47,7 @@ const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
 const BUILT_IN_TAGS = new Set([
-  'ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'bits',
+  'ordered', 'sorted-set', 'array', 'uuid', 'objectid', 'ip', 'uri', 'bytes', 'bits',
   'date', 'time', 'datetime', 'local-datetime', 'duration', 'regex'
 ]);
 
@@ -642,6 +644,10 @@ class Parser {
       }
       case 'uuid':
         return DXNUUID.fromString(this.parseStringValue(name, offset));
+      case 'objectid':
+        return DXNObjectId.fromString(this.parseStringValue(name, offset));
+      case 'ip':
+        return DXNIp.fromString(this.parseStringValue(name, offset));
       case 'uri':
         return DXNURI.fromString(this.parseStringValue(name, offset));
       case 'bytes':

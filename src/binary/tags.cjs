@@ -19,12 +19,15 @@ const T_DECIMAL = 4;
 const T_RATIONAL = 30;
 const T_URI = 32;
 const T_UUID = 37;
+// RFC 9164: an IPv4 or IPv6 address, or a prefix.
+const T_IPV4 = 52;
+const T_IPV6 = 54;
 const T_STRINGREF_NAMESPACE = 256;
 const T_STRINGREF = 25;
 const T_SHAREABLE = 28;
 const T_SHARED_REF = 29;
 
-// ---- private tag block, DXN.md §2.3 (200-220) --------------------------
+// ---- private tag block, DXN.md §2.3 (200-221) --------------------------
 const T_CHAR = 200;
 const T_SYMBOL = 201;
 const T_KEYWORD = 202;
@@ -51,10 +54,12 @@ const T_BITS = 216;
 const T_LOCAL_DATETIME = 217;
 // Nanoseconds since midnight.
 const T_TIME = 218;
-// [epoch-nanoseconds, offset-minutes]; UTC is offset 0.
+// Epoch nanoseconds in UTC; else [epoch-nanoseconds, offset-minutes].
 const T_DATETIME = 219;
 // The duration bitmask, its seventh field nanoseconds.
 const T_DURATION = 220;
+// BSON's ObjectId: 12 raw bytes (Jan, 2026-10-20).
+const T_OBJECTID = 221;
 
 /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
 const DURATION_FIELDS = /** @type {const} */ (['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'nanoseconds']);
@@ -114,6 +119,8 @@ module.exports = {
   T_RATIONAL,
   T_URI,
   T_UUID,
+  T_IPV4,
+  T_IPV6,
   T_STRINGREF_NAMESPACE,
   T_STRINGREF,
   T_SHAREABLE,
@@ -139,6 +146,7 @@ module.exports = {
   T_TIME,
   T_DATETIME,
   T_DURATION,
+  T_OBJECTID,
   DURATION_FIELDS,
   REGEX_FLAG_BITS,
   regexFlagsToByte,

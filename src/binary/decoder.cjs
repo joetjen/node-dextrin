@@ -27,6 +27,7 @@ const { checkPairs } = require('../map-key.cjs');
 const { BinaryError } = require('./errors.cjs');
 const Tags = require('./tags.cjs');
 const { bigIntToBytes } = require('./writer.cjs');
+const { fromHalf } = require('./float.cjs');
 
 const DXNChar = require('../values/char.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
@@ -46,6 +47,8 @@ const DXNDuration = require('../values/duration.cjs');
 const { civilFromDays } = require('../values/calendar.cjs');
 const temporal = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
@@ -156,7 +159,8 @@ class Decoder {
     if (info === 20) return false;
     if (info === 21) return true;
     if (info === 22) return null;
-    if (info === 25) throw new BinaryError('half-precision (16-bit) CBOR floats are not supported', this.pos);
+    // Every width CBOR has; the encoder writes the shortest exact one.
+    if (info === 25) return fromHalf(this.take(2).readUInt16BE(0));
     if (info === 26) return this.take(4).readFloatBE(0);
     // A native JS `number` already holds every IEEE-754 double bit
     // pattern, NaN/Infinity included — no manual sign/exponent/mantissa
@@ -392,6 +396,12 @@ function buildTagged(tag, value, trusted, registry) {
       return expect(value, 'string', tag, 'uri', (v) => new DXNURI(v));
     case Tags.T_UUID:
       return buildUuid(value);
+    case Tags.T_OBJECTID:
+      return buildObjectId(value);
+    case Tags.T_IPV4:
+      return buildIp(value, 4, tag);
+    case Tags.T_IPV6:
+      return buildIp(value, 16, tag);
     case Tags.T_CHAR:
       return buildChar(value);
     case Tags.T_SYMBOL:
@@ -501,6 +511,37 @@ function buildUuid(value) {
 }
 
 /** @param {unknown} value */
+function buildObjectId(value) {
+  if (!(value instanceof DXNBytes) || value.data.length !== 12) {
+    throw new BinaryError(`malformed objectid (tag ${Tags.T_OBJECTID}) payload`);
+  }
+  return new DXNObjectId(value.data);
+}
+
+/**
+ * RFC 9164: an address is its raw bytes; a prefix is its length and the
+ * bytes with trailing zero bytes left off, put back here.
+ * @param {unknown} value
+ * @param {4 | 16} size
+ * @param {number} tag
+ */
+function buildIp(value, size, tag) {
+  if (value instanceof DXNBytes && value.data.length === size) return new DXNIp(value.data);
+  const [length, bytes] = value instanceof DXNList && value.items.length === 2 ? value.items : [];
+  if (typeof length !== 'bigint' || !(bytes instanceof DXNBytes) || bytes.data.length > size) {
+    throw new BinaryError(`malformed ip (tag ${tag}) payload`);
+  }
+  if (length < 0n || length > BigInt(size * 8)) throw new BinaryError(`invalid ip prefix: its length ${length} is not 0 to ${size * 8}`);
+  const address = new Uint8Array(size);
+  address.set(bytes.data);
+  try {
+    return new DXNIp(address, Number(length));
+  } catch {
+    throw new BinaryError('invalid ip prefix: its host bits are not zero');
+  }
+}
+
+/** @param {unknown} value */
 function buildChar(value) {
   if (typeof value !== 'bigint' || value < 0n || value > 0x10ffffn || (value >= 0xd800n && value <= 0xdfffn)) {
     throw new BinaryError(`malformed char (tag ${Tags.T_CHAR}) payload`);
@@ -574,9 +615,15 @@ function buildTime(value, tag) {
   return temporal.timeFromNanos(value);
 }
 
-/** @param {unknown} value `[epoch-nanoseconds, offset-minutes]`. @param {number} tag */
+/**
+ * @param {unknown} value epoch nanoseconds in UTC, or `[epoch-nanoseconds,
+ *   offset-minutes]`: a writer uses the first for offset 0, a reader
+ *   reads both.
+ * @param {number} tag
+ */
 function buildDatetime(value, tag) {
-  const [nanos, offset] = value instanceof DXNList && value.items.length === 2 ? value.items : [];
+  const [nanos, offset] =
+    typeof value === 'bigint' && tag === Tags.T_DATETIME ? [value, 0n] : value instanceof DXNList && value.items.length === 2 ? value.items : [];
   if (typeof nanos !== 'bigint' || typeof offset !== 'bigint' || offset <= -1440n || offset >= 1440n) {
     throw new BinaryError(`malformed datetime (tag ${tag}) payload`);
   }
@@ -632,6 +679,8 @@ function buildDuration(value, tag, scale) {
 
 /** @param {unknown} value */
 function buildRegex(value) {
+  // With no flags, the bare pattern; otherwise [pattern, flags-byte].
+  if (typeof value === 'string') return new DXNRegex(value, Tags.regexByteToFlags(0));
   if (!(value instanceof DXNList) || value.items.length !== 2) throw new BinaryError(`malformed regex (tag ${Tags.T_REGEX}) payload`);
   const [pattern, flagsByte] = value.items;
   if (typeof pattern !== 'string' || typeof flagsByte !== 'bigint') {

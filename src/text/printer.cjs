@@ -30,6 +30,8 @@ const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
@@ -100,6 +102,8 @@ function print(value, opts = {}) {
   if (temporalForm) return tagForm(temporalForm.tag, quoteString(temporalForm.text), opts);
 
   if (value instanceof DXNUUID) return tagForm('uuid', quoteString(value.toString()), opts);
+  if (value instanceof DXNObjectId) return tagForm('objectid', quoteString(value.toString()), opts);
+  if (value instanceof DXNIp) return tagForm('ip', quoteString(value.toString()), opts);
   if (value instanceof DXNURI) return tagForm('uri', quoteString(value.value), opts);
 
   // `@regex "pattern"`, its flags in a header when it has any (DXN.md §1.2).

@@ -5,6 +5,8 @@ import DXNKeyword from '../../src/values/keyword.js';
 import DXNList from '../../src/values/list.js';
 import DXNTuple from '../../src/values/tuple.js';
 import DXNUUID from '../../src/values/uuid.js';
+import DXNObjectId from '../../src/values/object-id.js';
+import DXNIp from '../../src/values/ip.js';
 
 /**
  * A bounded-depth `fast-check` arbitrary generating DXNValue-shaped
@@ -30,7 +32,22 @@ const dxnScalar = fc.oneof(
   fc.string().map((s) => new DXNKeyword(s)),
   fc
     .uint8Array({ minLength: 16, maxLength: 16 })
-    .map((bytes) => new DXNUUID(bytes))
+    .map((bytes) => new DXNUUID(bytes)),
+  fc
+    .uint8Array({ minLength: 12, maxLength: 12 })
+    .map((bytes) => new DXNObjectId(bytes)),
+  // An address, or a prefix: its host bits cleared.
+  fc
+    .tuple(fc.oneof(fc.constant(4), fc.constant(16)), fc.uint8Array({ minLength: 16, maxLength: 16 }), fc.option(fc.nat(128)))
+    .map(([size, raw, length]) => {
+      const address = raw.slice(0, size);
+      if (length === null) return new DXNIp(address);
+      const prefix = length % (size * 8 + 1);
+      address.forEach((b, i) => {
+        address[i] = b & ~(0xff >> Math.min(8, Math.max(0, prefix - i * 8)));
+      });
+      return new DXNIp(address, prefix);
+    })
 );
 
 /**

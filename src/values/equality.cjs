@@ -52,6 +52,8 @@ const KIND_ORDER = [
   'local-datetime',
   'duration',
   'uuid',
+  'objectid',
+  'ip',
   'uri',
   'bytes',
   'bits',

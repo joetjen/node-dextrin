@@ -53,6 +53,8 @@
  *   | import('./local-date-time.cjs')
  *   | import('./duration.cjs')
  *   | import('./uuid.cjs')
+ *   | import('./object-id.cjs')
+ *   | import('./ip.cjs')
  *   | import('./uri.cjs')
  *   | import('./bytes.cjs')
  *   | import('./regex.cjs')
@@ -87,6 +89,8 @@ const DXNDateTime = require('./date-time.cjs');
 const DXNLocalDateTime = require('./local-date-time.cjs');
 const DXNDuration = require('./duration.cjs');
 const DXNUUID = require('./uuid.cjs');
+const DXNObjectId = require('./object-id.cjs');
+const DXNIp = require('./ip.cjs');
 const DXNURI = require('./uri.cjs');
 const DXNBytes = require('./bytes.cjs');
 const DXNBits = require('./bits.cjs');
@@ -111,6 +115,8 @@ module.exports.DXNDateTime = DXNDateTime;
 module.exports.DXNLocalDateTime = DXNLocalDateTime;
 module.exports.DXNDuration = DXNDuration;
 module.exports.DXNUUID = DXNUUID;
+module.exports.DXNObjectId = DXNObjectId;
+module.exports.DXNIp = DXNIp;
 module.exports.DXNURI = DXNURI;
 module.exports.DXNBytes = DXNBytes;
 module.exports.DXNBits = DXNBits;
