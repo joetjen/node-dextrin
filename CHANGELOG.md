@@ -142,6 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The README compares DXNS with the other schema languages** (as
+  dextrin 1006a08): "How DXNS compares, as a schema language", "Why a
+  DXNS type is never closed" and "Changing a schema across services",
+  in this port's names -- `decode(text, { registry, strict: true })`,
+  `Registry#putStructMaterializer` and `dextrin compat OLD NEW`.
 - **Every refine argument is checked when the schema compiles** (as
   dextrin 6918cf8): a count that is no non-negative integer, a flag that
   is no boolean, `multiple-of: 0`, `bits: 5`, a `pattern` that is no
@@ -244,6 +249,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The docs stylesheet indents the second dark theme's `--warn` line
+  like its neighbours** (as dextrin 7c45598): `example/doc/` is the
+  reference's again, byte for byte.
+- **The reference cross-check fixes of 7c45598 and 3b0ccc6 are held by
+  tests**: `bits` is a built-in tag for `{:tagged}`, `{:enum 1}` refuses
+  `1.0`, the docs take an enum value whose annotations are no map, and a
+  generic checked by its own name is refused as `schema/type-mismatch`.
+  This port had none of these defects.
 - **A hostname's 253 are codepoints** (as dextrin a56339b), not
   graphemes: `format: :hostname` and `:idn-hostname` no longer count with
   `Intl.Segmenter`.

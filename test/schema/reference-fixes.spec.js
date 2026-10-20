@@ -1,5 +1,8 @@
 import { expect } from 'chai';
-import { decode, decodeBinary, encodeBinary, Registry, Schema } from '../../src/dextrin.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { decode, decodeBinary, encodeBinary, Registry, Schema, SchemaDocs } from '../../src/dextrin.js';
 
 // What the ports' cross-check found in the reference, as dextrin a56339b
 // (2026-10-20): NaN and the infinities as bounds, `$` before a final
@@ -113,6 +116,50 @@ describe('schema: the reference cross-check fixes', () => {
       expect(Number.isNaN(trusted('NaN'))).to.equal(true);
       expect(trusted('nil')).to.equal(null);
       expect(trusted('true')).to.equal(true);
+    });
+  });
+
+  // dextrin 7c45598 (2026-10-20): what this port's cross-check found in
+  // the reference. This port never had these defects; the tests hold it.
+  describe("the node port's cross-check", () => {
+    it('bits is a built-in tag, no custom one', () => {
+      expect(compileError('{:tagged bits :any}')).to.include('built-in');
+    });
+
+    it("an enum's literal is the value itself: 1 is not 1.0", () => {
+      expect(takes('{:enum 1}', 1.0)).to.equal(false);
+      expect(takes('{:const 1.0}', 1n)).to.equal(false);
+      expect(takes('{:enum 1 2}', 2n)).to.equal(true);
+      expect(takes('{:enum %{a: 1}}', new Map([[Symbol.for('a'), 1.0]]))).to.equal(false);
+    });
+
+    it('the docs show a value whose annotations are no map, and do not crash', () => {
+      const root = mkdtempSync(join(tmpdir(), 'dextrin-fix-'));
+      writeFileSync(join(root, 'c.dxns'), '%{C: {:doc {:enum :a} %{values: %{:a => 5}}}}');
+      expect(() => SchemaDocs.site(root, { title: 'T' })).not.to.throw();
+    });
+  });
+
+  // dextrin 3b0ccc6 (2026-10-20): the php port's cross-check.
+  describe("the php port's cross-check", () => {
+    it('a generic checked by its own name refuses the value, and raises nothing', () => {
+      const registry = Schema.compile(
+        decode(`%{
+          Page: {:generic [t] %shape{items: {:list-of t}}}
+          Doc: {:doc {:generic [t] {:list-of t}} %{description: "x"}}
+        }`),
+        new Registry()
+      );
+      for (const name of ['Page', 'Doc']) {
+        /** @type {any} */
+        let refusal;
+        try {
+          Schema.check(new Map([[Symbol.for('items'), []]]), registry, name);
+        } catch (err) {
+          refusal = err;
+        }
+        expect(refusal?.category, name).to.equal('schema/type-mismatch');
+      }
     });
   });
 });
