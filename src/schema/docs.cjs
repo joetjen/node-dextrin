@@ -25,6 +25,7 @@ const path = require('node:path');
 const Document = require('../document.cjs');
 const parser = require('../text/parser.cjs');
 const Comments = require('./docs/comments.cjs');
+const Layout = require('./layout.cjs');
 
 /**
  * @typedef {import('../text/parser.cjs').SyntaxNode} SyntaxNode
@@ -232,10 +233,6 @@ function compare(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** @param {string} namespace @param {string} name */
-function join(namespace, name) {
-  return namespace === '' ? name : `${namespace}/${name}`;
-}
 
 /** @param {string} name */
 function namespaceOf(name) {
@@ -245,11 +242,12 @@ function namespaceOf(name) {
 
 /** @param {ReturnType<typeof readFile>} file @returns {Definition[]} */
 function definitionsOf(file) {
-  const own = file.stem[file.stem.length - 1];
-  const holder = file.entries.find((e) => e.key === own);
-  const namespace = file.stem.slice(0, -1).join('.');
-  const owner = holder ? join(namespace, own) : null;
-  const names = new Map(file.entries.map((e) => [e.key, e.key === own ? /** @type {string} */ (owner) : join(file.stem.join('.'), e.key)]));
+  // The names every reader of a tree gives them (`layout.cjs`, DXN.md §4.6).
+  const layout = Layout.of(file.file, file.entries.map((e) => e.key));
+  const names = layout.names;
+  const own = layout.holder;
+  const holder = own !== null;
+  const owner = own !== null ? /** @type {string} */ (names.get(own)) : null;
 
   return file.entries.map((entry) => {
     const name = /** @type {string} */ (names.get(entry.key));

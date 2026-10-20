@@ -22,6 +22,7 @@
 const DXNStruct = require('./values/struct.cjs');
 const Registry = require('./registry.cjs');
 const Compiler = require('./schema/compiler.cjs');
+const TypeExpr = require('./schema/type-expr.cjs');
 const Validator = require('./schema/validator.cjs');
 const Reader = require('./schema/reader.cjs');
 const Validated = require('./schema/validated.cjs');
@@ -31,13 +32,16 @@ const Compat = require('./schema/compat.cjs');
 /**
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
  * schema for each `%schema(N){}` entry, and a reusable named type for
- * every other entry.
+ * every other entry. `names`, when given, maps each entry's key to the
+ * full name a tree gives it (DXN.md §4.6) -- how `tree.cjs` compiles a
+ * file -- a bare symbol naming a sibling resolving to it.
  * @param {unknown} schemaDoc
  * @param {import('./registry.cjs')} baseRegistry
+ * @param {Map<string, string>} [names]
  * @returns {import('./registry.cjs')}
  */
-function compile(schemaDoc, baseRegistry) {
-  return Compiler.compile(schemaDoc, baseRegistry);
+function compile(schemaDoc, baseRegistry, names) {
+  return Compiler.compile(schemaDoc, baseRegistry, names);
 }
 
 /**
@@ -83,6 +87,43 @@ function validate(value, registry, schemaName) {
   const read = Reader.read(registry, schemaName, value.version, value.fields);
   if (!read) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
   return true;
+}
+
+/**
+ * Whether `value` -- data a program already holds -- matches the
+ * definition `name` in `registry`: a struct schema, a `%shape` or a
+ * named type (design/shapes-and-case.md). Only a check: `value` is never
+ * changed. Returns `true`, or throws the error saying why.
+ * @param {unknown} value
+ * @param {import('./registry.cjs')} registry
+ * @param {string} name
+ * @returns {true}
+ */
+function check(value, registry, name) {
+  conform(value, registry, name);
+  return true;
+}
+
+/**
+ * `value` checked as `check` checks it, returned with every shape's
+ * missing defaults filled in, as a decode fills them; throws the error
+ * saying why it does not match.
+ * @param {unknown} value
+ * @param {import('./registry.cjs')} registry
+ * @param {string} name
+ * @returns {unknown}
+ */
+function conform(value, registry, name) {
+  const type = registry.typeAliases.get(name);
+  if (type === undefined) {
+    validate(value, registry, name);
+    return value;
+  }
+  const conformed = TypeExpr.conform(/** @type {any} */ (type), value, TypeExpr.context(registry));
+  if (conformed === TypeExpr.NO) {
+    throw new Validator.SchemaValidationError(`value does not match ${JSON.stringify(name)}`, 'schema/type-mismatch');
+  }
+  return conformed;
 }
 
 /**
@@ -161,4 +202,4 @@ function compat(oldRegistry, newRegistry) {
  * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
  */
 
-module.exports = { compile, compileAll, validate, validateEncode, validateEncodeTree, registerProvider, compat };
+module.exports = { compile, compileAll, validate, check, conform, validateEncode, validateEncodeTree, registerProvider, compat };

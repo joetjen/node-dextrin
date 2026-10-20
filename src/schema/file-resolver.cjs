@@ -33,6 +33,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const parser = require('../text/parser.cjs');
 const Compiler = require('./compiler.cjs');
+const Tree = require('./tree.cjs');
+const Layout = require('./layout.cjs');
 const Compiled = require('./compiled.cjs');
 const Registry = require('../registry.cjs');
 
@@ -62,7 +64,7 @@ function forPaths(searchPaths) {
  */
 function inPath(dir, name) {
   const { entry, candidates } = candidatesFor(dir, name);
-  const found = candidates.flatMap(({ file, expected }) => load(file, entry, expected));
+  const found = candidates.flatMap(({ file, expected }) => load(file, entry, expected, dir, name));
   if (found.length === 0) return undefined;
   /** @type {Map<number, string[]>} */
   const holders = new Map();
@@ -140,12 +142,19 @@ function numbered(dir, prefix) {
  * The versions of `entry` in the file `file`: none when the file is not
  * there or holds no such entry. A file that does not compile, or holds
  * another version than its name says, is refused.
+ *
+ * The file is compiled as a tree compiles it (`tree.cjs`): its entries
+ * under their full names (DXN.md §4.6), over the named types the rest of
+ * its search path `dir` defines -- so a field naming another file's
+ * shape or named type resolves.
  * @param {string} file
  * @param {string} entry
  * @param {number | 'any'} expected
+ * @param {string} dir
+ * @param {string} name
  * @returns {Array<{version: number, compiled: Compiled, file: string}>}
  */
-function load(file, entry, expected) {
+function load(file, entry, expected, dir, name) {
   let source;
   try {
     if (!fs.statSync(file).isFile()) return [];
@@ -155,11 +164,16 @@ function load(file, entry, expected) {
   }
   let registry;
   try {
-    registry = Compiler.compile(parser.parse(source), new Registry());
+    const doc = parser.parse(source);
+    let base = new Registry();
+    for (const [n, t] of Tree.namedTypes([dir])) base = base.putTypeAlias(n, t);
+    const relative = path.relative(dir, file).split(path.sep).join('/');
+    const keys = doc instanceof Map ? Array.from(doc.keys(), (k) => (k && typeof k === 'object' && 'name' in k ? String(k.name) : String(k))) : [];
+    registry = Compiler.compile(doc, base, Layout.of(relative, keys).names);
   } catch (err) {
     throw new SchemaCompileError(`${file}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const versions = registry.structs.get(entry);
+  const versions = registry.structs.get(name) ?? registry.structs.get(entry);
   if (!versions || versions.size === 0) return [];
   if (expected !== 'any' && !(versions.size === 1 && versions.has(expected))) {
     throw new SchemaCompileError(

@@ -115,7 +115,7 @@ function resolveFields(compiled, given, registry, opts) {
  */
 function resolveField(field, given, registry, opts) {
   if (Object.prototype.hasOwnProperty.call(given, field.name)) {
-    return checkType(field.name, given[field.name], field.type, registry, opts);
+    return checkType(field.name, given[field.name], field.type, TypeExpr.context(registry, new Map(Object.entries(given))), opts);
   }
   if (field.default !== Field.NO_DEFAULT) return field.default;
   if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`, 'schema/missing-field');
@@ -126,17 +126,21 @@ function resolveField(field, given, registry, opts) {
  * @param {string} name
  * @param {unknown} value
  * @param {import('./type-expr.cjs').TypeExpr} type
- * @param {import('../registry.cjs')} registry
+ * @param {import('./type-expr.cjs').Context} ctx
  * @param {{[k: string]: unknown}} opts
  * @returns {unknown}
  */
-function checkType(name, value, type, registry, opts) {
-  if (TypeExpr.matches(type, value, registry)) {
+function checkType(name, value, type, ctx, opts) {
+  // Conformed, not only matched: a shape in the field's type comes out
+  // with its defaults filled, and a `{:case}` reads its sibling from the
+  // struct's other fields (`ctx`).
+  const conformed = TypeExpr.conform(type, value, ctx);
+  if (conformed !== TypeExpr.NO) {
     // Stripped here, not deferred to the top: `value` is about to be
     // handed to *this* struct's own materializer (decode) or stored
     // as a checked field value (encode) — neither should ever see an
     // internal `Validated` wrapper once it's done its one job.
-    return Validated.strip(value);
+    return Validated.strip(conformed);
   }
 
   throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`, 'schema/type-mismatch');
