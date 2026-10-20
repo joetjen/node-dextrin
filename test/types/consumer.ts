@@ -2,7 +2,7 @@
 // does, typechecked against the declarations `npm run types` writes
 // (`npm run typecheck:consumer`). It is never run; that it compiles is
 // the test.
-import { decode, encode, Document, DXNError, Registry, Schema, Std } from '@joetjen/dextrin';
+import { decode, encode, Document, DXNError, Format, Registry, Schema, Std } from '@joetjen/dextrin';
 import dextrin = require('@joetjen/dextrin');
 
 const value: unknown = decode('%{a: 1}');
@@ -28,3 +28,10 @@ const same: string = dextrin.encode(dextrin.decode('[1]'));
 void text;
 void laidOut;
 void same;
+
+// Format (DXN.md §6): a form's names, and whether a body is worth decoding as one.
+const textType: string = Format.mediaType('text');
+const named: 'text' | 'binary' | 'schema' | null = Format.form(textType);
+const worth: boolean = Format.identifies('%{a: 1}', 'text');
+void named;
+void worth;

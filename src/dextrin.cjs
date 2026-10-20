@@ -186,6 +186,7 @@ function maybeValidateEncode(value, opts) {
 const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
 const Document = require('./document.cjs');
+const Format = require('./format.cjs');
 
 // One name at a time, not one object: `tsc` declares a class exported
 // this way as a type as well as a value -- `err: DXNError`, `r: Registry`
@@ -204,6 +205,7 @@ module.exports.Schema = Schema;
 module.exports.Std = Std;
 module.exports.FileResolver = FileResolver;
 module.exports.Document = Document;
+module.exports.Format = Format;
 module.exports.DXNChar = DXNChar;
 module.exports.DXNSymbol = DXNSymbol;
 module.exports.DXNKeyword = DXNKeyword;
