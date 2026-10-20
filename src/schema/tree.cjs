@@ -320,6 +320,8 @@ function typeReferences(type) {
       return type.particles.flatMap(particleReferences);
     case 'tuple-of':
       return type.elems.flatMap(typeReferences);
+    case 'if':
+      return [type.test, type.consequent, type.alternative].flatMap(typeReferences);
     case 'one-of':
     case 'any-of':
     case 'all-of':

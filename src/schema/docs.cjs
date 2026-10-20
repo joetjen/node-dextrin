@@ -26,13 +26,16 @@ const Document = require('../document.cjs');
 const parser = require('../text/parser.cjs');
 const Comments = require('./docs/comments.cjs');
 const Layout = require('./layout.cjs');
+const DXNKeyword = require('../values/keyword.cjs');
+const { canonical } = require('../canonical.cjs');
 
 /**
  * @typedef {import('../text/parser.cjs').SyntaxNode} SyntaxNode
  * @typedef {{source: string, tokens: Array<{type: string, start: number, end: number}>}} Src
  * @typedef {{src: Src, node: SyntaxNode}} At a node, with the source it is in
- * @typedef {{name: string, optional: boolean, type: At | null, default: At | null, description: string | null, doc: string, position?: number}} Field
- * @typedef {{version: number | null, file: string, note: string | null, fields: Field[], value: At | null}} Version
+ * @typedef {{[name: string]: unknown}} Notes a doc's annotations by name (DXN.md §4.1b), each value decoded
+ * @typedef {{name: string, optional: boolean, type: At | null, default: At | null, description: string | null, doc: string, annotations: Notes, position?: number}} Field
+ * @typedef {{version: number | null, file: string, note: string | null, fields: Field[], value: At | null, annotations: Notes}} Version
  * @typedef {{name: string, short: string, namespace: string, kind: 'schema' | 'shape' | 'type', internalTo: string | null, doc: string, scope: Map<string, string>, namespaceNote: string | null, versions: Version[]}} Definition
  */
 
@@ -252,7 +255,8 @@ function definitionsOf(file) {
   return file.entries.map((entry) => {
     const name = /** @type {string} */ (names.get(entry.key));
     const internalTo = holder && entry.key !== own ? owner : null;
-    const { kind, version, fields } = classify(entry.src, entry.value, file.fileVersion);
+    const { node: value, notes } = undoc(entry.src, entry.value);
+    const { kind, version, fields } = classify(entry.src, value, file.fileVersion);
     return {
       name,
       short: entry.key,
@@ -268,7 +272,8 @@ function definitionsOf(file) {
           file: file.file,
           note: holder && entry.key === own ? file.leading : null,
           fields,
-          value: entry.value ? { src: entry.src, node: entry.value } : null,
+          value: value ? { src: entry.src, node: value } : null,
+          annotations: notes,
         },
       ],
     };
@@ -331,13 +336,14 @@ function fieldsOf(src, struct) {
  * @param {Src} src
  * @param {string} name
  * @param {boolean} optional
- * @param {SyntaxNode | null} value
+ * @param {SyntaxNode | null} raw the field's value as written, a `{:doc ...}` around it or not
  * @param {string} doc
  * @returns {Field}
  */
-function field(src, name, optional, value, doc) {
+function field(src, name, optional, raw, doc) {
+  const { node: value, notes } = undoc(src, raw);
   /** @type {Field} */
-  const base = { name, optional, type: value ? { src, node: value } : null, default: null, description: null, doc };
+  const base = { name, optional, type: value ? { src, node: value } : null, default: null, description: null, doc, annotations: notes };
   const struct = value ? bodyOf(value) : null;
   const keyed = struct && structName(src, struct) === 'field' ? struct.children.find((c) => c.kind === 'keyed') : null;
   if (!keyed) return base;
@@ -348,7 +354,76 @@ function field(src, name, optional, value, doc) {
     return node ? { src, node } : null;
   };
   const description = parts.get('description');
-  return { ...base, type: at('type'), default: at('default'), description: description ? stringValue(src, description) : null };
+  const type = undoc(src, parts.get('type') ?? null);
+  return {
+    ...base,
+    type: type.node ? { src, node: type.node } : null,
+    default: at('default'),
+    description: description ? stringValue(src, description) : null,
+    annotations: { ...notes, ...type.notes },
+  };
+}
+
+// ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ------------------------------
+
+/**
+ * A value node without the `{:doc T %{...}}` around it, and what the doc
+ * says: its annotations by name, each value decoded -- `{}` for a value
+ * without one.
+ * @param {Src} src
+ * @param {SyntaxNode | null} value
+ * @returns {{node: SyntaxNode | null, notes: Notes}}
+ */
+function undoc(src, value) {
+  const tuple = value ? bodyOf(value) : null;
+  if (!tuple || tuple.kind !== 'tuple') return { node: value, notes: {} };
+  const values = tuple.children.filter((c) => c.kind === 'value');
+  if (values.length !== 3 || text(src, values[0]) !== ':doc') return { node: value, notes: {} };
+  let map;
+  try {
+    map = parser.parse(source(src, values[2]));
+  } catch {
+    return { node: value, notes: {} };
+  }
+  return map instanceof Map ? { node: values[1], notes: namedNotes(map) } : { node: value, notes: {} };
+}
+
+/**
+ * Annotations keyed by name, and so are each enum value's under `values`.
+ * @param {Map<unknown, unknown>} map @returns {Notes}
+ */
+function namedNotes(map) {
+  /** @type {Notes} */
+  const out = {};
+  for (const [key, value] of map) {
+    const name = annotationName(key);
+    out[name] =
+      name === 'values' && value instanceof Map
+        ? new Map(Array.from(value, ([literal, notes]) => [literal, notes instanceof Map ? namedNotes(notes) : {}]))
+        : value;
+  }
+  return out;
+}
+
+/** An annotation's name: a keyword's, a string, or any other key as written. @param {unknown} key @returns {string} */
+function annotationName(key) {
+  if (key instanceof DXNKeyword) return key.name;
+  if (typeof key === 'string') return key;
+  return written(key);
+}
+
+/** A decoded value as DXN writes it, canonically. @param {unknown} value @returns {string} */
+function written(value) {
+  try {
+    return canonical(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** A node's source as written, trivia included, so it decodes as it reads. @param {Src} src @param {SyntaxNode} node */
+function source(src, node) {
+  return src.source.slice(src.tokens[node.first].start, src.tokens[node.last].end);
 }
 
 /** The string `node` writes. @param {Src} src @param {SyntaxNode} node */
@@ -404,4 +479,4 @@ function resolve(name, scope) {
   return scope.get(name) ?? name;
 }
 
-module.exports = { site, write, references, resolve, text, bodyOf, valueOf, isSymbol, tokenText };
+module.exports = { site, write, references, resolve, text, bodyOf, valueOf, isSymbol, tokenText, undoc, written };

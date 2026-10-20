@@ -17,12 +17,18 @@
 
 class Compiled {
   /**
-   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[]}} spec
+   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}}} spec
    */
-  constructor({ name = null, version = 1, fields = [] } = {}) {
+  constructor({ name = null, version = 1, fields = [], annotations = {} } = {}) {
     this.name = name;
     this.version = version;
     this.fields = fields;
+    /**
+     * What a `{:doc %schema{...} %{...}}` around the entry says about it
+     * (DXN.md §4.1b), by name; empty when it says nothing.
+     * @type {{[k: string]: unknown}}
+     */
+    this.annotations = annotations;
   }
 
   /** @returns {string[]} */

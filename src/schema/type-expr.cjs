@@ -4,7 +4,7 @@
  * @fileoverview Internal, compiled representation of a `.dxns` type
  * expression — the vocabulary of DXN.md §4.1 (`any`, `never`,
  * `primitive`, `reference`, `list-of`, `list-items`, `set-of`, `tuple-of`,
- * `tuple-of-all`, `map-of`, `array-of`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
+ * `tuple-of-all`, `map-of`, `array-of`, `tagged`, `doc`, `if`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
  * `any-of`, `all-of`, `not`, `nilable`, `refine`) `schema/compiler.cjs` turns
  * a parsed `.dxns` value into, and what `matches` below checks a
  * decoded value against — mirroring `Dextrin.Schema.TypeExpr`. (The
@@ -27,6 +27,9 @@
  *   | {form: 'set-of', elem: TypeExpr}
  *   | {form: 'tuple-of', elems: TypeExpr[]}
  *   | {form: 'tuple-of-all', elem: TypeExpr}
+ *   | {form: 'tagged', name: string, elem: TypeExpr}
+ *   | {form: 'doc', elem: TypeExpr, notes: {[k: string]: unknown}}
+ *   | {form: 'if', test: TypeExpr, consequent: TypeExpr, alternative: TypeExpr}
  *   | {form: 'map-of', key: TypeExpr, value: TypeExpr}
  *   | {form: 'array-of', elem: TypeExpr}
  *   | {form: 'ordered-map-of', key: TypeExpr, value: TypeExpr}
@@ -78,6 +81,7 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
+const DXNCustomTag = require('../values/custom-tag.cjs');
 const { daysFromCivil } = require('../values/calendar.cjs');
 const { single } = require('../binary/float.cjs');
 const Validated = require('./validated.cjs');
@@ -178,6 +182,13 @@ function conform(type, value, ctx) {
     case 'param':
     case 'generic':
       return NO;
+    // Annotations change nothing a type takes.
+    case 'doc':
+      return conform(type.elem, value, ctx);
+    // A value that is a `test` is checked as a `consequent`, any other as
+    // an `alternative` -- what the test would fill in is not kept.
+    case 'if':
+      return conform(conform(type.test, value, ctx) === NO ? type.alternative : type.consequent, value, ctx);
     default:
       break;
   }
@@ -217,6 +228,8 @@ function conform(type, value, ctx) {
       const items = all(value.items, (v) => conform(type.elem, v, ctx));
       return items === NO ? NO : new DXNTuple(/** @type {unknown[]} */ (items));
     }
+    case 'tagged':
+      return tagged(type.name, type.elem, value, ctx);
     case 'map-of': {
       if (!(value instanceof Map)) return NO;
       const pairs = all(Array.from(value.entries()), ([k, v]) => pair(type.key, type.value, k, v, ctx));
@@ -295,6 +308,31 @@ function all(items, one) {
     out.push(c);
   }
   return out;
+}
+
+/**
+ * A custom tag named `name` whose value is an `elem`, the value conformed;
+ * or an application's value that the registry's tag encoder writes as
+ * one, kept as it is.
+ * @param {string} name @param {TypeExpr} elem @param {unknown} value @param {Context} ctx
+ * @returns {unknown}
+ */
+function tagged(name, elem, value, ctx) {
+  if (value instanceof DXNCustomTag) {
+    if (value.name !== name) return NO;
+    const inner = conform(elem, value.value, ctx);
+    return inner === NO ? NO : new DXNCustomTag(name, inner);
+  }
+  if (!ctx.registry || value === null || typeof value !== 'object') return NO;
+  const encoder = ctx.registry.fetchTagEncoder(/** @type {Function} */ (value.constructor));
+  if (!encoder || encoder[0] !== name) return NO;
+  let written;
+  try {
+    written = encoder[1](value);
+  } catch {
+    return NO;
+  }
+  return conform(elem, written, ctx) === NO ? NO : value;
 }
 
 /** @param {TypeExpr} keyType @param {TypeExpr} valueType @param {unknown} k @param {unknown} v @param {Context} ctx */
@@ -474,6 +512,13 @@ function substitute(type, bound) {
           Object.entries(type.constraints).map(([key, t]) => (TYPE_KEYS.includes(key) ? [key, substitute(t, bound)] : [key, t]))
         )
       };
+    case 'if':
+      return {
+        ...type,
+        test: substitute(type.test, bound),
+        consequent: substitute(type.consequent, bound),
+        alternative: substitute(type.alternative, bound)
+      };
     case 'list-items':
       return { ...type, particles: type.particles.map((/** @type {Particle} */ p) => substituteParticle(p, bound)) };
     case 'tuple-of':
@@ -489,6 +534,8 @@ function substitute(type, bound) {
     case 'tuple-of-all':
     case 'not':
     case 'nilable':
+    case 'tagged':
+    case 'doc':
       return { ...type, elem: substitute(type.elem, bound) };
     case 'map-of':
     case 'ordered-map-of':
