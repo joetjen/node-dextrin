@@ -23,6 +23,7 @@ export const {
   Std,
   FileResolver,
   Document,
+  Format,
 } = dextrin;
 export * from './values/index.js';
 export default dextrin;
