@@ -33,16 +33,28 @@ const DXNStruct = require('../values/struct.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Compiled = require('./compiled.cjs');
 const Field = require('./field.cjs');
-const { print } = require('../text/printer.cjs');
+const { canonical } = require('../canonical.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS } = require('./type-expr.cjs');
 const Format = require('./format.cjs');
+const { dxnEquals, dxnCompare } = require('../values/equality.cjs');
 
 const PRIMITIVES = new Set([
   'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
   'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
   'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'objectid', 'ip', 'uri', 'bytes', 'bits', 'regex'
 ]);
+
+/** The sized integers' ranges (DXN.md §4.1's sugar). */
+const SIZED = new Map([
+  ['int32', [-2_147_483_648n, 2_147_483_647n]],
+  ['int64', [-9_223_372_036_854_775_808n, 9_223_372_036_854_775_807n]],
+  ['uint32', [0n, 4_294_967_295n]],
+  ['uint64', [0n, 18_446_744_073_709_551_615n]]
+]);
+
+/** What a doc may say about a type (DXN.md §4.1b), in the order its refusal names them. */
+const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
 
 class SchemaCompileError extends Error {
   /** @param {string} message */
@@ -85,12 +97,13 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
     return /** @type {[string, unknown]} */ ([names.get(name) ?? name, v]);
   });
 
-  /** @type {Array<[string, DXNStruct]>} */
+  /** @type {Array<[string, unknown]>} */
   const schemaEntries = [];
   /** @type {Array<[string, unknown]>} */
   const aliasEntries = [];
   for (const [name, value] of namedEntries) {
-    if (value instanceof DXNStruct && value.name === 'schema') schemaEntries.push([name, value]);
+    const inner = undoc(value);
+    if (inner instanceof DXNStruct && inner.name === 'schema') schemaEntries.push([name, /** @type {any} */ (value)]);
     else aliasEntries.push([name, value]);
   }
 
@@ -173,6 +186,14 @@ function fullName(written, aliases) {
  * @returns {any}
  */
 function compileNamed(name, raw, scope) {
+  // A named type's annotations wrap it whole: a generic keeps them on its
+  // body, a shape takes the name as it would bare.
+  if (isDoc(raw) && /** @type {DXNTuple} */ (raw).items.length === 3) {
+    const [, inner, notes] = /** @type {DXNTuple} */ (raw).items;
+    const compiled = compileNamed(name, inner, scope);
+    if (compiled.form === 'generic') return { ...compiled, body: { form: 'doc', elem: compiled.body, notes: annotations(notes, compiled.body) } };
+    return { form: 'doc', elem: compiled, notes: annotations(notes, compiled) };
+  }
   if (raw instanceof DXNTuple && raw.items[0] instanceof DXNKeyword && raw.items[0].name === 'generic') {
     const [, params, body] = raw.items;
     const list = params instanceof DXNList ? params.items : Array.isArray(params) ? params : null;
@@ -224,6 +245,13 @@ function resolved(type, known, path) {
       };
     case 'refine':
       return { ...type, base: resolved(type.base, known, path), constraints: resolvedTypes(type.constraints, known, path) };
+    case 'if':
+      return {
+        ...type,
+        test: resolved(type.test, known, path),
+        consequent: resolved(type.consequent, known, path),
+        alternative: resolved(type.alternative, known, path)
+      };
     case 'list-items':
       return { ...type, particles: resolvedParticles(type.particles, known, path) };
     case 'tuple-of':
@@ -239,6 +267,8 @@ function resolved(type, known, path) {
     case 'tuple-of-all':
     case 'not':
     case 'nilable':
+    case 'tagged':
+    case 'doc':
       return { ...type, elem: resolved(type.elem, known, path) };
     case 'map-of':
     case 'ordered-map-of':
@@ -316,9 +346,12 @@ function unguardedNames(type) {
       return type.variants.flatMap(unguardedNames);
     case 'not':
     case 'nilable':
+    case 'doc':
       return unguardedNames(type.elem);
     case 'refine':
       return unguardedNames(type.base);
+    case 'if':
+      return [type.test, type.consequent, type.alternative].flatMap(unguardedNames);
     case 'case':
       return [...(type.otherwise ? [type.otherwise] : []), ...type.branches.map((/** @type {[unknown, any]} */ [, t]) => t)].flatMap(unguardedNames);
     default:
@@ -358,6 +391,14 @@ function entryName(key) {
  * @returns {Compiled}
  */
 function compileEntry(entry, aliases) {
+  // A schema's annotations, `{:doc %schema{...} %{...}}`, kept on its
+  // `Compiled`.
+  if (isDoc(entry) && /** @type {DXNTuple} */ (entry).items.length === 3) {
+    const [, inner, notes] = /** @type {DXNTuple} */ (entry).items;
+    const compiled = compileEntry(inner, aliases);
+    compiled.annotations = annotations(notes, 'schema');
+    return compiled;
+  }
   if (!(entry instanceof DXNStruct) || entry.name !== 'schema') {
     throw new SchemaCompileError(`expected a %schema(N){...} entry, got ${describe(entry)}`);
   }
@@ -482,12 +523,21 @@ function compileTypeExpr(value, aliases) {
     if (value.name === 'any') return { form: 'any' };
     if (value.name === 'never') return { form: 'never' };
     if (PRIMITIVES.has(value.name)) return { form: 'primitive', name: value.name };
+    // Sugar (DXN.md §4.1, Jan, 2026-10-20): protobuf's and MongoDB's sized
+    // numbers as their ranges, `:float32` as single precision, `:number` as
+    // every kind of number.
+    const sized = SIZED.get(value.name);
+    if (sized) return { form: 'refine', base: { form: 'primitive', name: 'integer' }, constraints: { min: sized[0], max: sized[1] } };
+    if (value.name === 'float32') return { form: 'refine', base: { form: 'primitive', name: 'float' }, constraints: { float32: true } };
+    if (value.name === 'number') {
+      return { form: 'any-of', variants: ['integer', 'float', 'decimal', 'rational'].map((name) => ({ form: 'primitive', name })) };
+    }
     // DXN 0.2's timestamp type, now a datetime in UTC (DXN.md §4.2, Jan,
     // 2026-10-20): a schema naming it keeps its meaning.
     if (value.name === 'timestamp') {
       return { form: 'refine', base: { form: 'primitive', name: 'datetime' }, constraints: { offsets: new DXNList(['Z']) } };
     }
-    throw new SchemaCompileError(`unrecognized primitive type name ${JSON.stringify(value.name)}`);
+    throw new SchemaCompileError(`unrecognized type expression: ${shown(value)}`);
   }
 
   if (value instanceof DXNSymbol) {
@@ -569,10 +619,42 @@ function compileTypeExpr(value, aliases) {
     // one item or a `{:repeat ...}` (DXN.md §4.1a).
     if (tag === 'list-items') return { form: 'list-items', particles: particles(rest, aliases) };
     if (tag === 'tuple-of-all' && rest.length === 1) return { form: 'tuple-of-all', elem: compileTypeExpr(rest[0], aliases) };
+    // `{:const v}`: the one value `v`, `{:enum v}`.
+    if (tag === 'const') {
+      if (rest.length !== 1) throw new SchemaCompileError('a const is {:const value}');
+      return { form: 'enum', literals: rest };
+    }
+    // `{:if I T E}`: JSON Schema's if, then and else; `E` is `:any` when
+    // not given.
+    if (tag === 'if') {
+      if (rest.length !== 2 && rest.length !== 3) throw new SchemaCompileError('an if is {:if test then else}, else :any when left out');
+      return {
+        form: 'if',
+        test: compileTypeExpr(rest[0], aliases),
+        consequent: compileTypeExpr(rest[1], aliases),
+        alternative: compileTypeExpr(rest.length === 3 ? rest[2] : new DXNKeyword('any'), aliases)
+      };
+    }
+    // `{:doc type %{...}}`: the type, annotated (DXN.md §4.1b).
+    if (tag === 'doc') {
+      if (rest.length !== 2) throw new SchemaCompileError('a doc is {:doc type %{description: ..., ...}}');
+      const type = compileTypeExpr(rest[0], aliases);
+      return { form: 'doc', elem: type, notes: annotations(rest[1], type) };
+    }
+    // `{:tagged name type}`: a custom tag of that name, its value a type
+    // (DXN.md §4.1).
+    if (tag === 'tagged') {
+      if (rest.length !== 2) throw new SchemaCompileError('a tagged is {:tagged name type}');
+      const name = nameOf(rest[0]);
+      if (name === null) throw new SchemaCompileError('a tagged is {:tagged name type}, the name a symbol, keyword or string');
+      // Required here, not at the top: the parser reads schemas with this module.
+      if (require('../text/parser.cjs').BUILT_IN_TAGS.has(name)) throw new SchemaCompileError(`${name} is a built-in tag (DXN.md §1.3), no custom one: its type is :${name}`);
+      return { form: 'tagged', name, elem: compileTypeExpr(rest[1], aliases) };
+    }
     if (tag === 'repeat' || tag === 'group') throw new SchemaCompileError(`a ${tag} stands only among {:list-items ...}'s items`);
   }
 
-  throw new SchemaCompileError(`unrecognized type expression: ${describe(value)}`);
+  throw new SchemaCompileError(`unrecognized type expression: ${shown(value)}`);
 }
 
 /**
@@ -766,10 +848,15 @@ function nameOf(value) {
   return null;
 }
 
-/** A value as an error message shows it: in DXN notation, when it has one. @param {unknown} value @returns {string} */
+/**
+ * A value as an error message shows it: in its canonical DXN form
+ * (DXN.md §1.5), as the reference's `Dextrin.Canonical.print/1` writes it,
+ * when it has one.
+ * @param {unknown} value @returns {string}
+ */
 function shown(value) {
   try {
-    return print(value);
+    return canonical(value);
   } catch {
     return describe(value);
   }
@@ -778,6 +865,93 @@ function shown(value) {
 /** Strings in code point order, as Elixir's `Enum.sort/1` orders them. @param {string} a @param {string} b */
 function byCodepoint(a, b) {
   return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
+// ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+
+/** Whether `value` is written `{:doc ...}`. @param {unknown} value */
+function isDoc(value) {
+  return value instanceof DXNTuple && value.items[0] instanceof DXNKeyword && value.items[0].name === 'doc';
+}
+
+/**
+ * An entry's value without the `{:doc ...}` around it.
+ * @param {unknown} value @returns {unknown}
+ */
+function undoc(value) {
+  return isDoc(value) && /** @type {DXNTuple} */ (value).items.length === 3 ? /** @type {DXNTuple} */ (value).items[1] : value;
+}
+
+/**
+ * A doc's annotations by name, each of its kind; `type` is what they
+ * annotate -- `'schema'` for a whole schema, `'value'` for one of an
+ * enum's values -- so `values` can be checked against an enum's literals.
+ * `values` becomes a `Map` from each literal to its own annotations, by
+ * name.
+ * @param {unknown} raw @param {any} type
+ * @returns {{[k: string]: unknown}}
+ */
+function annotations(raw, type) {
+  if (!(raw instanceof Map)) throw new SchemaCompileError(`a doc's annotations are a map, %{description: ...}, not ${shown(raw)}`);
+  const named = constraintNames(raw);
+  for (const key of Object.keys(named).sort(byCodepoint)) {
+    const what = annotation(key, named[key], type);
+    if (what !== null) throw new SchemaCompileError(`a doc's ${key} is ${what}, not ${shown(named[key])}`);
+  }
+  if ('values' in named) {
+    const values = /** @type {Map<unknown, unknown>} */ (named.values);
+    named.values = new Map(Array.from(values, ([literal, notes]) => [literal, annotations(notes, 'value')]));
+  }
+  return named;
+}
+
+/**
+ * What `key` takes when `value` is not of that kind; `null` when it is. A
+ * key that is no annotation, and an enum's value that is wrong, throw.
+ * @param {string} key @param {unknown} value @param {any} type
+ * @returns {string | null}
+ */
+function annotation(key, value, type) {
+  switch (key) {
+    case 'title':
+    case 'description':
+      return typeof value === 'string' ? null : 'a string';
+    case 'examples':
+      return value instanceof DXNList ? null : 'a list';
+    case 'read-only':
+    case 'write-only':
+      return typeof value === 'boolean' ? null : 'true or false';
+    case 'deprecated':
+      return typeof value === 'boolean' || typeof value === 'string' ? null : 'true, false or a reason';
+    case 'meta':
+      return value instanceof Map ? null : 'a map';
+    case 'values':
+      if (!(value instanceof Map) || type === null || typeof type !== 'object' || type.form !== 'enum') {
+        return "a map of an enum's values to their annotations, on an enum";
+      }
+      enumValues(value, type.literals);
+      return null;
+    default:
+      throw new SchemaCompileError(`${key} is no annotation; a doc holds ${ANNOTATION_KEYS.join(', ')}`);
+  }
+}
+
+/**
+ * An enum's `values:`: each key one of its `literals`, each value a map of
+ * annotations holding no `values` of its own.
+ * @param {Map<unknown, unknown>} values @param {unknown[]} literals
+ */
+function enumValues(values, literals) {
+  for (const [literal, notes] of Array.from(values).sort(([a], [b]) => dxnCompare(a, b))) {
+    if (!literals.some((l) => dxnEquals(l, literal))) {
+      throw new SchemaCompileError(`a doc's values annotate the enum's own values; ${shown(literal)} is none of them`);
+    }
+    if (!(notes instanceof Map)) throw new SchemaCompileError("a doc's values hold a map of annotations for each value");
+    if (Array.from(notes.keys()).some((k) => k instanceof DXNKeyword && k.name === 'values')) {
+      throw new SchemaCompileError("a value's annotations hold no values of their own");
+    }
+    annotations(notes, 'value');
+  }
 }
 
 // ---- helpers -------------------------------------------------------------

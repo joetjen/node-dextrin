@@ -159,10 +159,10 @@ function check(name, text) {
       return address(text, 4);
     case 'ipv6':
       return address(text, 6);
-    // RFC 1123's labels, the whole at most 253 characters.
+    // RFC 1123's labels, the whole at most 253 codepoints.
     case 'hostname':
     case 'idn-hostname':
-      return characters(text) <= 253 && matches(name, text);
+      return codepoints(text) <= 253 && matches(name, text);
     case 'email':
       return email(text, LOCAL, 'hostname');
     case 'idn-email':
@@ -193,13 +193,13 @@ function matches(name, text) {
 }
 
 /**
- * `text`'s length as the reference's `String.length/1` counts it, in
- * grapheme clusters.
+ * `text`'s length in codepoints, as DXN.md counts a string's length (the
+ * reference counted graphemes until a56339b).
  * @param {string} text @returns {number}
  */
-function characters(text) {
+function codepoints(text) {
   let count = 0;
-  for (const _ of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) count += 1;
+  for (const _ of text) count += 1;
   return count;
 }
 

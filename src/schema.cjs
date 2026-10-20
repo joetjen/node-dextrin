@@ -127,6 +127,33 @@ function conform(value, registry, name) {
 }
 
 /**
+ * What the `{:doc ... %{...}}` around the schema or named type `name` says
+ * about it (DXN.md §4.1b): its annotations by name, `{}` when it has none,
+ * `undefined` when there is no such name -- as the registry's `fetch*`
+ * answer a name it does not know. A schema answers for its latest
+ * version. As the reference's `Dextrin.Schema.annotations/2`.
+ *
+ * An enum's `values` is a `Map` from each value to its own annotations.
+ *
+ * @example
+ * const registry = Schema.compile(decode('%{Port: {:doc :integer %{description: "A TCP port"}}}'), new Registry());
+ * Schema.annotations(registry, 'Port'); // => {description: 'A TCP port'}
+ * @param {import('./registry.cjs')} registry
+ * @param {string} name
+ * @returns {{[k: string]: unknown} | undefined}
+ */
+function annotations(registry, name) {
+  const type = /** @type {any} */ (registry.typeAliases.get(name));
+  if (type !== undefined) {
+    if (type.form === 'doc') return type.notes;
+    if (type.form === 'generic' && type.body.form === 'doc') return type.body.notes;
+    return {};
+  }
+  const found = registry.fetchStructSchema(name);
+  return found ? found.compiled.annotations : undefined;
+}
+
+/**
  * Encode-time schema validation: checks `value` — ordinary JS data
  * you're about to encode — against a named, compiled schema *before*
  * encoding produces any output. The mirror image of `validate`, for
@@ -202,4 +229,4 @@ function compat(oldRegistry, newRegistry) {
  * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
  */
 
-module.exports = { compile, compileAll, validate, check, conform, validateEncode, validateEncodeTree, registerProvider, compat };
+module.exports = { compile, compileAll, validate, check, conform, annotations, validateEncode, validateEncodeTree, registerProvider, compat };

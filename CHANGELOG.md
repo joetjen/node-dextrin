@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sugar** (as dextrin d1b050a, Jan, 2026-10-20; DXN.md §4.1; the
+  superset's group 9): `:int32`, `:int64`, `:uint32`, `:uint64` and
+  `:float32`, `:number`, `{:const v}`, and `{:if I T E}` (JSON Schema's
+  if/then/else).
+- **Annotations, `{:doc T %{...}}`** (as dextrin 0b4225d and 053432a,
+  Jan, 2026-10-20; DXN.md §4.1b; the superset's group 8): a `title`,
+  `description`, `examples`, `read-only`, `write-only`, `deprecated` and
+  free `meta` on any type, around a whole schema, named type or generic
+  too, and `values:` for an enum's single values. They change nothing a
+  type takes; `Schema.annotations(registry, name)` reads them (`{}` for a
+  definition without, `undefined` for no such name) and `Compiled`'s
+  `annotations` holds a schema's. `dextrin docs` shows them: a title, the
+  description, examples, meta and an enum's values beside the
+  definition, deprecated, read-only and write-only as chips; the example
+  tree carries a few, and its `doc/` is the reference's, byte for byte.
+- **`{:tagged name T}`** (as dextrin bdb20b3, Jan, 2026-10-20; DXN.md
+  §4.1; the superset's group 7): a custom tag of that name whose value is
+  a `T` -- or an application's value its registered tag encoder
+  (`Registry#putTagEncoder`) writes as one. A built-in tag's name is a
+  compile error.
 - **Encoded content** (as dextrin 6918cf8, Jan, 2026-10-20; DXN.md
   §4.2): `encoding:` (RFC 4648's base64, base64url, base32, base16),
   `media-type:` and `content: T` on strings -- the string, decoded, is a
@@ -223,6 +243,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no known type.
 
 ### Fixed
+
+- **A hostname's 253 are codepoints** (as dextrin a56339b), not
+  graphemes: `format: :hostname` and `:idn-hostname` no longer count with
+  `Intl.Segmenter`.
+- **An unknown type's compile error writes it in DXN** (as dextrin
+  a56339b): `unrecognized type expression: :nope`, a keyword included,
+  where it said `unrecognized primitive type name "nope"`, or a value as
+  JavaScript strings it. Every value a compile error shows is written in
+  its canonical form, as the reference's `Dextrin.Canonical.print/1`
+  writes it (`%{a: 1}`, not `%{a:1}`). The rest of the reference's cross-check fixes
+  held here already, and are tested now: NaN and the infinities are
+  numbers in a schema; a grammar's `$` is the string's end, and the
+  temporal readers refuse a final newline; a trusted decode reads a
+  keyword as a global symbol, never as NaN, an infinity, nil or a
+  boolean.
 
 - **Negative zero prints as `-0.0`**: `encode(-0)` wrote `0.0`, which
   reads back as another value (DXN.md §1.5); `canonical` already kept

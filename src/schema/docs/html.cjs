@@ -12,6 +12,7 @@
 const Docs = require('../docs.cjs');
 const { escape, toHtml } = require('./markdown.cjs');
 const { STYLESHEET, THEME_EARLY, THEME_SWITCH } = require('./assets.cjs');
+const DXNList = require('../../values/list.cjs');
 
 /**
  * @typedef {import('../docs.cjs').Definition} Definition
@@ -364,10 +365,10 @@ function definition(d, ctx) {
   return `<article class="def kind-${d.kind}" id="${escape(anchor(d))}">
   <header class="def-head">
     <h2><a class="self" href="#${escape(anchor(d))}"><code>${escape(d.short)}</code></a></h2>
-    <div class="chips">${kindChip(d)}${internalChip(d, ctx)}${versionChips(d)}</div>
-    <p class="full-name"><code>${escape(d.name)}</code></p>
+    <div class="chips">${kindChip(d)}${internalChip(d, ctx)}${versionChips(d)}${annotationChips(latest.annotations)}</div>
+    ${title(latest.annotations)}<p class="full-name"><code>${escape(d.name)}</code></p>
   </header>
-  ${prose(d.doc, d, ctx)}
+  ${about(d, latest.annotations, ctx)}
   ${versionBody(d, latest, ctx)}
   ${older.map((v) => olderVersion(d, v, ctx)).join('')}
   ${used === '' ? '' : `<p class="used-by"><span class="label">Used by</span> ${used}</p>`}
@@ -375,12 +376,87 @@ function definition(d, ctx) {
 `;
 }
 
+// ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+
+/**
+ * What a definition's page says about it before its body: the doc's
+ * description, the comments, examples and meta -- each only when there is
+ * one, so a definition without annotations reads as it always did.
+ * @param {Definition} d @param {import('../docs.cjs').Notes} notes @param {Ctx} ctx
+ */
+function about(d, notes, ctx) {
+  return [prose(described(notes), d, ctx), prose(d.doc, d, ctx), values(notes, d, ctx), examples(notes), meta(notes)]
+    .filter((part) => part !== '')
+    .join('\n  ');
+}
+
+/** A doc's description, `null` without one. @param {import('../docs.cjs').Notes} notes @returns {string | null} */
+function described(notes) {
+  return typeof notes.description === 'string' ? notes.description : null;
+}
+
+/** Deprecated (with its reason), read-only and write-only, as chips. @param {import('../docs.cjs').Notes} notes */
+function annotationChips(notes) {
+  const reason = notes.deprecated;
+  let deprecated = '';
+  if (reason === true) deprecated = '<span class="chip chip-deprecated">deprecated</span>';
+  else if (typeof reason === 'string') deprecated = `<span class="chip chip-deprecated" title="${escape(reason)}">deprecated: ${escape(reason)}</span>`;
+  const flags = ['read-only', 'write-only']
+    .filter((key) => notes[key] === true)
+    .map((key) => `<span class="chip chip-${key}">${key}</span>`)
+    .join('');
+  return deprecated + flags;
+}
+
+/** An enum's values, each with what its own annotations say. @param {import('../docs.cjs').Notes} notes @param {Definition} d @param {Ctx} ctx */
+function values(notes, d, ctx) {
+  const all = notes.values;
+  if (!(all instanceof Map) || all.size === 0) return '';
+  const rows = Array.from(all, ([literal, own]) => /** @type {[string, import('../docs.cjs').Notes]} */ ([Docs.written(literal), own]))
+    .sort(([a], [b]) => byCodepoint(a, b))
+    .map(([literal, own]) => {
+      const description = typeof own.description === 'string' ? toHtml(own.description, linker(d.scope, ctx)) : '';
+      return `<dt><code>${escape(literal)}</code>${annotationChips(own)}</dt><dd>${description}</dd>`;
+    })
+    .join('');
+  return `<dl class="values"><p class="label">Values</p>${rows}</dl>`;
+}
+
+/** @param {import('../docs.cjs').Notes} notes */
+function title(notes) {
+  return typeof notes.title === 'string' ? `<p class="title">${escape(notes.title)}</p>` : '';
+}
+
+/** @param {import('../docs.cjs').Notes} notes */
+function examples(notes) {
+  const list = notes.examples;
+  if (!(list instanceof DXNList) || list.items.length === 0) return '';
+  const items = list.items.map((e) => `<li><code>${escape(Docs.written(e))}</code></li>`).join('');
+  return `<div class="examples"><p class="label">Examples</p><ul>${items}</ul></div>`;
+}
+
+/** @param {import('../docs.cjs').Notes} notes */
+function meta(notes) {
+  const all = notes.meta;
+  if (!(all instanceof Map) || all.size === 0) return '';
+  const rows = Array.from(all, ([key, value]) => [Docs.written(key), Docs.written(value)])
+    .sort(([k1, v1], [k2, v2]) => byCodepoint(k1, k2) || byCodepoint(v1, v2))
+    .map(([key, value]) => `<dt><code>${escape(key)}</code></dt><dd><code>${escape(value)}</code></dd>`)
+    .join('');
+  return `<dl class="meta"><p class="label">Meta</p>${rows}</dl>`;
+}
+
+/** Strings in code point order, as Elixir sorts them. @param {string} a @param {string} b */
+function byCodepoint(a, b) {
+  return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
 /** @param {Definition} d */
 function display(d) {
   return d.internalTo === null ? d.name : `${shortOf(d.internalTo)} › ${d.short}`;
 }
 
-/** @param {string} text @param {Definition} d @param {Ctx} ctx */
+/** @param {string | null} text @param {Definition} d @param {Ctx} ctx */
 function prose(text, d, ctx) {
   if (text === '' || text === null) return '';
   return `<div class="prose">${toHtml(text, linker(d.scope, ctx))}</div>`;
@@ -432,10 +508,15 @@ function versionBody(d, version, ctx) {
   const positionHead = d.kind === 'schema' ? '<th scope="col" class="pos" title="Position in the binary form">#</th>' : '';
   const rows = version.fields
     .map((f) => {
-      const notesHtml = [f.description, f.doc]
-        .filter((t) => t !== null && t !== '')
-        .map((t) => toHtml(/** @type {string} */ (t), linker(d.scope, ctx)))
-        .join('');
+      const notesHtml =
+        annotationChips(f.annotations) +
+        [described(f.annotations), f.description, f.doc]
+          .filter((t) => t !== null && t !== '')
+          .map((t) => toHtml(/** @type {string} */ (t), linker(d.scope, ctx)))
+          .join('') +
+        values(f.annotations, d, ctx) +
+        examples(f.annotations) +
+        meta(f.annotations);
       const def = f.default ? `<div class="default"><span class="label">default</span> <code>${typeHtml(f.default, d, ctx)}</code></div>` : '';
       return `<tr>
   ${d.kind === 'schema' ? `<td class="pos">${f.position}</td>` : ''}

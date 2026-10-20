@@ -54,4 +54,55 @@ describe('SchemaDocs', () => {
     writeFileSync(join(root, 'bad.dxns'), '[1 2]');
     expect(() => SchemaDocs.site(root)).to.throw(/bad\.dxns/);
   });
+
+  // As dextrin 053432a.
+  describe('annotations, {:doc T %{...}} (DXN.md §4.1b)', () => {
+    const annotated = `%{
+  Order: {:doc %schema(2){
+    id: :integer
+    email: {:doc :string %{description: "Where *receipts* go", read-only: true}}
+    legacy?: {:doc :string %{deprecated: "use email"}}
+  } %{title: "An order", description: "One checkout.", examples: [%Order(2){id: 1, email: "a@b"}]}}
+
+  Port: {:doc {:refine :integer %{min: 1}} %{deprecated: true, meta: %{"acme.owner" => "net"}}}
+}
+`;
+
+    /** The page holding the definition whose anchor is `id`. @param {Map<string, string>} pages @param {string} id */
+    const pageWith = (pages, id) => [...pages.values()].find((page) => page.includes(`id="${id}"`)) ?? '';
+
+    it('an annotated schema is still a schema, its fields still fields', () => {
+      const html = pageWith(site({ 'shop.dxns': annotated }), 'Order');
+      expect(html).to.include('struct schema');
+      expect(html).to.include('<code>email</code>');
+      expect(html).not.to.include('{:doc');
+    });
+
+    it('a title, a description, examples and meta are shown with the definition', () => {
+      const html = pageWith(site({ 'shop.dxns': annotated }), 'Order');
+      expect(html).to.include('An order');
+      expect(html).to.include('One checkout.');
+      expect(html).to.include('Examples');
+      expect(html).to.include('a@b');
+      expect(html).to.include('acme.owner');
+    });
+
+    it("deprecated, read-only and write-only are chips; a field's description is its note", () => {
+      const html = pageWith(site({ 'shop.dxns': annotated }), 'Order');
+      expect(html).to.include('class="chip chip-deprecated"');
+      expect(html).to.include('use email');
+      expect(html).to.include('class="chip chip-read-only"');
+      expect(html).to.include('<em>receipts</em>');
+    });
+
+    it("an enum's values are listed with their own notes", () => {
+      const pages = site({
+        'c.dxns': '%{Color: {:doc {:enum :red :old} %{values: %{:old => %{deprecated: true, description: "Use red"}}}}}'
+      });
+      const html = pageWith(pages, 'Color');
+      expect(html).to.include('<dl class="values">');
+      expect(html).to.include('Use red');
+      expect(html).to.include('<code>:old</code><span class="chip chip-deprecated">');
+    });
+  });
 });

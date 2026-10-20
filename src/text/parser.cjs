@@ -758,4 +758,4 @@ function hasCategory(err) {
   return err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string';
 }
 
-module.exports = { parse, parseTree, ParseError, LexError };
+module.exports = { parse, parseTree, ParseError, LexError, BUILT_IN_TAGS };
