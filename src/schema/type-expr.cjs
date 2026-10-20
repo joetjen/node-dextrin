@@ -78,6 +78,8 @@ const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
 const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
+const { daysFromCivil } = require('../values/calendar.cjs');
+const { single } = require('../binary/float.cjs');
 const Validated = require('./validated.cjs');
 const Field = require('./field.cjs');
 const { canonical } = require('../canonical.cjs');
@@ -268,7 +270,7 @@ function conform(type, value, ctx) {
       return value === null ? null : conform(type.elem, value, ctx);
     case 'refine': {
       const c = conform(type.base, value, ctx);
-      return c !== NO && satisfiesConstraints(c, type.constraints, ctx) ? c : NO;
+      return c !== NO && satisfiesConstraints(c, type.constraints, type.base, ctx) ? c : NO;
     }
     default:
       return NO;
@@ -610,16 +612,43 @@ function keywordAwareEq(literal, value) {
 
 // ---- refine constraints -----------------------------------------------------
 
+/** A resolution's unit, in nanoseconds. */
+const RESOLUTIONS = new Map([
+  ['second', 1_000_000_000n],
+  ['millisecond', 1_000_000n],
+  ['microsecond', 1_000n],
+  ['nanosecond', 1n]
+]);
+
+/** The units a `resolution` takes. @returns {string[]} */
+function resolutions() {
+  return Array.from(RESOLUTIONS.keys());
+}
+
 /**
+ * Every constraint holds. A constraint on a value it does not apply to
+ * -- a length on an integer, a range on a string -- refuses it (DXN.md
+ * §4.2, Jan, 2026-10-20). `base`, the refine's base type, decides what a
+ * byte string's length counts.
  * @param {unknown} value
  * @param {{[k: string]: unknown}} constraints
+ * @param {TypeExpr} base
  * @param {Context} ctx
  * @returns {boolean}
  */
-function satisfiesConstraints(value, constraints, ctx) {
-  return Object.entries(constraints).every(([key, arg]) =>
-    key === 'contains' ? contains(/** @type {TypeExpr} */ (arg), constraints, value, ctx) : satisfiesConstraint(key, arg, value)
-  );
+function satisfiesConstraints(value, constraints, base, ctx) {
+  return Object.entries(constraints).every(([key, arg]) => {
+    switch (key) {
+      case 'contains':
+        return contains(/** @type {TypeExpr} */ (arg), constraints, value, ctx);
+      case 'min-length':
+        return within(lengthOf(value, base), arg, null);
+      case 'max-length':
+        return within(lengthOf(value, base), null, arg);
+      default:
+        return satisfiesConstraint(key, arg, value);
+    }
+  });
 }
 
 /**
@@ -631,9 +660,18 @@ function contains(type, constraints, value, ctx) {
   const items = itemsOf(value);
   if (items === null) return false;
   const count = items.filter((item) => conform(type, item, ctx) !== NO).length;
-  const least = /** @type {number | bigint} */ (constraints['min-contains'] ?? 1);
-  const most = /** @type {number | bigint | undefined} */ (constraints['max-contains']);
-  return count >= least && (most === undefined || count <= most);
+  return within(count, constraints['min-contains'] ?? 1, constraints['max-contains'] ?? null);
+}
+
+/**
+ * Whether `count` lies between `least` and `most`, either `null` for no
+ * bound; a `null` count, of a value that has none, never does.
+ * @param {number | bigint | null} count @param {unknown} least @param {unknown} most
+ * @returns {boolean}
+ */
+function within(count, least, most) {
+  if (count === null) return false;
+  return (least === null || count >= /** @type {number | bigint} */ (least)) && (most === null || count <= /** @type {number | bigint} */ (most));
 }
 
 /**
@@ -644,73 +682,230 @@ function contains(type, constraints, value, ctx) {
  */
 function satisfiesConstraint(key, arg, value) {
   // NaN lies outside every range, as every IEEE 754 comparison with it is
-  // false -- which `<`/`>` on a `number` already answer; the infinities
-  // compare as the numbers they are (Jan, 2026-10-20).
+  // false; the infinities compare as the numbers they are (Jan,
+  // 2026-10-20). Dates, times and durations compare with their own kind.
   switch (key) {
     case 'min':
-      return toComparableNumber(value) >= toComparableNumber(arg);
+      return ['gt', 'eq'].includes(compare(value, arg));
     case 'max':
-      return toComparableNumber(value) <= toComparableNumber(arg);
+      return ['lt', 'eq'].includes(compare(value, arg));
     case 'exclusive-min':
-      return toComparableNumber(value) > toComparableNumber(arg);
+      return compare(value, arg) === 'gt';
     case 'exclusive-max':
-      return toComparableNumber(value) < toComparableNumber(arg);
-    case 'multiple-of':
-      return isMultipleOf(toComparableNumber(value), toComparableNumber(arg));
-    case 'min-length':
-      return typeof value === 'string' && Array.from(value).length >= /** @type {number} */ (arg);
-    case 'max-length':
-      return typeof value === 'string' && Array.from(value).length <= /** @type {number} */ (arg);
-    case 'pattern':
-      return typeof value === 'string' && arg instanceof DXNRegex && arg.toRegExp().test(value);
-    case 'min-count':
-      return countOf(value) >= /** @type {number} */ (arg);
-    case 'max-count':
-      return countOf(value) <= /** @type {number} */ (arg);
-    // Counted with `contains`, which reads them.
-    case 'min-contains':
-    case 'max-contains':
-      return true;
-    case 'unique':
-      return arg === false || (arg === true && distinct(itemsOf(value), (item) => ({ id: identity(item) })));
-    // Items without the field are compared with none.
-    case 'unique-by':
-      return distinct(itemsOf(value), (item) => fieldIdentity(item, /** @type {string} */ (arg)));
-    case 'finite':
-      return arg !== true || typeof value !== 'number' || Number.isFinite(value);
-    // The datetime's offset is one of these, `Z` or `±HH:MM`.
-    case 'offsets': {
-      const offsets = arg instanceof DXNList ? arg.items : Array.isArray(arg) ? arg : [];
-      return offsets.includes(offsetName(datetimeOffset(value)));
+      return compare(value, arg) === 'lt';
+    case 'finite': {
+      const o = ordinal(value);
+      if (arg === true) return o !== null && o.kind === 'number' && !(typeof o.at === 'number' && !Number.isFinite(o.at));
+      if (arg === false) return o !== null && o.kind === 'number';
+      return false;
     }
+    // A float single precision holds exactly; NaN and the infinities it holds.
+    case 'float32':
+      if (typeof value !== 'number') return false;
+      return arg !== true || !Number.isFinite(value) || single(value);
     // An ip's family, 4 or 6, and whether it is a prefix (DXN.md §4.2).
     case 'version':
       return value instanceof DXNIp && (typeof arg === 'bigint' || typeof arg === 'number') && Number(arg) === value.version;
     case 'prefix':
       return value instanceof DXNIp && (value.prefix !== null) === (arg === true);
+    // The datetime's offset is one of these, `Z` or `±HH:MM`.
+    case 'offsets': {
+      const offsets = arg instanceof DXNList ? arg.items : Array.isArray(arg) ? arg : null;
+      const minutes = datetimeOffset(value);
+      return offsets !== null && minutes !== null && offsets.includes(offsetName(minutes));
+    }
+    case 'multiple-of': {
+      const o = ordinal(value);
+      if (o === null || o.kind !== 'number' || (typeof o.at === 'number' && !Number.isFinite(o.at))) return false;
+      return isMultipleOf(/** @type {number | bigint} */ (o.at), arg);
+    }
+    case 'min-bytes':
+      return within(utf8Size(value), arg, null);
+    case 'max-bytes':
+      return within(utf8Size(value), null, arg);
+    case 'pattern': {
+      if (!(arg instanceof DXNRegex)) return false;
+      const text = patternText(value);
+      return text !== null && arg.toRegExp().test(text);
+    }
+    case 'min-count':
+      return within(countOf(value), arg, null);
+    case 'max-count':
+      return within(countOf(value), null, arg);
+    // Counted with `contains`, which reads them.
+    case 'min-contains':
+    case 'max-contains':
+      return true;
+    case 'unique':
+      if (arg === false) return itemsOf(value) !== null;
+      return arg === true && distinct(itemsOf(value), (item) => ({ id: identity(item) }));
+    // Items without the field are compared with none.
+    case 'unique-by':
+      return distinct(itemsOf(value), (item) => fieldIdentity(item, /** @type {string} */ (arg)));
+    // A decimal's precision is its coefficient's digit count, as written
+    // (`1.50M` has three); its exponent the power of ten that scales them.
+    case 'min-precision':
+      return within(precision(value), arg, null);
+    case 'max-precision':
+      return within(precision(value), null, arg);
+    case 'min-exponent':
+      return within(value instanceof DXNDecimal ? value.exponent : null, arg, null);
+    case 'max-exponent':
+      return within(value instanceof DXNDecimal ? value.exponent : null, null, arg);
+    // Only the bits numbered in `arg` are set (RFC 8610's `.bits`): an
+    // unsigned integer's from its lowest, a byte string's from its first
+    // byte's lowest.
+    case 'bits':
+      return allowedBits(arg, value);
+    // Against the time of the check.
+    case 'before-now':
+      return fromNow(value, arg, (d) => d < 0n);
+    case 'after-now':
+      return fromNow(value, arg, (d) => d > 0n);
+    case 'within': {
+      const span = ordinal(arg);
+      if (span === null || span.kind !== 'duration') return false;
+      const most = /** @type {bigint} */ (span.at);
+      return fromNow(value, true, (d) => (d < 0n ? -d : d) <= most);
+    }
+    // No part of the value is finer than `arg`.
+    case 'resolution': {
+      const nanos = nanosOf(value);
+      const unit = RESOLUTIONS.get(/** @type {string} */ (arg));
+      return nanos !== null && unit !== undefined && nanos % unit === 0n;
+    }
     default:
       return false;
   }
 }
 
 /**
- * A datetime's offset in minutes: a native `Date`'s is UTC's, 0.
+ * A datetime's offset in minutes, a native `Date`'s UTC's, 0; `null` for
+ * a value that is no datetime.
  * @param {unknown} value
- * @returns {number}
+ * @returns {number | null}
  */
 function datetimeOffset(value) {
   if (value instanceof DXNDateTime) return value.offsetMinutes;
   if (value instanceof Date) return 0;
-  throw new TypeError(`an offsets constraint applies to a datetime, not ${String(value)}`);
+  return null;
 }
 
-/** @param {unknown} value @returns {number} */
+/**
+ * The name of a keyword (a `DXNKeyword` or a JS symbol) or a `DXNSymbol`;
+ * `null` for any other value.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function nameText(value) {
+  if (value instanceof DXNKeyword || value instanceof DXNSymbol) return value.name;
+  if (typeof value === 'symbol') return Symbol.keyFor(value) ?? value.description ?? '';
+  return null;
+}
+
+/**
+ * A string's, keyword's or symbol's length in codepoints; a byte string's
+ * in bytes, in bits under `:bits`; `null` for anything else.
+ * @param {unknown} value @param {TypeExpr} base
+ * @returns {number | null}
+ */
+function lengthOf(value, base) {
+  const text = typeof value === 'string' ? value : nameText(value);
+  if (text !== null) return Array.from(text).length;
+  const underBits = base.form === 'primitive' && base.name === 'bits';
+  if (value instanceof DXNBits) return underBits ? value.bitLength : value.data.length;
+  if (value instanceof DXNBytes) return underBits ? value.data.length * 8 : value.data.length;
+  return null;
+}
+
+/** A string's, keyword's or symbol's size in UTF-8 bytes; `null` for anything else. @param {unknown} value @returns {number | null} */
+function utf8Size(value) {
+  const text = typeof value === 'string' ? value : nameText(value);
+  return text === null ? null : Buffer.byteLength(text, 'utf8');
+}
+
+/**
+ * What a pattern matches: a name's text, or a byte string one character
+ * per byte -- each byte the Latin-1 character it is, which is the byte
+ * itself to a pattern without the `u` flag and that character to one
+ * with it. A run of bits that is no whole bytes has no text.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function patternText(value) {
+  if (typeof value === 'string') return value;
+  if (value instanceof DXNBytes) return Buffer.from(value.data).toString('latin1');
+  return nameText(value);
+}
+
+/** A decimal's coefficient's digit count, as written; `null` for anything else. @param {unknown} value @returns {number | null} */
+function precision(value) {
+  return value instanceof DXNDecimal ? value.unscaledValue.toString().length : null;
+}
+
+/**
+ * Whether `value` -- a non-negative integer, or a byte string of whole
+ * bytes -- sets only the bits numbered in `allowed`.
+ * @param {unknown} allowed @param {unknown} value
+ * @returns {boolean}
+ */
+function allowedBits(allowed, value) {
+  const numbers = allowed instanceof DXNList ? allowed.items : Array.isArray(allowed) ? allowed : null;
+  if (numbers === null || !numbers.every((n) => typeof n === 'bigint')) return false;
+  const bits = /** @type {bigint[]} */ (numbers);
+  if (typeof value === 'bigint') return value >= 0n && (value & ~mask(bits, 0n, null)) === 0n;
+  if (value instanceof DXNBytes) {
+    return Array.from(value.data).every((byte, i) => (BigInt(byte) & ~mask(bits, BigInt(i * 8), 8n)) === 0n);
+  }
+  return false;
+}
+
+/**
+ * The bits of `allowed` from bit `from` on, `width` of them (`null` for
+ * all), shifted down to it.
+ * @param {bigint[]} allowed @param {bigint} from @param {bigint | null} width
+ * @returns {bigint}
+ */
+function mask(allowed, from, width) {
+  return allowed
+    .filter((n) => (width === null ? true : n >= from && n < from + width))
+    .reduce((acc, n) => acc | (n - from < 0n ? 0n : 1n << (n - from)), 0n);
+}
+
+/**
+ * Whether a datetime's distance from now, in nanoseconds, passes `test`;
+ * `wanted` false asks nothing.
+ * @param {unknown} value @param {unknown} wanted @param {(d: bigint) => boolean} test
+ * @returns {boolean}
+ */
+function fromNow(value, wanted, test) {
+  if (wanted === false) return true;
+  if (wanted !== true) return false;
+  const o = ordinal(value);
+  return o !== null && o.kind === 'datetime' && test(/** @type {bigint} */ (o.at) - nowNanos());
+}
+
+/** The current time, in nanoseconds since the epoch. @returns {bigint} */
+function nowNanos() {
+  return BigInt(Date.now()) * 1_000_000n;
+}
+
+/**
+ * A time's, datetime's, local date-time's or duration's nanoseconds, the
+ * part a resolution looks at; `null` for anything else.
+ * @param {unknown} value
+ * @returns {bigint | null}
+ */
+function nanosOf(value) {
+  if (value instanceof DXNDuration) return value.nanoseconds ?? 0n;
+  const o = ordinal(value);
+  return o !== null && ['time', 'datetime', 'local'].includes(o.kind) ? /** @type {bigint} */ (o.at) : null;
+}
+
+/** A collection's item count, `null` for a value that is none. @param {unknown} value @returns {number | null} */
 function countOf(value) {
-  if (value instanceof DXNList || value instanceof DXNTuple) return value.items.length;
-  if (value instanceof DXNSortedSet) return value.items.length;
-  if (value instanceof Set) return value.size;
-  if (Array.isArray(value)) return value.length;
-  return NaN;
+  const items = itemsOf(value);
+  return items === null ? null : items.length;
 }
 
 /** A collection's items, `null` for a value that is none. @param {unknown} value @returns {unknown[] | null} */
@@ -776,18 +971,71 @@ function fieldOf(value, field) {
   return null;
 }
 
-/** @param {number} a @param {number} b @returns {boolean} */
+/**
+ * Whether `a` is a multiple of `b`: two integers exactly, anything else
+ * as floats. A zero divisor has no multiples.
+ * @param {number | bigint} a @param {unknown} b @returns {boolean}
+ */
 function isMultipleOf(a, b) {
-  return a % b === 0;
+  if (typeof a === 'bigint' && typeof b === 'bigint') return b !== 0n && a % b === 0n;
+  const divisor = toNumber(b);
+  return divisor !== null && Number(a) % divisor === 0;
 }
 
-/** @param {unknown} value @returns {number} */
-function toComparableNumber(value) {
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'number') return value;
-  if (value instanceof DXNDecimal) return value.toNumber();
-  if (value instanceof DXNRational) return value.toNumber();
-  throw new TypeError(`cannot compare a non-numeric value in a refine constraint: ${String(value)}`);
+/**
+ * `'lt'`, `'eq'` or `'gt'`, or `'nan'` for two values that do not
+ * compare: NaN with anything, or two values of different kinds.
+ * @param {unknown} a @param {unknown} b @returns {'lt' | 'eq' | 'gt' | 'nan'}
+ */
+function compare(a, b) {
+  const x = ordinal(a);
+  const y = ordinal(b);
+  if (x === null || y === null || x.kind !== y.kind) return 'nan';
+  if (Number.isNaN(x.at) || Number.isNaN(y.at)) return 'nan';
+  if (x.at < y.at) return 'lt';
+  if (x.at > y.at) return 'gt';
+  return 'eq';
 }
 
-module.exports = { matches, conform, context, NO };
+/**
+ * A value as its kind and its place in that kind's order: a number (NaN
+ * and the infinities as the numbers they are), or a date, time, datetime,
+ * local date-time or duration as a count of days or nanoseconds; `null`
+ * for a value with no place. A duration with years or months has none:
+ * their length varies.
+ * @param {unknown} value
+ * @returns {{kind: 'number' | 'date' | 'time' | 'datetime' | 'local' | 'duration', at: number | bigint} | null}
+ */
+function ordinal(value) {
+  if (typeof value === 'number' || typeof value === 'bigint') return { kind: 'number', at: value };
+  if (value instanceof DXNDecimal || value instanceof DXNRational) return { kind: 'number', at: value.toNumber() };
+  if (value instanceof DXNDate) return { kind: 'date', at: daysFromCivil(value.year, value.month, value.day) };
+  if (value instanceof DXNTime) {
+    const seconds = BigInt(value.hour * 3600 + value.minute * 60 + value.second);
+    return { kind: 'time', at: seconds * 1_000_000_000n + BigInt(value.nanosecond) };
+  }
+  if (value instanceof DXNDateTime) return { kind: 'datetime', at: value.epochNanoseconds };
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isNaN(ms) ? null : { kind: 'datetime', at: BigInt(ms) * 1_000_000n };
+  }
+  if (value instanceof DXNLocalDateTime) return { kind: 'local', at: value.localNanoseconds };
+  if (value instanceof DXNDuration && !value.years && !value.months) {
+    const at =
+      BigInt(value.weeks ?? 0) * 604_800_000_000_000n +
+      BigInt(value.days ?? 0) * 86_400_000_000_000n +
+      BigInt(value.hours ?? 0) * 3_600_000_000_000n +
+      BigInt(value.minutes ?? 0) * 60_000_000_000n +
+      (value.nanoseconds ?? 0n);
+    return { kind: 'duration', at };
+  }
+  return null;
+}
+
+/** A number of any kind as a float; `null` for any other value. @param {unknown} value @returns {number | null} */
+function toNumber(value) {
+  const o = ordinal(value);
+  return o !== null && o.kind === 'number' ? Number(o.at) : null;
+}
+
+module.exports = { matches, conform, context, NO, resolutions };
