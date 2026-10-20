@@ -2,7 +2,7 @@
 // does, typechecked against the declarations `npm run types` writes
 // (`npm run typecheck:consumer`). It is never run; that it compiles is
 // the test.
-import { decode, encode, Document, DXNError, Format, Registry, Schema, Std } from '@joetjen/dextrin';
+import { decode, encode, Document, DXNError, Format, Registry, Schema, SchemaDocs, Std } from '@joetjen/dextrin';
 import dextrin = require('@joetjen/dextrin');
 
 const value: unknown = decode('%{a: 1}');
@@ -35,3 +35,7 @@ const named: 'text' | 'binary' | 'schema' | null = Format.form(textType);
 const worth: boolean = Format.identifies('%{a: 1}', 'text');
 void named;
 void worth;
+
+// SchemaDocs: a directory of .dxns as HTML pages, each a path and its content.
+const pages: Array<[string, string]> = SchemaDocs.site('example/schemas', { title: 'Acme schemas' });
+void pages;

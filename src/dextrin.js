@@ -24,6 +24,7 @@ export const {
   FileResolver,
   Document,
   Format,
+  SchemaDocs,
 } = dextrin;
 export * from './values/index.js';
 export default dextrin;
