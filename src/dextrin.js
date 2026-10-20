@@ -25,6 +25,8 @@ export const {
   Document,
   Format,
   SchemaDocs,
+  SchemaTree,
+  SchemaLayout,
 } = dextrin;
 export * from './values/index.js';
 export default dextrin;
