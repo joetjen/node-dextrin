@@ -88,9 +88,12 @@ function decode(text, opts = {}) {
 /**
  * Encodes a value back to `.dxn` text. Single-line, minimal-whitespace
  * by default; pass `pretty: true` for multi-line, indented output
- * instead (`indent:` then sets spaces per nesting level, default 2).
- * Both produce the exact same value on the way back through `decode`
- * — `pretty`/`indent` are a rendering choice, never a semantic one.
+ * instead: the top-level collection one entry per line, a nested one on
+ * one line when it fits (`indent:` then sets spaces per nesting level,
+ * default 2, and `width:` the columns that line must fit in, default
+ * 80). Both produce the exact same value on the way back through
+ * `decode` — `pretty`/`indent`/`width` are a rendering choice, never a
+ * semantic one.
  * Throws `DXNError` for a value with no DXN representation, or that
  * fails schema validation.
  *
@@ -108,7 +111,7 @@ function decode(text, opts = {}) {
  * a value is.
  *
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, width?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {

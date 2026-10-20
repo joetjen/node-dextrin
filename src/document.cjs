@@ -109,9 +109,10 @@ function render(doc) {
 /**
  * `doc` laid out the way the pretty printer lays out a value, with every
  * comment kept beside the entry it belongs to. Layout only: every token
- * is written as it was.
+ * is written as it was. `indent` is the spaces per level (2), `width` the
+ * columns a nested collection's one line must fit in (80).
  * @param {Doc} doc
- * @param {{indent?: number}} [opts]
+ * @param {{indent?: number, width?: number}} [opts]
  */
 function format(doc, opts = {}) {
   return Formatter.format(doc, opts);

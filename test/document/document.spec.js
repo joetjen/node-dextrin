@@ -195,6 +195,34 @@ describe('Document', () => {
   });
 
   describe('format', () => {
+    // Jan, 2026-10-20: a nested collection that fits goes on one line, as
+    // the pretty printer writes it -- unless it holds a comment or a blank
+    // line, which keep it over lines.
+    describe('layout', () => {
+      const formatted = (/** @type {string} */ text, opts = {}) => Document.format(Document.parse(text), opts);
+
+      it('writes a nested collection that fits on one line', () => {
+        expect(formatted('%{deps: ["a" "b"], at: %{x: 1, y: 2}}')).to.equal('%{\n  deps: ["a" "b"]\n  at: %{x: 1 y: 2}\n}');
+      });
+
+      it('breaks the top level however short it is', () => {
+        expect(formatted('[1]')).to.equal('[\n  1\n]');
+      });
+
+      it('keeps one holding a comment over lines', () => {
+        expect(formatted('%{deps: ["a" # why\n]}')).to.equal('%{\n  deps: [\n    "a"  # why\n  ]\n}');
+      });
+
+      it('and one with a blank line between its entries', () => {
+        expect(formatted('%{deps: ["a"\n\n"b"]}')).to.equal('%{\n  deps: [\n    "a"\n\n    "b"\n  ]\n}');
+      });
+
+      it('counts the indent and the key in the width', () => {
+        expect(formatted('%{key: [1 2 3]}', { width: 14 })).to.equal('%{\n  key: [1 2 3]\n}');
+        expect(formatted('%{key: [1 2 3]}', { width: 13 })).to.equal('%{\n  key: [\n    1\n    2\n    3\n  ]\n}');
+      });
+    });
+
     it('lays a document out and keeps its comments', () => {
       const text = '# top\n\n%{name: "acme", # the name\n deps: ["a" # temporary\n# still about a\n "b"\n\n# pinned\n "c"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n';
       expect(Document.format(Document.parse(text))).to.equal(

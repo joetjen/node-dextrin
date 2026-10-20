@@ -50,7 +50,7 @@ describe('bin/dextrin.js CLI', () => {
     it('pretty-prints to stdout by default', () => {
       const result = run(['format', 'sample.dxn'], { cwd: dir });
       expect(result.status).to.equal(0);
-      expect(result.stdout.trim()).to.equal('%{\n  x: 1\n  y: [\n    1\n    2\n    3\n  ]\n}');
+      expect(result.stdout.trim()).to.equal('%{\n  x: 1\n  y: [1 2 3]\n}');
     });
 
     it('--mode condense produces single-line output', () => {
@@ -68,7 +68,7 @@ describe('bin/dextrin.js CLI', () => {
     it('--mode pretty keeps every comment beside its entry', () => {
       writeFileSync(join(dir, 'commented.dxn'), '# the config\n%{name: "acme", # the name\n deps: ["a"]}\n');
       const result = run(['format', 'commented.dxn'], { cwd: dir });
-      expect(result.stdout).to.equal('# the config\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"\n  ]\n}\n');
+      expect(result.stdout).to.equal('# the config\n%{\n  name: "acme"  # the name\n  deps: ["a"]\n}\n');
     });
 
     it('--mode condense drops comments: a comment ends its line, and condensed is one', () => {
@@ -131,7 +131,7 @@ describe('bin/dextrin.js CLI', () => {
 
       const decodeResult = run(['decode', 'sample.dxnb'], { cwd: dir });
       expect(decodeResult.status).to.equal(0);
-      expect(decodeResult.stdout.trim()).to.equal('%{\n  x: 1\n  y: [\n    1\n    2\n    3\n  ]\n}');
+      expect(decodeResult.stdout.trim()).to.equal('%{\n  x: 1\n  y: [1 2 3]\n}');
     });
 
     it('encode with no --out writes binary bytes to stdout', () => {
