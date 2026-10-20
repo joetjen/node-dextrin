@@ -34,7 +34,9 @@ const DXNCustomTag = require('../values/custom-tag.cjs');
 const Compiled = require('./compiled.cjs');
 const Field = require('./field.cjs');
 const { print } = require('../text/printer.cjs');
-const { resolutions } = require('./type-expr.cjs');
+const DXNRegex = require('../values/regex.cjs');
+const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS } = require('./type-expr.cjs');
+const Format = require('./format.cjs');
 
 const PRIMITIVES = new Set([
   'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
@@ -221,7 +223,7 @@ function resolved(type, known, path) {
         otherwise: type.otherwise === null ? null : resolved(type.otherwise, known, path)
       };
     case 'refine':
-      return { ...type, base: resolved(type.base, known, path), constraints: resolvedContains(type.constraints, known, path) };
+      return { ...type, base: resolved(type.base, known, path), constraints: resolvedTypes(type.constraints, known, path) };
     case 'list-items':
       return { ...type, particles: resolvedParticles(type.particles, known, path) };
     case 'tuple-of':
@@ -247,12 +249,16 @@ function resolved(type, known, path) {
 }
 
 /**
- * A refine's constraints with the type its `contains` holds resolved, as
- * `resolved` resolves every type.
+ * A refine's types -- `contains`, `content`, `encodes`, `encodes-seq` --
+ * resolved as its base is.
  * @param {{[k: string]: any}} constraints @param {Map<string, any>} known @param {string[]} path
  */
-function resolvedContains(constraints, known, path) {
-  return 'contains' in constraints ? { ...constraints, contains: resolved(constraints.contains, known, path) } : constraints;
+function resolvedTypes(constraints, known, path) {
+  const out = { ...constraints };
+  for (const key of TYPE_KEYS) {
+    if (key in out) out[key] = resolved(out[key], known, path);
+  }
+  return out;
 }
 
 /**
@@ -603,13 +609,24 @@ const REFINE_KEYS = new Set([
   'min-bytes', 'max-bytes', 'pattern', 'min-count', 'max-count', 'finite', 'float32', 'offsets',
   'version', 'prefix', 'contains', 'min-contains', 'max-contains', 'unique', 'unique-by',
   'min-precision', 'max-precision', 'min-exponent', 'max-exponent', 'bits', 'before-now',
-  'after-now', 'within', 'resolution'
+  'after-now', 'within', 'resolution', 'format', 'encoding', 'media-type', 'content', 'encodes',
+  'encodes-seq'
 ]);
 
+const COUNTS = ['min-length', 'max-length', 'min-bytes', 'max-bytes', 'min-count', 'max-count', 'min-contains', 'max-contains', 'min-precision', 'max-precision'];
+const FLAGS = ['finite', 'float32', 'unique', 'before-now', 'after-now', 'prefix'];
+const BOUNDS = ['min', 'max', 'exclusive-min', 'exclusive-max'];
+const ENCODINGS = ['base64', 'base64url', 'base32', 'base16'];
+
+/** What `content` reads a string as, by its media type. */
+const CONTENT_READERS = [null, 'application/dxn', 'application/dxnb'];
+
 /**
- * A refine's constraints by name, every key one DXN.md §4.2 knows: a
- * misspelt key would otherwise refuse every value, silently. `contains`
- * holds a type, compiled here; `unique-by` and `resolution` a name.
+ * A refine's constraints by name, every key one DXN.md §4.2 knows and
+ * every argument one it takes: a misspelt key would otherwise refuse
+ * every value, silently, and a bad argument fail at check time. The
+ * types are compiled here; `unique-by`, `format`, `resolution` and
+ * `encoding` become names.
  * @param {Map<unknown, unknown>} written @param {Map<string, unknown>} aliases
  * @returns {{[k: string]: unknown}}
  */
@@ -622,10 +639,87 @@ function refineConstraints(written, aliases) {
   if (!('contains' in named) && ('min-contains' in named || 'max-contains' in named)) {
     throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
   }
-  if ('contains' in named) named.contains = compileTypeExpr(named.contains, aliases);
   namedArg(named, 'unique-by', null);
+  namedArg(named, 'format', Format.names());
   namedArg(named, 'resolution', resolutions());
+  namedArg(named, 'encoding', ENCODINGS);
+  for (const key of Object.keys(named).sort(byCodepoint)) {
+    const what = argument(key, named[key]);
+    if (what !== null) throw new SchemaCompileError(`${key} takes ${what}, not ${shown(named[key])}`);
+  }
+  contentReadable(named);
+  for (const key of TYPE_KEYS) {
+    if (key in named) named[key] = compileTypeExpr(named[key], aliases);
+  }
   return named;
+}
+
+/**
+ * What `key` takes when `arg` is not of that kind; `null` when it is, or
+ * when the key takes anything.
+ * @param {string} key @param {unknown} arg @returns {string | null}
+ */
+function argument(key, arg) {
+  if (COUNTS.includes(key)) return typeof arg === 'bigint' && arg >= 0n ? null : 'a non-negative integer';
+  if (key === 'min-exponent' || key === 'max-exponent') return typeof arg === 'bigint' ? null : 'an integer';
+  if (FLAGS.includes(key)) return typeof arg === 'boolean' ? null : 'true or false';
+  if (BOUNDS.includes(key)) {
+    return comparable(arg) ? null : 'a number, date, time, datetime, local date-time or a duration without years or months';
+  }
+  switch (key) {
+    case 'multiple-of':
+      return nonzeroNumber(arg) ? null : 'a number other than 0';
+    case 'pattern':
+      return arg instanceof DXNRegex ? null : 'a regex, @regex "..."';
+    case 'version':
+      return arg === 4n || arg === 6n ? null : '4 or 6';
+    case 'offsets': {
+      const items = listItems(arg);
+      return items !== null && items.every(isOffset) ? null : 'a list of offsets, "Z" or "±HH:MM"';
+    }
+    case 'bits': {
+      const items = listItems(arg);
+      return items !== null && items.every((n) => typeof n === 'bigint' && n >= 0n) ? null : 'a list of bit numbers, non-negative integers';
+    }
+    case 'within':
+      return span(arg) ? null : 'a duration without years or months';
+    // RFC 6838's type/subtype, without parameters.
+    case 'media-type':
+      return typeof arg === 'string' && MEDIA_TYPE.test(arg) ? null : 'a media type, "type/subtype"';
+    default:
+      return null;
+  }
+}
+
+const MEDIA_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
+const OFFSET = /^[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+/** A list's items, `null` for a value that is no list. @param {unknown} value @returns {unknown[] | null} */
+function listItems(value) {
+  if (value instanceof DXNList) return value.items;
+  return Array.isArray(value) ? value : null;
+}
+
+/** Whether `value` is an offset, `Z` or `±HH:MM`. @param {unknown} value @returns {boolean} */
+function isOffset(value) {
+  return value === 'Z' || (typeof value === 'string' && OFFSET.test(value));
+}
+
+/**
+ * `content` reads a DXN document: text, or `.dxnb` under
+ * application/dxnb, which a string holds only encoded.
+ * @param {{[k: string]: unknown}} named
+ */
+function contentReadable(named) {
+  if (!('content' in named)) return;
+  const written = named['media-type'];
+  const media = typeof written === 'string' ? written.toLowerCase() : null;
+  if (!CONTENT_READERS.includes(media)) {
+    throw new SchemaCompileError(`content reads application/dxn or application/dxnb, not ${shown(media)}`);
+  }
+  if (media === 'application/dxnb' && !('encoding' in named)) {
+    throw new SchemaCompileError('content under application/dxnb needs an encoding: a string holds no raw bytes');
+  }
 }
 
 /**

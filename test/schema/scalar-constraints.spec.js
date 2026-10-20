@@ -54,9 +54,40 @@ describe('schema scalar constraints', () => {
       expect(compileError('{:refine {:list-of :any} %{unique-by: 5}}')).to.include('unique-by');
       expect(compileError('{:refine :time %{resolution: :fortnight}}')).to.include(':millisecond');
     });
+
+    it("every constraint's argument is checked: a bad one never reaches a check", () => {
+      for (const [type, key] of [
+        ['{:refine :integer %{bits: 5}}', 'bits'],
+        ['{:refine :integer %{bits: [-1]}}', 'bits'],
+        ['{:refine :datetime %{before-now: 5}}', 'before-now'],
+        ['{:refine :integer %{multiple-of: 0}}', 'multiple-of'],
+        ['{:refine :string %{min-length: "x"}}', 'min-length'],
+        ['{:refine :string %{max-length: -1}}', 'max-length'],
+        ['{:refine :decimal %{min-exponent: 1.5}}', 'min-exponent'],
+        ['{:refine :ip %{version: 5}}', 'version'],
+        ['{:refine :string %{pattern: "a"}}', 'pattern'],
+        ['{:refine :datetime %{within: @duration "P1Y"}}', 'within'],
+        ['{:refine :datetime %{offsets: "Z"}}', 'offsets'],
+        ['{:refine :datetime %{offsets: ["UTC"]}}', 'offsets'],
+        ['{:refine :integer %{min: "x"}}', 'min']
+      ]) {
+        expect(compileError(type), type).to.include(key);
+      }
+    });
+
+    it('a value in a message is written in DXN', () => {
+      expect(compileError('{:refine :time %{resolution: :fortnight}}')).to.include('not :fortnight');
+      expect(compileError('{:refine :string %{min-length: "x"}}')).to.include('not "x"');
+    });
   });
 
   describe('lengths', () => {
+    it("a string's counts codepoints, not what a reader sees as one character", () => {
+      const decomposed = 'e\u0301';
+      expect(takes('{:refine :string %{min-length: 2}}', `"${decomposed}"`)).to.equal(true);
+      expect(takes('{:refine :string %{max-length: 1}}', `"${decomposed}"`)).to.equal(false);
+    });
+
     it("a keyword's or a symbol's is its name's, in codepoints", () => {
       expect(takes('{:refine :keyword %{max-length: 3}}', ':abc')).to.equal(true);
       expect(takes('{:refine :keyword %{max-length: 3}}', ':abcd')).to.equal(false);

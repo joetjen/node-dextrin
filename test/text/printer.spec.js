@@ -19,6 +19,11 @@ describe('text/printer', () => {
     expect(print(5e30)).to.match(/[.e]/);
   });
 
+  it('prints negative zero with its sign, as DXN.md §1.5 writes it', () => {
+    expect(print(-0)).to.equal('-0.0');
+    expect(print(0)).to.equal('0.0');
+  });
+
   it('prints the three non-finite floats as their reserved words', () => {
     expect(print(NaN)).to.equal('NaN');
     expect(print(Infinity)).to.equal('Infinity');

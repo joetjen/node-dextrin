@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Encoded content** (as dextrin 6918cf8, Jan, 2026-10-20; DXN.md
+  §4.2): `encoding:` (RFC 4648's base64, base64url, base32, base16),
+  `media-type:` and `content: T` on strings -- the string, decoded, is a
+  DXN document of type T, `.dxnb` under `application/dxnb` -- and
+  `encodes: T` and `encodes-seq: T` on bytes, CDDL's `.cbor` and
+  `.cborseq`. The binary decoder's `decodeSequence` reads documents back
+  to back. An encoding is checked by its alphabet and padding, as the
+  reference checks it, not by `Buffer.from`, which takes what it refuses.
+- **`format:`** (as dextrin 71fbec0, Jan, 2026-10-20; DXN.md §4.2a): a
+  string in one of a closed set of 22 formats -- `date`, `time`,
+  `datetime`, `local-datetime`, `duration`, `uuid`, `ipv4`, `ipv6`,
+  `hostname`, `idn-hostname`, `email`, `idn-email`, `uri`,
+  `uri-reference`, `iri`, `iri-reference`, `uri-template`,
+  `json-pointer`, `relative-json-pointer`, `semver`, `mac`, `host-port`
+  -- `src/schema/format.cjs`. A format DXN has a tag for is read by that
+  tag's reader; every other one by a grammar the spec gives, compiled
+  with the `u` flag. `@uuid` already read only 8-4-4-4-12 hex digits.
 - **Refine keys on scalars** (as dextrin 2f20707, Jan, 2026-10-20;
   DXN.md §4.2; the superset's group 5): `min-length`/`max-length` on
   keywords, symbols, bytes (in bytes) and bits (in bits, under `:bits`);
@@ -105,6 +122,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every refine argument is checked when the schema compiles** (as
+  dextrin 6918cf8): a count that is no non-negative integer, a flag that
+  is no boolean, `multiple-of: 0`, `bits: 5`, a `pattern` that is no
+  regex and the like are compile errors (`schema/compile`); some were
+  refused only at check time before. A compile error writes the value it
+  refuses in DXN.
 - **A refine constraint refuses a value it does not apply to** (as
   dextrin 2f20707): a length on an integer, a range on a string, `bits`
   on a negative integer. Before, several such checks threw; `finite:
@@ -201,6 +224,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Negative zero prints as `-0.0`**: `encode(-0)` wrote `0.0`, which
+  reads back as another value (DXN.md §1.5); `canonical` already kept
+  the sign.
 - A date in a year below 100, `@date "0050-03-01"`, was refused, and
   `.dxnb` wrote it as the wrong day: `DXNDate` and the encoder counted
   through `Date.UTC`, which reads a year from 0 to 99 as 19xx. Days are

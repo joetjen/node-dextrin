@@ -76,16 +76,63 @@ const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
  * @returns {unknown}
  */
 function decode(bytes, opts = {}) {
-  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (buf.length < 3 || buf[0] !== MAGIC.charCodeAt(0) || buf[1] !== MAGIC.charCodeAt(1) || buf[2] !== VERSION) {
-    throw new BinaryError(`missing or invalid .dxnb envelope (expected magic "DX" + version ${VERSION})`);
+  const buf = asBuffer(bytes);
+  if (!enveloped(buf, 0)) throw envelopeError();
+  const { value, end } = document(buf, 0, opts);
+  if (end !== buf.length) {
+    throw new BinaryError(`trailing bytes after top-level value (${buf.length - end} left over)`, end);
   }
-  const decoder = new Decoder(buf, 3, opts);
+  return value;
+}
+
+/**
+ * `bytes` read as `.dxnb` documents back to back, each with its own
+ * envelope -- a CBOR sequence of documents, as a schema's `encodes-seq:`
+ * reads one (DXN.md §4.2); no bytes at all are no documents.
+ * @param {Uint8Array} bytes
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @returns {unknown[]}
+ */
+function decodeSequence(bytes, opts = {}) {
+  const buf = asBuffer(bytes);
+  const values = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    if (!enveloped(buf, pos)) throw envelopeError();
+    const { value, end } = document(buf, pos, opts);
+    values.push(value);
+    pos = end;
+  }
+  return values;
+}
+
+/** @param {Uint8Array} bytes @returns {Buffer} */
+function asBuffer(bytes) {
+  return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/** Whether an envelope, magic and version, starts at `pos`. @param {Buffer} buf @param {number} pos */
+function enveloped(buf, pos) {
+  return buf.length - pos >= 3 && buf[pos] === MAGIC.charCodeAt(0) && buf[pos + 1] === MAGIC.charCodeAt(1) && buf[pos + 2] === VERSION;
+}
+
+function envelopeError() {
+  return new BinaryError(`missing or invalid .dxnb envelope (expected magic "DX" + version ${VERSION})`);
+}
+
+/**
+ * One document from `pos` in `buf`, its envelope already checked, and
+ * where it ends. Its shared-item and stringref tables are its own
+ * `Decoder`'s: a schema check that reads a document inside a document
+ * (`encodes:`) leaves the outer one's as they were.
+ * @param {Buffer} buf @param {number} pos
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
+ * @returns {{value: unknown, end: number}}
+ */
+function document(buf, pos, opts) {
+  const decoder = new Decoder(buf, pos + 3, opts);
   const value = decoder.decodeItem();
-  if (decoder.pos !== buf.length) {
-    throw new BinaryError(`trailing bytes after top-level value (${buf.length - decoder.pos} left over)`, decoder.pos);
-  }
-  return Validated.strip(value);
+  return { value: Validated.strip(value), end: decoder.pos };
 }
 
 class Decoder {
@@ -753,4 +800,4 @@ function buildBits(value) {
   }
 }
 
-module.exports = { decode, BinaryError };
+module.exports = { decode, decodeSequence, BinaryError };
