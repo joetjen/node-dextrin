@@ -3,8 +3,8 @@
 /**
  * @fileoverview Internal, compiled representation of a `.dxns` type
  * expression — the vocabulary of DXN.md §4.1 (`any`, `never`,
- * `primitive`, `reference`, `list-of`, `set-of`, `tuple-of`, `map-of`,
- * `array-of`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
+ * `primitive`, `reference`, `list-of`, `list-items`, `set-of`, `tuple-of`,
+ * `tuple-of-all`, `map-of`, `array-of`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
  * `any-of`, `all-of`, `not`, `nilable`, `refine`) `schema/compiler.cjs` turns
  * a parsed `.dxns` value into, and what `matches` below checks a
  * decoded value against — mirroring `Dextrin.Schema.TypeExpr`. (The
@@ -23,8 +23,10 @@
  *   | {form: 'primitive', name: string}
  *   | {form: 'reference', name: string}
  *   | {form: 'list-of', elem: TypeExpr}
+ *   | {form: 'list-items', particles: Particle[]}
  *   | {form: 'set-of', elem: TypeExpr}
  *   | {form: 'tuple-of', elems: TypeExpr[]}
+ *   | {form: 'tuple-of-all', elem: TypeExpr}
  *   | {form: 'map-of', key: TypeExpr, value: TypeExpr}
  *   | {form: 'array-of', elem: TypeExpr}
  *   | {form: 'ordered-map-of', key: TypeExpr, value: TypeExpr}
@@ -42,6 +44,14 @@
  *   | {form: 'generic', params: string[], body: TypeExpr}
  *   | {form: 'apply', name: string, args: TypeExpr[]}
  *   | {form: 'param', name: string}} TypeExpr
+ */
+
+/**
+ * One of a `{:list-items}`'s items: a type for exactly one item, or a
+ * repeat of a group of them, `max` null when there is no upper bound
+ * (DXN.md §4.1a).
+ * @typedef {{kind: 'one', type: TypeExpr}
+ *   | {kind: 'repeat', group: Particle[], min: number, max: number | null}} Particle
  */
 
 const { dxnEquals } = require('../values/equality.cjs');
@@ -70,6 +80,7 @@ const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const Validated = require('./validated.cjs');
 const Field = require('./field.cjs');
+const { canonical } = require('../canonical.cjs');
 
 /** What `conform` answers when a value does not match. */
 const NO = Symbol('no match');
@@ -180,6 +191,11 @@ function conform(type, value, ctx) {
       const items = all(value.items, (v) => conform(type.elem, v, ctx));
       return items === NO ? NO : new DXNList(/** @type {unknown[]} */ (items));
     }
+    case 'list-items': {
+      if (!(value instanceof DXNList)) return NO;
+      const items = listItems(type.particles, value.items, ctx, allTaken);
+      return items === NO ? NO : new DXNList(/** @type {unknown[]} */ (items));
+    }
     case 'set-of': {
       if (!(value instanceof Set)) return NO;
       const items = all(Array.from(value), (v) => conform(type.elem, v, ctx));
@@ -188,6 +204,11 @@ function conform(type, value, ctx) {
     case 'tuple-of': {
       if (!(value instanceof DXNTuple) || type.elems.length !== value.items.length) return NO;
       const items = all(value.items, (v, i) => conform(type.elems[i], v, ctx));
+      return items === NO ? NO : new DXNTuple(/** @type {unknown[]} */ (items));
+    }
+    case 'tuple-of-all': {
+      if (!(value instanceof DXNTuple)) return NO;
+      const items = all(value.items, (v) => conform(type.elem, v, ctx));
       return items === NO ? NO : new DXNTuple(/** @type {unknown[]} */ (items));
     }
     case 'map-of': {
@@ -247,7 +268,7 @@ function conform(type, value, ctx) {
       return value === null ? null : conform(type.elem, value, ctx);
     case 'refine': {
       const c = conform(type.base, value, ctx);
-      return c !== NO && satisfiesConstraints(c, type.constraints) ? c : NO;
+      return c !== NO && satisfiesConstraints(c, type.constraints, ctx) ? c : NO;
     }
     default:
       return NO;
@@ -282,6 +303,62 @@ function pair(keyType, valueType, k, v, ctx) {
 function sameMap(like, pairs) {
   const Kind = /** @type {any} */ (like.constructor);
   return new Kind(pairs);
+}
+
+// ---- list items -------------------------------------------------------------
+
+/**
+ * `particles` matched against the front of `left`, then `rest` against
+ * what they leave: the items conformed, in order, or `NO`. A repeat takes
+ * as many items as it can while the rest still matches, and gives back
+ * one at a time until it does (DXN.md §4.1a).
+ * @param {Particle[]} particles
+ * @param {unknown[]} left
+ * @param {Context} ctx
+ * @param {(left: unknown[]) => unknown[] | typeof NO} rest
+ * @returns {unknown[] | typeof NO}
+ */
+function listItems(particles, left, ctx, rest) {
+  if (particles.length === 0) return rest(left);
+  const [first, ...more] = particles;
+  if (first.kind === 'one') {
+    if (left.length === 0) return NO;
+    const conformed = conform(first.type, left[0], ctx);
+    if (conformed === NO) return NO;
+    const tail = listItems(more, left.slice(1), ctx, rest);
+    return tail === NO ? NO : [conformed, ...tail];
+  }
+  return repeat(first.group, first.min, first.max, left, ctx, (after) => listItems(more, after, ctx, rest));
+}
+
+/**
+ * One more repetition first, while `most` allows it; stopping once
+ * `least` is reached. A repetition that took no item is the last: every
+ * further one would take none either, so `least` is met by them.
+ * @param {Particle[]} group
+ * @param {number} least
+ * @param {number | null} most
+ * @param {unknown[]} left
+ * @param {Context} ctx
+ * @param {(left: unknown[]) => unknown[] | typeof NO} rest
+ * @returns {unknown[] | typeof NO}
+ */
+function repeat(group, least, most, left, ctx, rest) {
+  const again =
+    most === null || most > 0
+      ? listItems(group, left, ctx, (afterOne) =>
+          afterOne.length === left.length
+            ? rest(afterOne)
+            : repeat(group, Math.max(least - 1, 0), most === null ? null : most - 1, afterOne, ctx, rest)
+        )
+      : NO;
+  if (again !== NO) return again;
+  return least === 0 ? rest(left) : NO;
+}
+
+/** The end of a `{:list-items}`: every item taken. @param {unknown[]} left @returns {unknown[] | typeof NO} */
+function allTaken(left) {
+  return left.length === 0 ? [] : NO;
 }
 
 // ---- {:case} ----------------------------------------------------------------
@@ -384,7 +461,13 @@ function substitute(type, bound) {
         otherwise: type.otherwise === null ? null : substitute(type.otherwise, bound)
       };
     case 'refine':
-      return { ...type, base: substitute(type.base, bound) };
+      return {
+        ...type,
+        base: substitute(type.base, bound),
+        constraints: 'contains' in type.constraints ? { ...type.constraints, contains: substitute(type.constraints.contains, bound) } : type.constraints
+      };
+    case 'list-items':
+      return { ...type, particles: type.particles.map((/** @type {Particle} */ p) => substituteParticle(p, bound)) };
     case 'tuple-of':
       return { ...type, elems: type.elems.map((/** @type {any} */ t) => substitute(t, bound)) };
     case 'one-of':
@@ -395,6 +478,7 @@ function substitute(type, bound) {
     case 'set-of':
     case 'array-of':
     case 'sorted-set-of':
+    case 'tuple-of-all':
     case 'not':
     case 'nilable':
       return { ...type, elem: substitute(type.elem, bound) };
@@ -404,6 +488,13 @@ function substitute(type, bound) {
     default:
       return type;
   }
+}
+
+/** @param {Particle} particle @param {Map<string, TypeExpr>} bound @returns {Particle} */
+function substituteParticle(particle, bound) {
+  return particle.kind === 'one'
+    ? { kind: 'one', type: substitute(particle.type, bound) }
+    : { ...particle, group: particle.group.map((p) => substituteParticle(p, bound)) };
 }
 
 /**
@@ -522,10 +613,27 @@ function keywordAwareEq(literal, value) {
 /**
  * @param {unknown} value
  * @param {{[k: string]: unknown}} constraints
+ * @param {Context} ctx
  * @returns {boolean}
  */
-function satisfiesConstraints(value, constraints) {
-  return Object.entries(constraints).every(([key, arg]) => satisfiesConstraint(key, arg, value));
+function satisfiesConstraints(value, constraints, ctx) {
+  return Object.entries(constraints).every(([key, arg]) =>
+    key === 'contains' ? contains(/** @type {TypeExpr} */ (arg), constraints, value, ctx) : satisfiesConstraint(key, arg, value)
+  );
+}
+
+/**
+ * Between `min-contains` (1 when not given) and `max-contains` of the
+ * collection's items are a `type`.
+ * @param {TypeExpr} type @param {{[k: string]: unknown}} constraints @param {unknown} value @param {Context} ctx
+ */
+function contains(type, constraints, value, ctx) {
+  const items = itemsOf(value);
+  if (items === null) return false;
+  const count = items.filter((item) => conform(type, item, ctx) !== NO).length;
+  const least = /** @type {number | bigint} */ (constraints['min-contains'] ?? 1);
+  const most = /** @type {number | bigint | undefined} */ (constraints['max-contains']);
+  return count >= least && (most === undefined || count <= most);
 }
 
 /**
@@ -559,6 +667,15 @@ function satisfiesConstraint(key, arg, value) {
       return countOf(value) >= /** @type {number} */ (arg);
     case 'max-count':
       return countOf(value) <= /** @type {number} */ (arg);
+    // Counted with `contains`, which reads them.
+    case 'min-contains':
+    case 'max-contains':
+      return true;
+    case 'unique':
+      return arg === false || (arg === true && distinct(itemsOf(value), (item) => ({ id: identity(item) })));
+    // Items without the field are compared with none.
+    case 'unique-by':
+      return distinct(itemsOf(value), (item) => fieldIdentity(item, /** @type {string} */ (arg)));
     case 'finite':
       return arg !== true || typeof value !== 'number' || Number.isFinite(value);
     // The datetime's offset is one of these, `Z` or `±HH:MM`.
@@ -592,7 +709,71 @@ function countOf(value) {
   if (value instanceof DXNList || value instanceof DXNTuple) return value.items.length;
   if (value instanceof DXNSortedSet) return value.items.length;
   if (value instanceof Set) return value.size;
+  if (Array.isArray(value)) return value.length;
   return NaN;
+}
+
+/** A collection's items, `null` for a value that is none. @param {unknown} value @returns {unknown[] | null} */
+function itemsOf(value) {
+  if (value instanceof DXNList || value instanceof DXNTuple || value instanceof DXNSortedSet) return value.items;
+  if (value instanceof Set) return Array.from(value);
+  if (Array.isArray(value)) return value;
+  return null;
+}
+
+/**
+ * Whether no two of `items` give the same identity; `identify` answers
+ * `{id}`, or `null` for an item left out.
+ * @param {unknown[] | null} items @param {(item: unknown) => {id: unknown} | null} identify
+ */
+function distinct(items, identify) {
+  if (items === null) return false;
+  const ids = items.map(identify).flatMap((found) => (found === null ? [] : [found.id]));
+  return new Set(ids).size === ids.length;
+}
+
+/**
+ * Two values are the same when their canonical forms are (DXN.md §1.5):
+ * `1` and `1.0` differ, as `name:` and `"name" =>` do. A value with no DXN
+ * meaning, an application's object, is compared as itself.
+ * @param {unknown} value @returns {unknown}
+ */
+function identity(value) {
+  try {
+    return canonical(Validated.strip(value));
+  } catch {
+    return value;
+  }
+}
+
+/** @param {unknown} item @param {string} field @returns {{id: unknown} | null} */
+function fieldIdentity(item, field) {
+  const found = fieldOf(item, field);
+  return found === null ? null : { id: identity(found.value) };
+}
+
+/**
+ * The value of the field named `field`, whatever its key's spelling, or
+ * `null` when there is none.
+ * @param {unknown} value @param {string} field @returns {{value: unknown} | null}
+ */
+function fieldOf(value, field) {
+  if (value instanceof Validated) return fieldOf(value.value, field);
+  if (value instanceof DXNStruct) {
+    if (value.fields.type !== 'keyed') return null;
+    const pair = value.fields.pairs.find(([name]) => name === field);
+    return pair ? { value: pair[1] } : null;
+  }
+  if (value instanceof Map) {
+    for (const [key, v] of value.entries()) {
+      if (keyName(key) === field) return { value: v };
+    }
+    return null;
+  }
+  if (value !== null && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, field)) {
+    return { value: /** @type {any} */ (value)[field] };
+  }
+  return null;
 }
 
 /** @param {number} a @param {number} b @returns {boolean} */
