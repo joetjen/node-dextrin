@@ -25,6 +25,7 @@ const parser = require('../text/parser.cjs');
 const Registry = require('../registry.cjs');
 const Compiler = require('./compiler.cjs');
 const Layout = require('./layout.cjs');
+const { TYPE_KEYS } = require('./type-expr.cjs');
 const DXNKeyword = require('../values/keyword.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
 const DXNTuple = require('../values/tuple.cjs');
@@ -311,8 +312,10 @@ function typeReferences(type) {
       return typeReferences(type.body);
     case 'apply':
       return type.args.flatMap(typeReferences);
+    // A refine's base, and the types its `contains`, `content`, `encodes`
+    // and `encodes-seq` hold.
     case 'refine':
-      return [...typeReferences(type.base), ...('contains' in type.constraints ? typeReferences(type.constraints.contains) : [])];
+      return [type.base, ...TYPE_KEYS.filter((key) => key in type.constraints).map((key) => type.constraints[key])].flatMap(typeReferences);
     case 'list-items':
       return type.particles.flatMap(particleReferences);
     case 'tuple-of':

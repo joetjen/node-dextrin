@@ -83,6 +83,10 @@ const { single } = require('../binary/float.cjs');
 const Validated = require('./validated.cjs');
 const Field = require('./field.cjs');
 const { canonical } = require('../canonical.cjs');
+const Format = require('./format.cjs');
+
+/** A refine's keys whose argument is a type (DXN.md §4.2). */
+const TYPE_KEYS = ['contains', 'content', 'encodes', 'encodes-seq'];
 
 /** What `conform` answers when a value does not match. */
 const NO = Symbol('no match');
@@ -466,7 +470,9 @@ function substitute(type, bound) {
       return {
         ...type,
         base: substitute(type.base, bound),
-        constraints: 'contains' in type.constraints ? { ...type.constraints, contains: substitute(type.constraints.contains, bound) } : type.constraints
+        constraints: Object.fromEntries(
+          Object.entries(type.constraints).map(([key, t]) => (TYPE_KEYS.includes(key) ? [key, substitute(t, bound)] : [key, t]))
+        )
       };
     case 'list-items':
       return { ...type, particles: type.particles.map((/** @type {Particle} */ p) => substituteParticle(p, bound)) };
@@ -641,6 +647,12 @@ function satisfiesConstraints(value, constraints, base, ctx) {
     switch (key) {
       case 'contains':
         return contains(/** @type {TypeExpr} */ (arg), constraints, value, ctx);
+      case 'content':
+        return content(/** @type {TypeExpr} */ (arg), constraints, value, ctx);
+      case 'encodes':
+        return encodes(/** @type {TypeExpr} */ (arg), value, ctx);
+      case 'encodes-seq':
+        return encodesSeq(/** @type {TypeExpr} */ (arg), value, ctx);
       case 'min-length':
         return within(lengthOf(value, base), arg, null);
       case 'max-length':
@@ -661,6 +673,132 @@ function contains(type, constraints, value, ctx) {
   if (items === null) return false;
   const count = items.filter((item) => conform(type, item, ctx) !== NO).length;
   return within(count, constraints['min-contains'] ?? 1, constraints['max-contains'] ?? null);
+}
+
+/**
+ * The string, decoded by its `encoding` when it has one, is a DXN
+ * document whose value is a `type`: `.dxnb` under application/dxnb, text
+ * otherwise.
+ * @param {TypeExpr} type @param {{[k: string]: unknown}} constraints @param {unknown} value @param {Context} ctx
+ * @returns {boolean}
+ */
+function content(type, constraints, value, ctx) {
+  if (typeof value !== 'string') return false;
+  const bytes = decoded(/** @type {string | undefined} */ (constraints.encoding), value);
+  if (bytes === null) return false;
+  const document = readContent(contentMedia(constraints), bytes);
+  return document !== NO && conform(type, document.value, ctx) !== NO;
+}
+
+/** The media type `content` reads by, in lower case; `null` for none. @param {{[k: string]: unknown}} constraints */
+function contentMedia(constraints) {
+  const media = constraints['media-type'];
+  return typeof media === 'string' ? media.toLowerCase() : null;
+}
+
+/**
+ * The document `bytes` hold, `.dxnb` under application/dxnb, text
+ * otherwise; `NO` when they hold none. A string with no encoding is its
+ * own text.
+ * @param {string | null} media @param {Buffer | string} bytes
+ * @returns {{value: unknown} | typeof NO}
+ */
+function readContent(media, bytes) {
+  // Required here, not at the top: the decoders check schemas with this module.
+  const dextrin = require('../dextrin.cjs');
+  try {
+    if (media === 'application/dxnb') return { value: dextrin.decodeBinary(typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : bytes) };
+    const text = typeof bytes === 'string' ? bytes : UTF8_STRICT.decode(bytes);
+    if (/\p{Cs}/u.test(text)) return NO;
+    return { value: dextrin.decode(text) };
+  } catch {
+    return NO;
+  }
+}
+
+/**
+ * The bytes are a `.dxnb` document whose value is a `type`.
+ * @param {TypeExpr} type @param {unknown} value @param {Context} ctx @returns {boolean}
+ */
+function encodes(type, value, ctx) {
+  if (!(value instanceof DXNBytes)) return false;
+  let document;
+  try {
+    document = require('../dextrin.cjs').decodeBinary(value.data);
+  } catch {
+    return false;
+  }
+  return conform(type, document, ctx) !== NO;
+}
+
+/**
+ * The bytes are `.dxnb` documents back to back, each a `type`; none at
+ * all too.
+ * @param {TypeExpr} type @param {unknown} value @param {Context} ctx @returns {boolean}
+ */
+function encodesSeq(type, value, ctx) {
+  if (!(value instanceof DXNBytes)) return false;
+  let documents;
+  try {
+    documents = require('../binary/decoder.cjs').decodeSequence(value.data);
+  } catch {
+    return false;
+  }
+  return documents.every((document) => conform(type, document, ctx) !== NO);
+}
+
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
+
+/** RFC 4648's alphabets, each with the padding its encoding takes (DXN.md §4.2). */
+const ENCODED = {
+  base64: /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+  base64urlPadded: /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}==|[A-Za-z0-9_-]{3}=)?$/,
+  base64urlBare: /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$/,
+  base32: /^(?:[A-Z2-7]{8})*(?:[A-Z2-7]{2}={6}|[A-Z2-7]{4}={4}|[A-Z2-7]{5}={3}|[A-Z2-7]{7}=)?$/,
+  base16: /^(?:[0-9A-Fa-f]{2})*$/
+};
+
+/**
+ * `text` decoded by RFC 4648's `encoding`, `null` when it is not valid in
+ * it; no encoding leaves it as it is. base64 and base32 take their
+ * padding, base64url with or without it, base16 either case. Checked by
+ * the alphabets above, not by `Buffer.from`, which takes what they refuse.
+ * @param {string | undefined} encoding @param {string} text
+ * @returns {Buffer | string | null}
+ */
+function decoded(encoding, text) {
+  switch (encoding) {
+    case undefined:
+      return text;
+    case 'base64':
+      return ENCODED.base64.test(text) ? Buffer.from(text, 'base64') : null;
+    case 'base64url':
+      return (text.includes('=') ? ENCODED.base64urlPadded : ENCODED.base64urlBare).test(text) ? Buffer.from(text, 'base64url') : null;
+    case 'base32':
+      return ENCODED.base32.test(text) ? base32(text) : null;
+    case 'base16':
+      return ENCODED.base16.test(text) ? Buffer.from(text, 'hex') : null;
+    default:
+      return null;
+  }
+}
+
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** The bytes of base32 `text`, already known valid; trailing bits are dropped. @param {string} text @returns {Buffer} */
+function base32(text) {
+  const out = [];
+  let bits = 0;
+  let acc = 0;
+  for (const c of text.replace(/=+$/, '')) {
+    acc = ((acc << 5) | BASE32.indexOf(c)) & 0xfff;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((acc >> bits) & 0xff);
+    }
+  }
+  return Buffer.from(out);
 }
 
 /**
@@ -768,6 +906,15 @@ function satisfiesConstraint(key, arg, value) {
       const most = /** @type {bigint} */ (span.at);
       return fromNow(value, true, (d) => (d < 0n ? -d : d) <= most);
     }
+    // The string is valid in RFC 4648's `arg`.
+    case 'encoding':
+      return typeof value === 'string' && decoded(/** @type {string} */ (arg), value) !== null;
+    // What the string holds; it checks nothing more (`content` reads it).
+    case 'media-type':
+      return typeof value === 'string';
+    // One of DXN.md §4.2a's formats, checked as `format.cjs` says.
+    case 'format':
+      return typeof value === 'string' && Format.valid(/** @type {string} */ (arg), value);
     // No part of the value is finer than `arg`.
     case 'resolution': {
       const nanos = nanosOf(value);
@@ -1032,10 +1179,33 @@ function ordinal(value) {
   return null;
 }
 
+/** Whether `value` has a place in some kind's order: a range's bound. @param {unknown} value @returns {boolean} */
+function comparable(value) {
+  return ordinal(value) !== null;
+}
+
+/**
+ * Whether `value` is a finite number other than zero: a `multiple-of`.
+ * NaN and the infinities are none, as they are no number to the
+ * reference.
+ * @param {unknown} value @returns {boolean}
+ */
+function nonzeroNumber(value) {
+  const o = ordinal(value);
+  if (o === null || o.kind !== 'number') return false;
+  return typeof o.at === 'bigint' ? o.at !== 0n : Number.isFinite(o.at) && o.at !== 0;
+}
+
+/** Whether `value` is a duration of a fixed length: a `within`. @param {unknown} value @returns {boolean} */
+function span(value) {
+  const o = ordinal(value);
+  return o !== null && o.kind === 'duration';
+}
+
 /** A number of any kind as a float; `null` for any other value. @param {unknown} value @returns {number | null} */
 function toNumber(value) {
   const o = ordinal(value);
   return o !== null && o.kind === 'number' ? Number(o.at) : null;
 }
 
-module.exports = { matches, conform, context, NO, resolutions };
+module.exports = { matches, conform, context, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };

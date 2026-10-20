@@ -151,6 +151,8 @@ function printFloat(n) {
   if (Number.isNaN(n)) return 'NaN';
   if (n === Infinity) return 'Infinity';
   if (n === -Infinity) return '-Infinity';
+  // `String(-0)` is "0": the sign is written, as every reader keeps it.
+  if (Object.is(n, -0)) return '-0.0';
   const s = String(n);
   // JS omits the decimal point for integer-valued floats (`String(1)`
   // === "1"), which `.dxn` needs to stay distinct from `integer` —
