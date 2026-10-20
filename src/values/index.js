@@ -15,6 +15,8 @@ import DXNDateTime from './date-time.js';
 import DXNLocalDateTime from './local-date-time.js';
 import DXNDuration from './duration.js';
 import DXNUUID from './uuid.js';
+import DXNObjectId from './object-id.js';
+import DXNIp from './ip.js';
 import DXNURI from './uri.js';
 import DXNBytes from './bytes.js';
 import DXNBits from './bits.js';
@@ -40,6 +42,8 @@ export {
   DXNLocalDateTime,
   DXNDuration,
   DXNUUID,
+  DXNObjectId,
+  DXNIp,
   DXNURI,
   DXNBytes,
   DXNBits,

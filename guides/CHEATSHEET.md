@@ -84,6 +84,8 @@ struct      DXNStruct{name, fields}                 `%Name{...}` / `%Name[...]`,
 duration    DXNDuration{years, months, ...}         `@duration "P1Y2M"` — 7 independent fields
 rational    DXNRational{numerator, denominator}     `22/7` — stored exactly, never auto-reduced
 uuid        DXNUUID{bytes: Uint8Array(16)}          `@uuid "..."` — 16 raw bytes, not the text form
+objectid    DXNObjectId{bytes: Uint8Array(12)}      `@objectid "..."` — 12 raw bytes, BSON's ObjectId
+ip          DXNIp{address, prefix}                  `@ip "10.0.0.0/8"` — an address or a prefix, raw bytes
 uri         DXNURI{value}                           `@uri "..."` — raw string, not parsed
 bytes       DXNBytes{data: Uint8Array}               `@bytes "..."` (base64 in text)
 char        DXNChar{codepoint}                       `?a` — distinct from a 1-codepoint string

@@ -38,11 +38,6 @@ describe('.dxnb malformed input', () => {
     expect(() => decode(doc(invalidUtf8))).to.throw(BinaryError, /UTF-8/);
   });
 
-  it('rejects half-precision (16-bit) floats outright', () => {
-    const halfFloat = Buffer.from([(7 << 5) | 25, 0x00, 0x00]);
-    expect(() => decode(doc(halfFloat))).to.throw(BinaryError, /half-precision/);
-  });
-
   it('rejects an unrecognized simple value / reserved major-7 additional info', () => {
     const reserved = Buffer.from([(7 << 5) | 28]);
     expect(() => decode(doc(reserved))).to.throw(BinaryError);

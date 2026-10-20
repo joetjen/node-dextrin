@@ -31,6 +31,8 @@ const {
   DXNLocalDateTime,
   DXNDuration,
   DXNUUID,
+  DXNObjectId,
+  DXNIp,
   DXNURI,
   DXNBytes,
   DXNBits,
@@ -229,6 +231,8 @@ module.exports.DXNDateTime = DXNDateTime;
 module.exports.DXNLocalDateTime = DXNLocalDateTime;
 module.exports.DXNDuration = DXNDuration;
 module.exports.DXNUUID = DXNUUID;
+module.exports.DXNObjectId = DXNObjectId;
+module.exports.DXNIp = DXNIp;
 module.exports.DXNURI = DXNURI;
 module.exports.DXNBytes = DXNBytes;
 module.exports.DXNBits = DXNBits;

@@ -2,7 +2,7 @@
 
 /**
  * @fileoverview Which values may be map keys (`DXN.md` §1.6): a string,
- * keyword, integer, uuid, date, bytes, symbol or char. Anything else is
+ * keyword, integer, uuid, objectid, date, bytes, symbol or char. Anything else is
  * refused as `key/not-allowed` -- in text, in binary and when encoding.
  *
  * The allowed types are those whose identity is exact and obvious in
@@ -15,13 +15,14 @@
 
 const DXNKeyword = require('./values/keyword.cjs');
 const DXNUUID = require('./values/uuid.cjs');
+const DXNObjectId = require('./values/object-id.cjs');
 const DXNDate = require('./values/date.cjs');
 const DXNBytes = require('./values/bytes.cjs');
 const DXNSymbol = require('./values/symbol.cjs');
 const DXNChar = require('./values/char.cjs');
 
 /**
- * Whether `key` is one of the eight types.
+ * Whether `key` is one of the nine types.
  * @param {unknown} key
  * @returns {boolean}
  */
@@ -32,6 +33,7 @@ function allowed(key) {
     typeof key === 'symbol' ||
     key instanceof DXNKeyword ||
     key instanceof DXNUUID ||
+    key instanceof DXNObjectId ||
     key instanceof DXNDate ||
     key instanceof DXNBytes ||
     key instanceof DXNSymbol ||
@@ -46,7 +48,7 @@ function allowed(key) {
 function check(key) {
   if (allowed(key)) return;
   const err = new TypeError(
-    `${describe(key)} cannot be a map key: a key is a string, keyword, integer, uuid, date, bytes, symbol or char`
+    `${describe(key)} cannot be a map key: a key is a string, keyword, integer, uuid, objectid, date, bytes, symbol or char`
   );
   /** @type {any} */ (err).category = 'key/not-allowed';
   throw err;

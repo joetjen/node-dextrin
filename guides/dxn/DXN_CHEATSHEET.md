@@ -39,6 +39,8 @@ datetime     @datetime "YYYY-MM-DDTHH:MM:SS(Z|±HH:MM)"  an instant with its off
 local-dt     @local-datetime "YYYY-MM-DDTHH:MM:SS"    no offset
 duration     @duration "P..."                         ISO 8601 duration
 uuid         @uuid "..."                              RFC 4122
+objectid     @objectid "<24 hex>"                     BSON's ObjectId, 12 bytes
+ip           @ip "192.0.2.1" | "2001:db8::/32"        an address or a prefix
 uri          @uri "..."                               RFC 3986
 bytes        @bytes "..."                             base64 in text
 bits         @bits {"..." n}                          base64 and a bit count; whole bytes are bytes
@@ -91,6 +93,10 @@ Name                            bare symbol -- a struct name or a named type
 {:nilable T}                     sugar for {:any-of :nil T}
 {:refine T %{constraints}}       base type + constraints, see below
 %schema{}    struct/record shape
+%shape{}     plain map with these fields, defaults filled (unversioned)
+{:case f %{v => T, :else => U}}  the type field f's value chooses
+{:generic [t] body}             a named type with parameters
+{:of Name T}                    one use of a generic
 ```
 
 ## `refine` constraints
