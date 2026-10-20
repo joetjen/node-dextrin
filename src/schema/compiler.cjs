@@ -226,6 +226,7 @@ function compileTypeExpr(value, aliases) {
 
   if (value instanceof DXNKeyword) {
     if (value.name === 'any') return { form: 'any' };
+    if (value.name === 'never') return { form: 'never' };
     if (PRIMITIVES.has(value.name)) return { form: 'primitive', name: value.name };
     throw new SchemaCompileError(`unrecognized primitive type name ${JSON.stringify(value.name)}`);
   }
@@ -245,8 +246,15 @@ function compileTypeExpr(value, aliases) {
     if (tag === 'map-of' && rest.length === 2) {
       return { form: 'map-of', key: compileTypeExpr(rest[0], aliases), value: compileTypeExpr(rest[1], aliases) };
     }
+    if (tag === 'array-of' && rest.length === 1) return { form: 'array-of', elem: compileTypeExpr(rest[0], aliases) };
+    if (tag === 'sorted-set-of' && rest.length === 1) return { form: 'sorted-set-of', elem: compileTypeExpr(rest[0], aliases) };
+    if (tag === 'ordered-map-of' && rest.length === 2) {
+      return { form: 'ordered-map-of', key: compileTypeExpr(rest[0], aliases), value: compileTypeExpr(rest[1], aliases) };
+    }
     if (tag === 'enum') return { form: 'enum', literals: rest };
     if (tag === 'one-of') return { form: 'one-of', variants: rest.map((v) => compileTypeExpr(v, aliases)) };
+    if (tag === 'any-of') return { form: 'any-of', variants: rest.map((v) => compileTypeExpr(v, aliases)) };
+    if (tag === 'not' && rest.length === 1) return { form: 'not', elem: compileTypeExpr(rest[0], aliases) };
     if (tag === 'all-of') return { form: 'all-of', variants: rest.map((v) => compileTypeExpr(v, aliases)) };
     if (tag === 'nilable' && rest.length === 1) return { form: 'nilable', elem: compileTypeExpr(rest[0], aliases) };
     if (tag === 'refine' && rest.length === 2 && rest[1] instanceof Map) {
