@@ -43,6 +43,13 @@ describe('text/printer', () => {
     expect(print(new DXNCustomTag('my-tag', 42n))).to.equal('@my-tag 42');
   });
 
+  // Jan, 2026-10-20: `@array[` is the preferred spelling; `@array [`
+  // still reads.
+  it('prints an array with its bracket against the tag', () => {
+    expect(print([1n, 2n])).to.equal('@array[1 2]');
+    expect(print(parse('@array [1 2]'))).to.equal('@array[1 2]');
+  });
+
   it('throws TypeError for a value with no DXN representation', () => {
     expect(() => print(() => {})).to.throw(TypeError);
     expect(() => print({ plain: 'object' })).to.throw(TypeError);

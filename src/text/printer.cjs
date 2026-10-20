@@ -77,7 +77,9 @@ function print(value, opts = {}) {
 
   if (value instanceof DXNList) return '[' + value.items.map((v) => print(v, opts)).join(' ') + ']';
   if (value instanceof DXNTuple) return '{' + value.items.map((v) => print(v, opts)).join(' ') + '}';
-  if (Array.isArray(value)) return tagForm('array', '[' + value.map((v) => print(v, opts)).join(' ') + ']', opts);
+  // `@array[`, the bracket against the tag, is the preferred spelling
+  // (Jan, 2026-10-20); `@array [` still reads.
+  if (Array.isArray(value)) return '@array[' + value.map((v) => print(v, opts)).join(' ') + ']';
 
   if (value instanceof Set) return '@{' + Array.from(value).map((v) => print(v, opts)).join(' ') + '}';
   if (value instanceof DXNSortedSet) {
