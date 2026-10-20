@@ -33,6 +33,8 @@ const DXNStruct = require('../values/struct.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Compiled = require('./compiled.cjs');
 const Field = require('./field.cjs');
+const { print } = require('../text/printer.cjs');
+const { resolutions } = require('./type-expr.cjs');
 
 const PRIMITIVES = new Set([
   'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
@@ -598,20 +600,21 @@ function particle(value, aliases) {
 
 const REFINE_KEYS = new Set([
   'min', 'max', 'exclusive-min', 'exclusive-max', 'multiple-of', 'min-length', 'max-length',
-  'pattern', 'min-count', 'max-count', 'finite', 'offsets', 'version', 'prefix', 'contains',
-  'min-contains', 'max-contains', 'unique', 'unique-by'
+  'min-bytes', 'max-bytes', 'pattern', 'min-count', 'max-count', 'finite', 'float32', 'offsets',
+  'version', 'prefix', 'contains', 'min-contains', 'max-contains', 'unique', 'unique-by',
+  'min-precision', 'max-precision', 'min-exponent', 'max-exponent', 'bits', 'before-now',
+  'after-now', 'within', 'resolution'
 ]);
 
 /**
  * A refine's constraints by name, every key one DXN.md §4.2 knows: a
  * misspelt key would otherwise refuse every value, silently. `contains`
- * holds a type, compiled here; `unique-by` a field's name.
+ * holds a type, compiled here; `unique-by` and `resolution` a name.
  * @param {Map<unknown, unknown>} written @param {Map<string, unknown>} aliases
  * @returns {{[k: string]: unknown}}
  */
 function refineConstraints(written, aliases) {
-  /** @type {{[k: string]: unknown}} */
-  const named = Object.fromEntries(Array.from(written.entries(), ([k, v]) => [literalName(k), v]));
+  const named = constraintNames(written);
   const unknown = Object.keys(named)
     .sort(byCodepoint)
     .find((key) => !REFINE_KEYS.has(key));
@@ -620,8 +623,62 @@ function refineConstraints(written, aliases) {
     throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
   }
   if ('contains' in named) named.contains = compileTypeExpr(named.contains, aliases);
-  if ('unique-by' in named) named['unique-by'] = literalName(named['unique-by']);
+  namedArg(named, 'unique-by', null);
+  namedArg(named, 'resolution', resolutions());
   return named;
+}
+
+/**
+ * The constraints keyed by their names; a key that is no name is a
+ * compile error, not a crash.
+ * @param {Map<unknown, unknown>} written
+ * @returns {{[k: string]: unknown}}
+ */
+function constraintNames(written) {
+  /** @type {{[k: string]: unknown}} */
+  const named = {};
+  for (const [key, value] of written.entries()) {
+    const name = nameOf(key);
+    if (name === null) throw new SchemaCompileError(`a refine constraint's key is a name, not ${shown(key)}`);
+    named[name] = value;
+  }
+  return named;
+}
+
+/**
+ * `key`'s argument made a name, in place, one of `allowed` when they are
+ * given.
+ * @param {{[k: string]: unknown}} named @param {string} key @param {string[] | null} allowed
+ */
+function namedArg(named, key, allowed) {
+  if (!(key in named)) return;
+  const arg = named[key];
+  const name = nameOf(arg);
+  if (name === null || (allowed !== null && !allowed.includes(name))) {
+    throw new SchemaCompileError(`${key} takes ${expected(allowed)}, not ${shown(arg)}`);
+  }
+  named[key] = name;
+}
+
+/** @param {string[] | null} allowed @returns {string} */
+function expected(allowed) {
+  return allowed === null ? 'a name' : `one of ${[...allowed].sort(byCodepoint).map((a) => `:${a}`).join(' ')}`;
+}
+
+/** A keyword's, symbol's or string's name; `null` for any other value. @param {unknown} value @returns {string | null} */
+function nameOf(value) {
+  if (value instanceof DXNKeyword || value instanceof DXNSymbol) return value.name;
+  if (typeof value === 'string') return value;
+  return null;
+}
+
+/** A value as an error message shows it: in DXN notation, when it has one. @param {unknown} value @returns {string} */
+function shown(value) {
+  try {
+    return print(value);
+  } catch {
+    return describe(value);
+  }
 }
 
 /** Strings in code point order, as Elixir's `Enum.sort/1` orders them. @param {string} a @param {string} b */
