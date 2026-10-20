@@ -43,18 +43,14 @@ function commentText(comment) {
  */
 function leading(text) {
   /** @type {string[]} */
-  const lines = [];
+  const out = [];
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    if (line.startsWith('#')) lines.push(commentText(line));
-    else if (line === '') lines.push('');
-  }
-  // A run of blank lines is one paragraph break.
-  /** @type {string[]} */
-  const out = [];
-  for (const line of lines) {
-    if (line === '' && out[out.length - 1] === '') continue;
-    out.push(line);
+    if (!line.startsWith('#') && line !== '') continue;
+    const comment = line === '' ? '' : commentText(line);
+    // A run of empty lines, blank or a bare `#`, is one paragraph break.
+    if (comment === '' && out.length > 0 && out[out.length - 1] === '') continue;
+    out.push(comment);
   }
   return out.join('\n').trim();
 }
