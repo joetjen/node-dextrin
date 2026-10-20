@@ -26,6 +26,25 @@ describe('error categories', () => {
 });
 
 describe('conformance adapter', () => {
+  it('a media type answers the form it names, or none', () => {
+    expect(answered([
+      { id: 'a', operation: 'media-type', 'media-type': 'application/vnd.acme.x+dxn' },
+      { id: 'b', operation: 'media-type', 'media-type': 'application/json' },
+    ])).to.deep.equal([{ id: 'a', form: 'text' }, { id: 'b', form: 'none' }]);
+  });
+
+  it('a body answers whether it is worth decoding as its form', () => {
+    expect(answered([
+      { id: 'a', operation: 'identify', form: 'schema', text: '# s\n%{}' },
+      { id: 'b', operation: 'identify', form: 'text', text: '[1]' },
+      { id: 'c', operation: 'identify-binary', binary: 'RFgB' },
+    ])).to.deep.equal([
+      { id: 'a', identified: 'true' },
+      { id: 'b', identified: 'false' },
+      { id: 'c', identified: 'true' },
+    ]);
+  });
+
   const USER = '%{User: %schema(2){name: :string}}';
 
   it("loads a case's schemas before it runs", () => {
