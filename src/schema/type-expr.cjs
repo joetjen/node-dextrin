@@ -2,9 +2,10 @@
 
 /**
  * @fileoverview Internal, compiled representation of a `.dxns` type
- * expression — the 12-form vocabulary (`any`, `primitive`,
- * `reference`, `list-of`, `set-of`, `tuple-of`, `map-of`, `enum`,
- * `one-of`, `all-of`, `nilable`, `refine`) `schema/compiler.cjs` turns
+ * expression — the vocabulary of DXN.md §4.1 (`any`, `never`,
+ * `primitive`, `reference`, `list-of`, `set-of`, `tuple-of`, `map-of`,
+ * `array-of`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
+ * `any-of`, `all-of`, `not`, `nilable`, `refine`) `schema/compiler.cjs` turns
  * a parsed `.dxns` value into, and what `matches` below checks a
  * decoded value against — mirroring `Dextrin.Schema.TypeExpr`. (The
  * 13th Elixir form, `struct`, isn't a distinct compiled shape there
@@ -18,15 +19,21 @@
  * all.
  *
  * @typedef {{form: 'any'}
+ *   | {form: 'never'}
  *   | {form: 'primitive', name: string}
  *   | {form: 'reference', name: string}
  *   | {form: 'list-of', elem: TypeExpr}
  *   | {form: 'set-of', elem: TypeExpr}
  *   | {form: 'tuple-of', elems: TypeExpr[]}
  *   | {form: 'map-of', key: TypeExpr, value: TypeExpr}
+ *   | {form: 'array-of', elem: TypeExpr}
+ *   | {form: 'ordered-map-of', key: TypeExpr, value: TypeExpr}
+ *   | {form: 'sorted-set-of', elem: TypeExpr}
  *   | {form: 'enum', literals: unknown[]}
  *   | {form: 'one-of', variants: TypeExpr[]}
+ *   | {form: 'any-of', variants: TypeExpr[]}
  *   | {form: 'all-of', variants: TypeExpr[]}
+ *   | {form: 'not', elem: TypeExpr}
  *   | {form: 'nilable', elem: TypeExpr}
  *   | {form: 'refine', base: TypeExpr, constraints: {[k: string]: unknown}}} TypeExpr
  */
@@ -80,6 +87,7 @@ const Validated = require('./validated.cjs');
  */
 function matches(type, value, registry = null) {
   if (type.form === 'any') return true;
+  if (type.form === 'never') return false;
 
   if (type.form === 'reference') return matchesReference(type.name, value, registry);
 
@@ -103,10 +111,25 @@ function matches(type, value, registry = null) {
         value instanceof Map &&
         Array.from(value.entries()).every(([k, v]) => matches(type.key, k, registry) && matches(type.value, v, registry))
       );
+    case 'array-of':
+      return Array.isArray(value) && value.every((v) => matches(type.elem, v, registry));
+    case 'ordered-map-of':
+      return (
+        value instanceof DXNOrderedMap &&
+        value.pairs.every(([k, v]) => matches(type.key, k, registry) && matches(type.value, v, registry))
+      );
+    case 'sorted-set-of':
+      return value instanceof DXNSortedSet && value.items.every((v) => matches(type.elem, v, registry));
     case 'enum':
       return type.literals.some((literal) => keywordAwareEq(literal, value));
     case 'one-of':
+      // Exactly one variant matches (JSON Schema's oneOf; Jan,
+      // 2026-10-20): every variant is tried, stopping at a second match.
+      return exactlyOne(type.variants, value, registry);
+    case 'any-of':
       return type.variants.some((t) => matches(t, value, registry));
+    case 'not':
+      return !matches(type.elem, value, registry);
     case 'all-of':
       return type.variants.every((t) => matches(t, value, registry));
     case 'nilable':
@@ -116,6 +139,23 @@ function matches(type, value, registry = null) {
     default:
       return false;
   }
+}
+
+/**
+ * Whether exactly one of `types` matches `value`, stopping at a second.
+ * @param {TypeExpr[]} types
+ * @param {unknown} value
+ * @param {import('../registry.cjs') | null} registry
+ */
+function exactlyOne(types, value, registry) {
+  let found = 0;
+  for (const type of types) {
+    if (matches(type, value, registry)) {
+      found += 1;
+      if (found > 1) return false;
+    }
+  }
+  return found === 1;
 }
 
 /**
