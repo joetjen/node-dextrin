@@ -287,6 +287,13 @@ documented at the point of difference:
   fromNumber()` (exact — every finite JS number is a binary fraction),
   `DXNOrderedMap.toMap()`/`.fromMap()`, `DXNRegex.toRegExp()` (guarded
   — only when no DXN-only flag is set).
+- **A documented limit: a regex pattern is not checked.** DXN refuses a
+  pattern PCRE does not compile (`@regex "a("` is `syntax`, DXN.md
+  §1.2), and the Elixir, PHP and Praxis implementations check it with
+  PCRE. JavaScript has no PCRE, and its own engine refuses valid PCRE
+  -- inline modifiers such as `(?im)`, atomic groups, `\A` -- so it
+  cannot stand in: node-dextrin reads any pattern, and `DXNRegex.
+  toRegExp()` is where a pattern JavaScript cannot run fails.
 
 ## Value model
 
