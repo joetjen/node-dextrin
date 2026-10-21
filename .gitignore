@@ -5,3 +5,4 @@ coverage/
 /doc/
 # Written by `npm run types` (and on prepack); never committed.
 /types/
+/tmp/
