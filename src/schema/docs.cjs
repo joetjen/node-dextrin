@@ -11,7 +11,7 @@
  * It reads the documents' **source**, not their compiled schemas, so it
  * documents what a person wrote and needs no schema to compile.
  *
- * **Names** come from where a file lies under the root, by DXN.md §4.6:
+ * **Names** come from where a file lies under the root, by DXNS.md §6:
  * `acme/shop/Customer-v2.dxns`, `acme/shop/Order/v1.dxns` and
  * `acme.shop.Product.dxns` each hold one definition, the entry named
  * like the file; every other entry in such a file is internal to it.
@@ -33,7 +33,7 @@ const { canonical } = require('../canonical.cjs');
  * @typedef {import('../text/parser.cjs').SyntaxNode} SyntaxNode
  * @typedef {{source: string, tokens: Array<{type: string, start: number, end: number}>}} Src
  * @typedef {{src: Src, node: SyntaxNode}} At a node, with the source it is in
- * @typedef {{[name: string]: unknown}} Notes a doc's annotations by name (DXN.md §4.1b), each value decoded
+ * @typedef {{[name: string]: unknown}} Notes a doc's annotations by name (DXNS.md §1b), each value decoded
  * @typedef {{name: string, optional: boolean, type: At | null, default: At | null, description: string | null, doc: string, annotations: Notes, position?: number}} Field
  * @typedef {{version: number | null, file: string, note: string | null, fields: Field[], value: At | null, annotations: Notes}} Version
  * @typedef {{name: string, short: string, namespace: string, kind: 'schema' | 'shape' | 'type', internalTo: string | null, doc: string, scope: Map<string, string>, namespaceNote: string | null, versions: Version[]}} Definition
@@ -245,7 +245,7 @@ function namespaceOf(name) {
 
 /** @param {ReturnType<typeof readFile>} file @returns {Definition[]} */
 function definitionsOf(file) {
-  // The names every reader of a tree gives them (`layout.cjs`, DXN.md §4.6).
+  // The names every reader of a tree gives them (`layout.cjs`, DXNS.md §6).
   const layout = Layout.of(file.file, file.entries.map((e) => e.key));
   const names = layout.names;
   const own = layout.holder;
@@ -364,7 +364,7 @@ function field(src, name, optional, raw, doc) {
   };
 }
 
-// ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ------------------------------
+// ---- annotations, {:doc T %{...}} (DXNS.md §1b) ------------------------------
 
 /**
  * A value node without the `{:doc T %{...}}` around it, and what the doc

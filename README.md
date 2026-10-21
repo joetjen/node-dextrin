@@ -199,7 +199,7 @@ switch, for two reasons:
   the decode: `decode(text, { registry, strict: true })` (or
   `decodeBinary`, or a registry marked with `registry.putStrict(true)`)
   refuses them (`schema/undeclared-field`), and without `strict` they
-  are kept -- in `.dxnb` as one trailing item (DXN.md §4.7) -- and
+  are kept -- in `.dxnb` as one trailing item (DXNS.md §7) -- and
   written back out.
 - **A closed type breaks the next version.** Adding a field to a closed
   type makes every older reader refuse every newer message, which turns
@@ -214,7 +214,7 @@ the application knows what it means.
 
 Several services reading and writing the same schema never all deploy
 at once. DXNS makes that safe with versions, not with compatibility
-modes (DXN.md §4.8):
+modes (DXNS.md §8):
 
 - **Every schema has a version**, `%schema(3){...}`, and every version
   stays loadable beside the others. A writer always writes the latest it
@@ -413,7 +413,7 @@ without depending on `dextrin`, see `src/schema/provider.cjs`),
 `Std.registry()`'s standard library of common named types
 (`PositiveInteger`, `NonEmptyString`, ...), and
 `FileResolver.forPaths([...])`'s resolver from names to `.dxns` files,
-by DXN.md §4.6's convention, for `Registry#putResolver`:
+by DXNS.md §6's convention, for `Registry#putResolver`:
 
 ```js
 const { decode, Schema, Registry, Std, FileResolver } = require('@joetjen/dextrin');

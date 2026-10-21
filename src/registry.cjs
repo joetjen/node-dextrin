@@ -258,7 +258,7 @@ class Registry {
 
   /**
    * What the resolver answers for `name`, every version of it loaded --
-   * so an older struct reaches the materializer (DXN.md §4.6, §4.8) --
+   * so an older struct reaches the materializer (DXNS.md §6, §4.8) --
    * and the latest answered. A resolver's refusal is thrown on.
    * @param {string} name
    * @returns {{compiled: import('./schema/compiled.cjs'), registry: Registry} | undefined}

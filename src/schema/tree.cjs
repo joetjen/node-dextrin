@@ -3,7 +3,7 @@
 /**
  * @fileoverview A tree of `.dxns` files read as one (Jan, 2026-10-20),
  * the port of `Dextrin.Schema.Tree`: every entry named from where its
- * file lies (DXN.md §4.6, `layout.cjs`), the files compiled in the order
+ * file lies (DXNS.md §6, `layout.cjs`), the files compiled in the order
  * their references need -- so a reference to another file's named type
  * resolves whatever order the files sort in -- and every problem
  * reported with its file and line:
@@ -148,7 +148,7 @@ function versionProblem(file) {
     const v = value.version ?? 1;
     return v === version
       ? null
-      : problem(file.file, entryLine(file, holder), `holds ${holder} as version ${v}, but its name says version ${version} (DXN.md §4.6)`);
+      : problem(file.file, entryLine(file, holder), `holds ${holder} as version ${v}, but its name says version ${version} (DXNS.md §6)`);
   }
   return problem(file.file, entryLine(file, holder), `a versioned file holds a %schema(N), not ${holder}'s kind`);
 }
@@ -186,7 +186,7 @@ function twice(index) {
       if (files.length < 2) continue;
       files.sort();
       const what = version === 'type' ? name : `${name} version ${version}`;
-      found.push(problem(/** @type {string} */ (files[0]), 1, `${what} is in two files, ${files.join(' and ')}; it is found once (DXN.md §4.6)`));
+      found.push(problem(/** @type {string} */ (files[0]), 1, `${what} is in two files, ${files.join(' and ')}; it is found once (DXNS.md §6)`));
     }
   }
   return found;

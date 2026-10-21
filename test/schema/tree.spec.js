@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { decode, FileResolver, Registry, SchemaTree } from '../../src/dextrin.js';
 
 // A tree of `.dxns` files read as one, as dextrin 96d3fc0 (Jan,
-// 2026-10-20): every entry named from its file's path (DXN.md §4.6), the
+// 2026-10-20): every entry named from its file's path (DXNS.md §6), the
 // files compiled in the order their references need, and every problem
 // reported with its file and line.
 describe('schema tree', () => {

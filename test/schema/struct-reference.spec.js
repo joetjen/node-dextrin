@@ -4,7 +4,7 @@ import DXNStruct from '../../src/values/struct.js';
 import DXNDateTime from '../../src/values/date-time.js';
 
 // A value matches only its declared type, and nothing is converted to
-// make it match (DXN.md §4.7). A field typed `User` accepts only a
+// make it match (DXNS.md §7). A field typed `User` accepts only a
 // `User` struct; a map is not a struct. A host value always means the
 // same DXN type, with or without a schema.
 class UserRecord {
