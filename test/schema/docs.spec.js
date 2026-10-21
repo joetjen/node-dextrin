@@ -56,7 +56,7 @@ describe('SchemaDocs', () => {
   });
 
   // As dextrin 053432a.
-  describe('annotations, {:doc T %{...}} (DXN.md §4.1b)', () => {
+  describe('annotations, {:doc T %{...}} (DXNS.md §1b)', () => {
     const annotated = `%{
   Order: {:doc %schema(2){
     id: :integer

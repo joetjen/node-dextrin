@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **DXNS has guides of its own** (Jan, 2026-10-21), as in the reference:
+  a tutorial, the reference (`DXNS.md`, DXN.md's old §4, its sections
+  renumbered 1 to 8 -- "DXNS.md §2" is the old "DXN.md §4.2"), examples
+  and a cheatsheet; every citation follows the new numbers.
+
 ### Added
 
 - **`bench/schema-validation`**: the Elixir reference's schema-validation
@@ -55,12 +62,12 @@ that misused a refine key no longer compiles.
   says so.
 ### Added
 
-- **Sugar** (as dextrin d1b050a, Jan, 2026-10-20; DXN.md §4.1; the
+- **Sugar** (as dextrin d1b050a, Jan, 2026-10-20; DXNS.md §1; the
   superset's group 9): `:int32`, `:int64`, `:uint32`, `:uint64` and
   `:float32`, `:number`, `{:const v}`, and `{:if I T E}` (JSON Schema's
   if/then/else).
 - **Annotations, `{:doc T %{...}}`** (as dextrin 0b4225d and 053432a,
-  Jan, 2026-10-20; DXN.md §4.1b; the superset's group 8): a `title`,
+  Jan, 2026-10-20; DXNS.md §1b; the superset's group 8): a `title`,
   `description`, `examples`, `read-only`, `write-only`, `deprecated` and
   free `meta` on any type, around a whole schema, named type or generic
   too, and `values:` for an enum's single values. They change nothing a
@@ -83,7 +90,7 @@ that misused a refine key no longer compiles.
   `.cborseq`. The binary decoder's `decodeSequence` reads documents back
   to back. An encoding is checked by its alphabet and padding, as the
   reference checks it, not by `Buffer.from`, which takes what it refuses.
-- **`format:`** (as dextrin 71fbec0, Jan, 2026-10-20; DXN.md §4.2a): a
+- **`format:`** (as dextrin 71fbec0, Jan, 2026-10-20; DXNS.md §2a): a
   string in one of a closed set of 22 formats -- `date`, `time`,
   `datetime`, `local-datetime`, `duration`, `uuid`, `ipv4`, `ipv6`,
   `hostname`, `idn-hostname`, `email`, `idn-email`, `uri`,
@@ -93,7 +100,7 @@ that misused a refine key no longer compiles.
   tag's reader; every other one by a grammar the spec gives, compiled
   with the `u` flag. `@uuid` already read only 8-4-4-4-12 hex digits.
 - **Refine keys on scalars** (as dextrin 2f20707, Jan, 2026-10-20;
-  DXN.md §4.2; the superset's group 5): `min-length`/`max-length` on
+  DXNS.md §2; the superset's group 5): `min-length`/`max-length` on
   keywords, symbols, bytes (in bytes) and bits (in bits, under `:bits`);
   `min-bytes`/`max-bytes` (UTF-8); `pattern` on keywords, symbols and
   bytes; `min-precision`/`max-precision` and `min-exponent`/
@@ -102,7 +109,7 @@ that misused a refine key no longer compiles.
   local date-times and durations; `before-now`, `after-now`, `within:
   @duration "PT1H"`; `resolution: :millisecond`.
 - **A list's items in order, and lists' refine keys** (as dextrin
-  f2639a9, Jan, 2026-10-20; DXN.md §4.1a, §4.2; the superset's group 4).
+  f2639a9, Jan, 2026-10-20; DXNS.md §1a, §4.2; the superset's group 4).
   `{:list-items :string {:repeat :integer 0 nil}}` is a list item by
   item: a type for one item, `{:repeat p min max}` for several (`max`
   `nil` for no bound), and `{:repeat {:group a b} min max}` for several
@@ -122,7 +129,7 @@ that misused a refine key no longer compiles.
   refine keys `version:` and `prefix:`. **`.dxnb` uses the smallest
   representation that keeps a value**, now said in DXN.md §2.2.
 - **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
-  types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has
+  types** (DXNS.md §4a, §4.5, Jan, 2026-10-20), as the reference has
   them: a shape is a named, unversioned plain-map type that fills its
   missing fields' defaults; a case chooses a field's type by its sibling's
   value; a named type may refer to itself through a field or a
@@ -146,7 +153,7 @@ that misused a refine key no longer compiles.
   link, every version shown, light or dark kept in localStorage.
   `example/` holds the shared Acme schemas and their generated `doc/`; a
   test checks the generated site against it.
-- **New type forms** (DXN.md §4.1, as dextrin 47d6d1d): `{:not t}`,
+- **New type forms** (DXNS.md §1, as dextrin 47d6d1d): `{:not t}`,
   `:never` (JSON Schema's `false`), and element types for the
   collections that had none: `{:array-of t}`, `{:ordered-map-of k v}`,
   `{:sorted-set-of t}`.
@@ -163,7 +170,7 @@ that misused a refine key no longer compiles.
 - **Dotted names** (DXN.md §1.1, as dextrin 0d1c7f5): segments joined by
   `.`, with at most one `/` -- `%Foo.Bar/Baz{...}`, `acme.billing/invoice`,
   `:a.b`, `a.b: 1`. Two slashes or an empty segment are refused.
-- **`FileResolver.forPaths` follows DXN.md §4.6** (as dextrin fd34537):
+- **`FileResolver.forPaths` follows DXNS.md §6** (as dextrin fd34537):
   the four layouts (`Foo/Bar/Baz-vN.dxns`, `Foo/Bar/Baz/vN.dxns`,
   `Foo.Bar.Baz-vN.dxns`, the namespace file `Foo.Bar.dxns`), the first
   search path deciding, a file's version its schema's, one version found
@@ -242,11 +249,11 @@ that misused a refine key no longer compiles.
   datetime, 220 duration, 217 local date-time); 0.2's microsecond tags
   (1, 210, 211, 212) are still read, as what they meant, and never
   written, so a tag never changes its meaning.
-- **Refine keys `finite:` and `offsets:`** (DXN.md §4.2), and **NaN lies
+- **Refine keys `finite:` and `offsets:`** (DXNS.md §2), and **NaN lies
   outside every range**: `min`, `max` and both exclusive bounds refuse it.
 - **The README's size table is the reference's measured again**: the
   pretty layout and the datetime spelling both changed it.
-- **A named type sees the named types beside it** (DXN.md §4.5): a
+- **A named type sees the named types beside it** (DXNS.md §5): a
   reference to a sibling in the same document resolves, in any order; a
   named type that reaches itself unguarded is refused.
 - **The package description opens with the development warning**
@@ -282,7 +289,7 @@ that misused a refine key no longer compiles.
   `Symbol.for` keys from the default. A `Document` path's keyword names a
   keyword key either way.
 - **A field typed with a namespaced reference takes a struct of that
-  name** (DXN.md §4.7): a field typed `geo/Address` accepts
+  name** (DXNS.md §7): a field typed `geo/Address` accepts
   `%geo/Address{...}` and refuses `%Address{...}` -- the other way round
   from before, when a resolved schema kept its file's name. Breaking for
   documents that wrote the bare name. `forPaths`' resolver answers a list
@@ -325,7 +332,7 @@ that misused a refine key no longer compiles.
   `.dxnb` wrote it as the wrong day: `DXNDate` and the encoder counted
   through `Date.UTC`, which reads a year from 0 to 99 as 19xx. Days are
   counted in plain arithmetic now.
-- **A field naming another file's named type resolves** (DXN.md §4.6):
+- **A field naming another file's named type resolves** (DXNS.md §6):
   `FileResolver` compiled each file on its own, so a field naming another
   file's shape or named type named a struct that never came.
 - A registry's own `putTrusted` was never consulted: the text and binary

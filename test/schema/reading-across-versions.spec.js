@@ -3,7 +3,7 @@ import { decode, decodeBinary, encodeBinary, DXNError, Registry, Schema } from '
 import DXNStruct from '../../src/values/struct.js';
 
 // A struct is read according to the version it was written with, set
-// against the versions loaded (DXN.md §4.8).
+// against the versions loaded (DXNS.md §8).
 const V1 = '%{User: %schema{name: :string}}';
 const V2 = '%{User: %schema(2){name: :string, email?: :string}}';
 const V3 = '%{User: %schema(3){name: :string, email?: :string, nick?: :string}}';

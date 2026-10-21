@@ -2,7 +2,7 @@
 
 /**
  * @fileoverview Internal, compiled representation of a `.dxns` type
- * expression — the vocabulary of DXN.md §4.1 (`any`, `never`,
+ * expression — the vocabulary of DXNS.md §1 (`any`, `never`,
  * `primitive`, `reference`, `list-of`, `list-items`, `set-of`, `tuple-of`,
  * `tuple-of-all`, `map-of`, `array-of`, `tagged`, `doc`, `if`, `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`,
  * `any-of`, `all-of`, `not`, `nilable`, `refine`) `schema/compiler.cjs` turns
@@ -52,7 +52,7 @@
 /**
  * One of a `{:list-items}`'s items: a type for exactly one item, or a
  * repeat of a group of them, `max` null when there is no upper bound
- * (DXN.md §4.1a).
+ * (DXNS.md §1a).
  * @typedef {{kind: 'one', type: TypeExpr}
  *   | {kind: 'repeat', group: Particle[], min: number, max: number | null}} Particle
  */
@@ -89,7 +89,7 @@ const Field = require('./field.cjs');
 const { canonical } = require('../canonical.cjs');
 const Format = require('./format.cjs');
 
-/** A refine's keys whose argument is a type (DXN.md §4.2). */
+/** A refine's keys whose argument is a type (DXNS.md §2). */
 const TYPE_KEYS = ['contains', 'content', 'encodes', 'encodes-seq'];
 
 /** What `conform` answers when a value does not match. */
@@ -166,7 +166,7 @@ function conform(type, value, ctx) {
       return chosen === null ? NO : conform(chosen, value, ctx);
     }
     case 'named': {
-      // A recursive named type's reference to itself (DXN.md §4.5), looked
+      // A recursive named type's reference to itself (DXNS.md §5), looked
       // up when it is checked; with no registry there is nothing to look in.
       const named = ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined;
       return named ? conform(/** @type {TypeExpr} */ (named), value, ctx) : NO;
@@ -355,7 +355,7 @@ function sameMap(like, pairs) {
  * `particles` matched against the front of `left`, then `rest` against
  * what they leave: the items conformed, in order, or `NO`. A repeat takes
  * as many items as it can while the rest still matches, and gives back
- * one at a time until it does (DXN.md §4.1a).
+ * one at a time until it does (DXNS.md §1a).
  * @param {Particle[]} particles
  * @param {unknown[]} left
  * @param {Context} ctx
@@ -561,7 +561,7 @@ function substituteParticle(particle, bound) {
 function matchesReference(name, value, registry) {
   if (value instanceof DXNStruct) return value.name === name;
   if (value instanceof Validated) return value.name === name;
-  // A struct is matched only by a struct (DXN.md §4.7): past a struct or
+  // A struct is matched only by a struct (DXNS.md §7): past a struct or
   // checked value of the right name, only the class registered for
   // `name` is one. A `Map`, or any other value, is not a struct, however
   // much it looks like one -- nothing is converted to make it match.
@@ -634,7 +634,7 @@ function primitiveMatches(name, value) {
       return value instanceof DXNURI;
     case 'bytes':
       return value instanceof DXNBytes;
-    // Bits and bytes are one value space (DXN.md §4.1): `:bits` takes both.
+    // Bits and bytes are one value space (DXNS.md §1): `:bits` takes both.
     case 'bits':
       return value instanceof DXNBits || value instanceof DXNBytes;
     case 'regex':
@@ -796,7 +796,7 @@ function encodesSeq(type, value, ctx) {
 
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
-/** RFC 4648's alphabets, each with the padding its encoding takes (DXN.md §4.2). */
+/** RFC 4648's alphabets, each with the padding its encoding takes (DXNS.md §2). */
 const ENCODED = {
   base64: /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
   base64urlPadded: /^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}==|[A-Za-z0-9_-]{3}=)?$/,
@@ -888,7 +888,7 @@ function satisfiesConstraint(key, arg, value) {
     case 'float32':
       if (typeof value !== 'number') return false;
       return arg !== true || !Number.isFinite(value) || single(value);
-    // An ip's family, 4 or 6, and whether it is a prefix (DXN.md §4.2).
+    // An ip's family, 4 or 6, and whether it is a prefix (DXNS.md §2).
     case 'version':
       return value instanceof DXNIp && (typeof arg === 'bigint' || typeof arg === 'number') && Number(arg) === value.version;
     case 'prefix':
@@ -959,7 +959,7 @@ function satisfiesConstraint(key, arg, value) {
     // What the string holds; it checks nothing more (`content` reads it).
     case 'media-type':
       return typeof value === 'string';
-    // One of DXN.md §4.2a's formats, checked as `format.cjs` says.
+    // One of DXNS.md §2a's formats, checked as `format.cjs` says.
     case 'format':
       return typeof value === 'string' && Format.valid(/** @type {string} */ (arg), value);
     // No part of the value is finer than `arg`.

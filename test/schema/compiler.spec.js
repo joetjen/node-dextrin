@@ -59,7 +59,7 @@ describe('schema/compiler', () => {
     expect(registry.fetchTypeAlias('HasAddress')).to.deep.equal({ form: 'reference', name: 'Address' });
   });
 
-  it('every DXN.md §4.1 type_expr form compiles', () => {
+  it('every DXNS.md §1 type_expr form compiles', () => {
     const doc = parse(`
       %{
         AnyT: :any

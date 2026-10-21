@@ -4,7 +4,7 @@ import DXNStruct from '../../src/values/struct.js';
  * A decoded value with every keyed `DXNStruct` in it turned into a plain
  * object of its fields — for tests about what a schema accepts, which
  * care about the checked fields and not about the generic struct a
- * schema with no materializer decodes to (DXN.md §4.8).
+ * schema with no materializer decodes to (DXNS.md §8).
  * @param {unknown} value
  * @returns {unknown}
  */

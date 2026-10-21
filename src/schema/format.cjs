@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @fileoverview The formats a refine's `format:` names (DXN.md §4.2a,
+ * @fileoverview The formats a refine's `format:` names (DXNS.md §2a,
  * Jan, 2026-10-20): a closed set, each checked the same way in every
  * implementation, mirroring `Dextrin.Schema.Format`. A format DXN has a
  * tag for is read by that tag's reader; every other one by a grammar
