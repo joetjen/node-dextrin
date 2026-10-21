@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Documentation
+
+- **A regex pattern is not checked: a documented limit** (Jan,
+  2026-10-21). DXN.md now says a pattern PCRE does not compile is
+  `syntax`; without PCRE, node-dextrin reads any pattern, and the README
+  says so.
 ### Added
 
 - **Sugar** (as dextrin d1b050a, Jan, 2026-10-20; DXN.md §4.1; the
