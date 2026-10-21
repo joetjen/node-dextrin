@@ -27,6 +27,7 @@ const { checkPairs } = require('../map-key.cjs');
 const { BinaryError } = require('./errors.cjs');
 const Tags = require('./tags.cjs');
 const { bigIntToBytes } = require('./writer.cjs');
+const { fromHalf } = require('./float.cjs');
 
 const DXNChar = require('../values/char.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
@@ -40,12 +41,17 @@ const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNDate = require('../values/date.cjs');
 const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
+const DXNLocalDateTime = require('../values/local-date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
+const { civilFromDays } = require('../values/calendar.cjs');
+const temporal = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Reader = require('../schema/reader.cjs');
@@ -55,7 +61,13 @@ const Validated = require('../schema/validated.cjs');
 
 const MAGIC = 'DX';
 const VERSION = 1;
-const EPOCH_MS = Date.UTC(1970, 0, 1);
+// Days past which no year from -9999 to 9999 lies, a bound checked before
+// a datetime's count is turned into a date, so an absurd one is never
+// computed with.
+const MAX_DAYS = 4_000_000n;
+// The days a `date` may lie from the epoch: as far as a JS `Date` reaches,
+// what this decoder has always read.
+const MAX_DATE_DAYS = 100_000_000n;
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
 /**
@@ -64,16 +76,63 @@ const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
  * @returns {unknown}
  */
 function decode(bytes, opts = {}) {
-  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (buf.length < 3 || buf[0] !== MAGIC.charCodeAt(0) || buf[1] !== MAGIC.charCodeAt(1) || buf[2] !== VERSION) {
-    throw new BinaryError(`missing or invalid .dxnb envelope (expected magic "DX" + version ${VERSION})`);
+  const buf = asBuffer(bytes);
+  if (!enveloped(buf, 0)) throw envelopeError();
+  const { value, end } = document(buf, 0, opts);
+  if (end !== buf.length) {
+    throw new BinaryError(`trailing bytes after top-level value (${buf.length - end} left over)`, end);
   }
-  const decoder = new Decoder(buf, 3, opts);
+  return value;
+}
+
+/**
+ * `bytes` read as `.dxnb` documents back to back, each with its own
+ * envelope -- a CBOR sequence of documents, as a schema's `encodes-seq:`
+ * reads one (DXN.md §4.2); no bytes at all are no documents.
+ * @param {Uint8Array} bytes
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @returns {unknown[]}
+ */
+function decodeSequence(bytes, opts = {}) {
+  const buf = asBuffer(bytes);
+  const values = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    if (!enveloped(buf, pos)) throw envelopeError();
+    const { value, end } = document(buf, pos, opts);
+    values.push(value);
+    pos = end;
+  }
+  return values;
+}
+
+/** @param {Uint8Array} bytes @returns {Buffer} */
+function asBuffer(bytes) {
+  return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/** Whether an envelope, magic and version, starts at `pos`. @param {Buffer} buf @param {number} pos */
+function enveloped(buf, pos) {
+  return buf.length - pos >= 3 && buf[pos] === MAGIC.charCodeAt(0) && buf[pos + 1] === MAGIC.charCodeAt(1) && buf[pos + 2] === VERSION;
+}
+
+function envelopeError() {
+  return new BinaryError(`missing or invalid .dxnb envelope (expected magic "DX" + version ${VERSION})`);
+}
+
+/**
+ * One document from `pos` in `buf`, its envelope already checked, and
+ * where it ends. Its shared-item and stringref tables are its own
+ * `Decoder`'s: a schema check that reads a document inside a document
+ * (`encodes:`) leaves the outer one's as they were.
+ * @param {Buffer} buf @param {number} pos
+ * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} opts
+ * @returns {{value: unknown, end: number}}
+ */
+function document(buf, pos, opts) {
+  const decoder = new Decoder(buf, pos + 3, opts);
   const value = decoder.decodeItem();
-  if (decoder.pos !== buf.length) {
-    throw new BinaryError(`trailing bytes after top-level value (${buf.length - decoder.pos} left over)`, decoder.pos);
-  }
-  return Validated.strip(value);
+  return { value: Validated.strip(value), end: decoder.pos };
 }
 
 class Decoder {
@@ -85,7 +144,8 @@ class Decoder {
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
-    this.trusted = opts.trusted ?? true;
+    // The option, else the registry's own (`putTrusted`), else untrusted.
+    this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
     this.registry = opts.registry && opts.strict !== undefined ? opts.registry.putStrict(opts.strict) : (opts.registry ?? null);
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];
@@ -146,7 +206,8 @@ class Decoder {
     if (info === 20) return false;
     if (info === 21) return true;
     if (info === 22) return null;
-    if (info === 25) throw new BinaryError('half-precision (16-bit) CBOR floats are not supported', this.pos);
+    // Every width CBOR has; the encoder writes the shortest exact one.
+    if (info === 25) return fromHalf(this.take(2).readUInt16BE(0));
     if (info === 26) return this.take(4).readFloatBE(0);
     // A native JS `number` already holds every IEEE-754 double bit
     // pattern, NaN/Infinity included — no manual sign/exponent/mantissa
@@ -372,14 +433,22 @@ function buildTagged(tag, value, trusted, registry) {
       return buildBignum(value, tag, (n) => -1n - n);
     case Tags.T_DECIMAL:
       return buildDecimal(value);
-    case Tags.T_TIMESTAMP:
-      return buildTimestamp(value);
+    // DXN 0.2's UTC timestamp, epoch microseconds (DXN.md §2.3).
+    case Tags.T_TIMESTAMP_US:
+      if (typeof value !== 'bigint') throw new BinaryError(`malformed datetime (tag ${tag}) payload`);
+      return buildDatetime(new DXNList([value * 1000n, 0n]), tag);
     case Tags.T_RATIONAL:
       return buildRational(value);
     case Tags.T_URI:
       return expect(value, 'string', tag, 'uri', (v) => new DXNURI(v));
     case Tags.T_UUID:
       return buildUuid(value);
+    case Tags.T_OBJECTID:
+      return buildObjectId(value);
+    case Tags.T_IPV4:
+      return buildIp(value, 4, tag);
+    case Tags.T_IPV6:
+      return buildIp(value, 16, tag);
     case Tags.T_CHAR:
       return buildChar(value);
     case Tags.T_SYMBOL:
@@ -399,15 +468,32 @@ function buildTagged(tag, value, trusted, registry) {
     case Tags.T_DATE:
       return buildDate(value);
     case Tags.T_TIME:
-      return buildTime(value);
-    case Tags.T_DATETIME_OFFSET:
-      return buildDatetimeOffset(value);
+      return buildTime(value, tag);
+    case Tags.T_DATETIME:
+      return buildDatetime(value, tag);
+    case Tags.T_LOCAL_DATETIME:
+      return buildLocal(value);
     case Tags.T_DURATION:
-      return buildDuration(value);
+      return buildDuration(value, tag, 1n);
+    // DXN 0.2's microsecond encodings, read as what they meant: a tag
+    // never changes its meaning (DXN.md §2.3).
+    case Tags.T_TIME_US:
+      return buildTime(typeof value === 'bigint' ? value * 1000n : value, tag);
+    case Tags.T_DATETIME_US:
+      return buildDatetime(
+        value instanceof DXNList && value.items.length === 2 && typeof value.items[0] === 'bigint'
+          ? new DXNList([value.items[0] * 1000n, value.items[1]])
+          : value,
+        tag
+      );
+    case Tags.T_DURATION_US:
+      return buildDuration(value, tag, 1000n);
     case Tags.T_REGEX:
       return buildRegex(value);
     case Tags.T_CUSTOM:
       return buildCustom(value, registry);
+    case Tags.T_BITS:
+      return buildBits(value);
     default:
       throw new BinaryError(`unrecognized CBOR tag ${tag}`);
   }
@@ -466,15 +552,40 @@ function buildRational(value) {
 }
 
 /** @param {unknown} value */
-function buildTimestamp(value) {
-  if (typeof value !== 'bigint') throw new BinaryError(`malformed timestamp (tag ${Tags.T_TIMESTAMP}) payload`);
-  return new DXNTimestamp(value);
-}
-
-/** @param {unknown} value */
 function buildUuid(value) {
   if (!(value instanceof DXNBytes) || value.data.length !== 16) throw new BinaryError(`malformed uuid (tag ${Tags.T_UUID}) payload`);
   return new DXNUUID(value.data);
+}
+
+/** @param {unknown} value */
+function buildObjectId(value) {
+  if (!(value instanceof DXNBytes) || value.data.length !== 12) {
+    throw new BinaryError(`malformed objectid (tag ${Tags.T_OBJECTID}) payload`);
+  }
+  return new DXNObjectId(value.data);
+}
+
+/**
+ * RFC 9164: an address is its raw bytes; a prefix is its length and the
+ * bytes with trailing zero bytes left off, put back here.
+ * @param {unknown} value
+ * @param {4 | 16} size
+ * @param {number} tag
+ */
+function buildIp(value, size, tag) {
+  if (value instanceof DXNBytes && value.data.length === size) return new DXNIp(value.data);
+  const [length, bytes] = value instanceof DXNList && value.items.length === 2 ? value.items : [];
+  if (typeof length !== 'bigint' || !(bytes instanceof DXNBytes) || bytes.data.length > size) {
+    throw new BinaryError(`malformed ip (tag ${tag}) payload`);
+  }
+  if (length < 0n || length > BigInt(size * 8)) throw new BinaryError(`invalid ip prefix: its length ${length} is not 0 to ${size * 8}`);
+  const address = new Uint8Array(size);
+  address.set(bytes.data);
+  try {
+    return new DXNIp(address, Number(length));
+  } catch {
+    throw new BinaryError('invalid ip prefix: its host bits are not zero');
+  }
 }
 
 /** @param {unknown} value */
@@ -534,41 +645,70 @@ function buildStruct(items, extra, registry) {
 /** @param {unknown} value */
 function buildDate(value) {
   if (typeof value !== 'bigint') throw new BinaryError(`malformed date (tag ${Tags.T_DATE}) payload`);
-  const ms = EPOCH_MS + Number(value) * 86_400_000;
-  const d = new Date(ms);
-  return new DXNDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  if (value < -MAX_DATE_DAYS || value > MAX_DATE_DAYS) throw new BinaryError(`date (tag ${Tags.T_DATE}) out of range`);
+  return new DXNDate(...civilFromDays(Number(value)));
 }
 
-/** @param {unknown} value */
-function buildTime(value) {
-  if (typeof value !== 'bigint' || value < 0n) throw new BinaryError(`malformed time (tag ${Tags.T_TIME}) payload`);
-  const totalMicro = value;
-  const microsecond = Number(totalMicro % 1_000_000n);
-  const totalSeconds = totalMicro / 1_000_000n;
-  const second = Number(totalSeconds % 60n);
-  const totalMinutes = totalSeconds / 60n;
-  const minute = Number(totalMinutes % 60n);
-  const hour = Number(totalMinutes / 60n);
-  return new DXNTime(hour, minute, second, microsecond);
-}
+// Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20). An integer out
+// of any calendar's range -- CBOR integers are unbounded, and a malformed
+// or adversarial document can hold one -- is refused, not left to crash
+// the decode.
 
-/** @param {unknown} value */
-function buildDatetimeOffset(value) {
-  if (!(value instanceof DXNList) || value.items.length !== 2) {
-    throw new BinaryError(`malformed datetime (tag ${Tags.T_DATETIME_OFFSET}) payload`);
+/** @param {unknown} value nanoseconds since midnight. @param {number} tag */
+function buildTime(value, tag) {
+  if (typeof value !== 'bigint' || value < 0n || value >= temporal.NANOS_PER_DAY) {
+    throw new BinaryError(`malformed time (tag ${tag}) payload`);
   }
-  const [epochMicros, offsetMinutes] = value.items;
-  if (typeof epochMicros !== 'bigint' || typeof offsetMinutes !== 'bigint') {
-    throw new BinaryError(`malformed datetime (tag ${Tags.T_DATETIME_OFFSET}) payload`);
-  }
-  return new DXNDateTime(epochMicros, Number(offsetMinutes));
+  return temporal.timeFromNanos(value);
 }
 
-/** @param {unknown} value */
-function buildDuration(value) {
-  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
+/**
+ * @param {unknown} value epoch nanoseconds in UTC, or `[epoch-nanoseconds,
+ *   offset-minutes]`: a writer uses the first for offset 0, a reader
+ *   reads both.
+ * @param {number} tag
+ */
+function buildDatetime(value, tag) {
+  const [nanos, offset] =
+    typeof value === 'bigint' && tag === Tags.T_DATETIME ? [value, 0n] : value instanceof DXNList && value.items.length === 2 ? value.items : [];
+  if (typeof nanos !== 'bigint' || typeof offset !== 'bigint' || offset <= -1440n || offset >= 1440n) {
+    throw new BinaryError(`malformed datetime (tag ${tag}) payload`);
+  }
+  const wall = nanos + offset * 60_000_000_000n;
+  if (!inRange(nanos) || !inRange(wall)) throw new BinaryError(`datetime (tag ${tag}) out of range`);
+  return new DXNDateTime(nanos, Number(offset));
+}
+
+/** @param {unknown} value nanoseconds since 1970-01-01T00:00:00, wall clock. */
+function buildLocal(value) {
+  if (typeof value !== 'bigint') throw new BinaryError(`malformed local-datetime (tag ${Tags.T_LOCAL_DATETIME}) payload`);
+  if (!inRange(value)) throw new BinaryError(`local-datetime (tag ${Tags.T_LOCAL_DATETIME}) out of range`);
+  return new DXNLocalDateTime(value);
+}
+
+/**
+ * Whether a moment `nanos` after 1970-01-01T00:00:00 falls in a year a
+ * datetime can be written in, -9999 to 9999, as the reference's calendar
+ * bounds it.
+ * @param {bigint} nanos
+ */
+function inRange(nanos) {
+  const days = nanos / temporal.NANOS_PER_DAY;
+  if (days < -MAX_DAYS || days > MAX_DAYS) return false;
+  const year = temporal.yearOf(nanos);
+  return year >= -9999 && year <= 9999;
+}
+
+/**
+ * @param {unknown} value the bitmask, then the fields it names.
+ * @param {number} tag
+ * @param {bigint} scale what turns the seventh field into nanoseconds:
+ *   1 for tag 220, 1000 for 0.2's microseconds (tag 212).
+ */
+function buildDuration(value, tag, scale) {
+  if (!(value instanceof DXNList) || value.items.length === 0) throw new BinaryError(`malformed duration (tag ${tag}) payload`);
   const [bitmaskItem, ...fieldItems] = value.items;
-  if (typeof bitmaskItem !== 'bigint') throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
+  if (typeof bitmaskItem !== 'bigint') throw new BinaryError(`malformed duration (tag ${tag}) payload`);
   const bitmask = Number(bitmaskItem);
   const fields = Tags.durationFieldsPresent(bitmask);
   if (fields.length !== fieldItems.length) {
@@ -578,14 +718,16 @@ function buildDuration(value) {
   const values = {};
   fields.forEach((field, i) => {
     const item = fieldItems[i];
-    if (typeof item !== 'bigint') throw new BinaryError(`malformed duration (tag ${Tags.T_DURATION}) payload`);
-    values[field] = Number(item);
+    if (typeof item !== 'bigint') throw new BinaryError(`malformed duration (tag ${tag}) payload`);
+    values[field] = field === 'nanoseconds' ? item * scale : Number(item);
   });
   return new DXNDuration(values);
 }
 
 /** @param {unknown} value */
 function buildRegex(value) {
+  // With no flags, the bare pattern; otherwise [pattern, flags-byte].
+  if (typeof value === 'string') return new DXNRegex(value, Tags.regexByteToFlags(0));
   if (!(value instanceof DXNList) || value.items.length !== 2) throw new BinaryError(`malformed regex (tag ${Tags.T_REGEX}) payload`);
   const [pattern, flagsByte] = value.items;
   if (typeof pattern !== 'string' || typeof flagsByte !== 'bigint') {
@@ -640,4 +782,22 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { decode, BinaryError };
+/**
+ * T_BITS, `[bytes, count]` (DXN.md §2.3): the count must match the bytes;
+ * a whole number of them is bytes.
+ * @param {unknown} value
+ * @returns {DXNBits | DXNBytes}
+ */
+function buildBits(value) {
+  const malformed = `malformed bits (tag ${Tags.T_BITS}) payload: [bytes, count] with the count matching the bytes`;
+  if (!(value instanceof DXNList) || value.items.length !== 2) throw new BinaryError(malformed);
+  const [data, count] = value.items;
+  if (!(data instanceof DXNBytes) || (typeof count !== 'bigint' && typeof count !== 'number')) throw new BinaryError(malformed);
+  try {
+    return DXNBits.from(data.data, count);
+  } catch {
+    throw new BinaryError(malformed);
+  }
+}
+
+module.exports = { decode, decodeSequence, BinaryError };

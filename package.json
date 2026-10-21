@@ -1,16 +1,23 @@
 {
   "name": "@joetjen/dextrin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "author": "Jan Oetjen <joetjen.riveting388@passmail.net> (http://joetjen.net)",
-  "description": "DXN (Data eXchange Notation) for Node.js -- .dxn text, .dxnb binary, and .dxns schema documents.",
+  "description": "Under heavy development: not for production use before 1.0.0. DXN (Data eXchange Notation) for Node.js -- .dxn text, .dxnb binary, and .dxns schema documents.",
   "homepage": "https://github.com/joetjen/node-dextrin",
   "type": "module",
   "main": "./src/dextrin.cjs",
+  "types": "./types/dextrin.d.cts",
   "exports": {
     ".": {
-      "import": "./src/dextrin.js",
-      "require": "./src/dextrin.cjs",
+      "import": {
+        "types": "./types/dextrin.d.ts",
+        "default": "./src/dextrin.js"
+      },
+      "require": {
+        "types": "./types/dextrin.d.cts",
+        "default": "./src/dextrin.cjs"
+      },
       "default": "./src/dextrin.cjs"
     }
   },
@@ -20,7 +27,8 @@
   "files": [
     "src",
     "priv",
-    "bin"
+    "bin",
+    "types"
   ],
   "license": "Apache-2.0",
   "publishConfig": {
@@ -32,6 +40,7 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "chai": "^6.2.2",
+    "esbuild": "^0.24.2",
     "fast-check": "^3.23.0",
     "mocha": "^11.7.6",
     "typedoc": "^0.28.20",
@@ -42,11 +51,15 @@
     "npm": ">=9.0.0"
   },
   "scripts": {
-    "test": "npx mocha --recursive test/",
-    "autotest": "npx mocha --recursive --watch test/",
+    "test": "npx mocha --recursive test/ --ignore 'test/fixtures/**'",
+    "autotest": "npx mocha --recursive --watch test/ --ignore 'test/fixtures/**'",
     "typecheck": "npx tsc --checkJs --noEmit",
-    "precommit": "npm run typecheck && npm test",
-    "docs": "npx typedoc"
+    "types": "rm -rf types && tsc -p tsconfig.types.json",
+    "typecheck:consumer": "npm run types && tsc -p test/types/tsconfig.json",
+    "prepack": "npm run types",
+    "precommit": "npm run typecheck && npm run typecheck:consumer && npm test",
+    "docs": "npx typedoc",
+    "std": "node scripts/std-source.cjs"
   },
   "repository": {
     "type": "git",

@@ -46,6 +46,29 @@ describe('versioned schemas', () => {
     it('refuses the old fields: form, which is now a field of no known type', () => {
       expect(categoryOf(() => compiled('%{P: %schema{fields: @ordered %{x: :integer}}}'))).to.equal('schema/compile');
     });
+
+    // A schema in Dextrin 0.1's syntax says what changed, rather than that
+    // a field has no known type -- as the reference.
+    it('says a 0.1 schema is one, and what a schema is written as now', () => {
+      for (const old of [
+        '%{P: %schema{fields: @ordered %{x: :integer}}}',
+        '%{P: %schema{closed: true, x: :integer}}',
+        '%{P: %schema{forbidden: [y], x: :integer}}',
+      ]) {
+        try {
+          compiled(old);
+        } catch (err) {
+          expect(err.category).to.equal('schema/compile');
+          expect(err.message).to.include('Dextrin 0.1').and.to.include('%schema(N){field: type, ...}');
+          continue;
+        }
+        throw new Error(`expected ${old} to be refused`);
+      }
+    });
+
+    it('and a schema may still have fields so named', () => {
+      expect(() => compiled('%{P: %schema{fields: {:list-of :string}, closed: :boolean, forbidden?: :string}}')).not.to.throw();
+    });
   });
 
   describe('versions', () => {

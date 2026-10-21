@@ -19,6 +19,11 @@ describe('text/printer', () => {
     expect(print(5e30)).to.match(/[.e]/);
   });
 
+  it('prints negative zero with its sign, as DXN.md §1.5 writes it', () => {
+    expect(print(-0)).to.equal('-0.0');
+    expect(print(0)).to.equal('0.0');
+  });
+
   it('prints the three non-finite floats as their reserved words', () => {
     expect(print(NaN)).to.equal('NaN');
     expect(print(Infinity)).to.equal('Infinity');
@@ -41,6 +46,13 @@ describe('text/printer', () => {
 
   it('prints a custom tag as "@name value"', () => {
     expect(print(new DXNCustomTag('my-tag', 42n))).to.equal('@my-tag 42');
+  });
+
+  // Jan, 2026-10-20: `@array[` is the preferred spelling; `@array [`
+  // still reads.
+  it('prints an array with its bracket against the tag', () => {
+    expect(print([1n, 2n])).to.equal('@array[1 2]');
+    expect(print(parse('@array [1 2]'))).to.equal('@array[1 2]');
   });
 
   it('throws TypeError for a value with no DXN representation', () => {
@@ -91,12 +103,13 @@ describe('text/printer', () => {
       '@array[1 2 3]',
       '@uuid "550e8400-e29b-41d4-a716-446655440000"',
       '@uri "https://example.com"',
-      '~D[2024-03-15]',
-      '~T[12:30:00]',
-      '~U[1990-01-01 00:00:00Z]',
+      '@date "2024-03-15"',
+      '@time "12:30:00"',
+      '@datetime "1990-01-01T00:00:00Z"',
+      '@local-datetime "1990-01-01T00:00:00.5"',
       '@datetime "2024-03-15T12:00:00+05:00"',
       '@duration "P1Y2M3DT4H5M6.5S"',
-      '~r/^[a-z]+$/i',
+      '@regex(i) "^[a-z]+$"',
       '@my-tag 42',
       '{:ok,200}',
       '@bytes "aGVsbG8="'

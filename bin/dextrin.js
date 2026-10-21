@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * @fileoverview `dextrin` CLI — one executable, six subcommands
- * (`decode`, `encode`, `format`, `validate`, `compat`, `conformance`), the JS analog of
+ * @fileoverview `dextrin` CLI — one executable, seven subcommands
+ * (`decode`, `encode`, `format`, `validate`, `compat`, `docs`, `conformance`), the JS analog of
  * `dextrin`'s `mix dextrin.*` tasks. One bin with subcommands rather
  * than a separate script per task, matching how Node CLIs are
  * conventionally shaped (`git <subcommand>`), not a mechanical
@@ -27,7 +27,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document } from '../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document, SchemaDocs, SchemaTree } from '../src/dextrin.js';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -39,6 +39,8 @@ Commands:
   validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                 Validate a .dxn/.dxnb file, optionally against a schema
   compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+  check SCHEMAS... [--extern NAMESPACE]...     Check a tree of .dxns schemas: syntax, compiling, layout and names
+  docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
   conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
@@ -57,6 +59,10 @@ function main(argv) {
       return run(() => cmdValidate(rest));
     case 'compat':
       return run(() => cmdCompat(rest));
+    case 'docs':
+      return run(() => cmdDocs(rest));
+    case 'check':
+      return run(() => cmdCheck(rest));
     case 'conformance':
       return run(() => cmdConformance(rest));
     default:
@@ -171,8 +177,50 @@ function cmdFormat(argv) {
   // value.
   const doc = Document.parse(readFileSync(path, 'utf8'));
   const text = mode === 'pretty' ? Document.format(doc) : encode(Document.toValue(doc));
-  if (flags['in-place']) writeFileSync(path, `${text}\n`);
-  else console.log(text);
+  // A file written in place ends with one newline, and printed output with
+  // none of its own, whether or not the formatted text kept the source's.
+  const line = text.replace(/\n+$/, '');
+  if (flags['in-place']) writeFileSync(path, `${line}\n`);
+  else console.log(line);
+}
+
+/**
+ * `dextrin docs SCHEMAS [--out DIR] [--title TITLE]`: every `.dxns` file
+ * under `SCHEMAS` as HTML documentation in `DIR` (`doc/schemas` when not
+ * given), as `mix dextrin.docs` writes it.
+ * @param {string[]} argv
+ */
+function cmdDocs(argv) {
+  const { positional, options } = parseArgs(argv, { options: ['out', 'title'] });
+  if (positional.length !== 1) throw new Error('usage: dextrin docs SCHEMAS [--out DIR] [--title TITLE]');
+  const out = options.out ?? 'doc/schemas';
+  const written = SchemaDocs.write(positional[0], out, options.title ? { title: options.title } : {});
+  console.log(`wrote ${written.length} files to ${out}`);
+}
+
+/**
+ * `dextrin check SCHEMAS... [--extern NAMESPACE]...`: a tree of `.dxns`
+ * schemas checked as `mix dextrin.check` checks it -- every problem
+ * printed as `file:line: message`, and a non-zero exit.
+ * @param {string[]} argv
+ */
+function cmdCheck(argv) {
+  /** @type {string[]} */
+  const roots = [];
+  /** @type {string[]} */
+  const extern = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--extern') extern.push(/** @type {string} */ (argv[++i]));
+    else roots.push(/** @type {string} */ (argv[i]));
+  }
+  if (roots.length === 0) throw new Error('usage: dextrin check SCHEMAS... [--extern NAMESPACE]...');
+  const result = SchemaTree.load(roots, { extern });
+  if (result.ok) {
+    console.log(`OK: ${result.summary.files} files, ${result.summary.definitions} definitions`);
+    return;
+  }
+  for (const p of result.problems) console.error(`${p.file}:${p.line}: ${p.message}`);
+  throw new Error(`${result.problems.length} problem(s)`);
 }
 
 /** @param {string[]} argv */

@@ -31,11 +31,14 @@ const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
 const DXNMap = require('../values/map.cjs');
-const { checkPairs } = require('../map-key.cjs');
+const { check: checkKey, checkPairs } = require('../map-key.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Reader = require('../schema/reader.cjs');
@@ -43,7 +46,13 @@ const { SchemaValidationError } = require('../schema/validator.cjs');
 const DXNError = require('../error.cjs');
 const Validated = require('../schema/validated.cjs');
 
-const BUILT_IN_TAGS = new Set(['ordered', 'sorted-set', 'array', 'uuid', 'uri', 'bytes', 'datetime', 'duration']);
+const BUILT_IN_TAGS = new Set([
+  'ordered', 'sorted-set', 'array', 'uuid', 'objectid', 'ip', 'uri', 'bytes', 'bits',
+  'date', 'time', 'datetime', 'local-datetime', 'duration', 'regex'
+]);
+
+/** The letters a regex's header may hold, each once (`DXN.md` §1.2). */
+const REGEX_FLAGS = /** @type {const} */ (['i', 'm', 's', 'u', 'x', 'f', 'r']);
 
 class ParseError extends Error {
   /**
@@ -67,7 +76,9 @@ class Parser {
   constructor(tokens, opts) {
     this.tokens = tokens;
     this.pos = 0;
-    this.trusted = opts.trusted ?? true;
+    // The option, else the registry's own (`putTrusted`), else untrusted:
+    // a keyword is a global `Symbol.for` only when the caller says so.
+    this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
     this.registry = strictly(opts.registry ?? null, opts.strict);
     /**
      * The syntax tree being recorded, when one was asked for
@@ -169,9 +180,36 @@ class Parser {
     return next?.type === 'IDENTIFIER' && next.value === '_';
   }
 
-  /** @returns {unknown} */
+  /**
+   * One value, read off the tokens.
+   *
+   * **A value written well that is not one** -- an impossible date, a
+   * uuid that is not one, an unknown escape -- is text that does not
+   * parse: the error the value's own constructor throws becomes a
+   * `syntax` error at the token the value began with, as the reference
+   * answers. One with a category of its own (a map key not allowed, a
+   * schema violation) or a parser's own error is passed on as it is.
+   *
+   * @returns {unknown}
+   */
   parseValueBody() {
     const tok = this.peek();
+    try {
+      return this.parseValueToken(tok);
+    } catch (err) {
+      if (err instanceof ParseError || err instanceof LexError) throw err;
+      if (err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string') throw err;
+      throw new ParseError(errorMessage(err), tok.start);
+    }
+  }
+
+  /**
+   * The value `tok` begins.
+   *
+   * @param {import('./lexer.cjs').Token} tok
+   * @returns {unknown}
+   */
+  parseValueToken(tok) {
     switch (tok.type) {
       case 'NIL':
         this.pos += 1;
@@ -193,7 +231,7 @@ class Parser {
         return DXNDecimal.fromString(tok.value.slice(0, -1));
       case 'RATIONAL':
         this.pos += 1;
-        return this.parseRationalToken(tok.value);
+        return this.parseRationalToken(tok.value, tok.start);
       case 'STRING':
         this.pos += 1;
         return decodeString(tok.value);
@@ -214,18 +252,6 @@ class Parser {
         return this.parsePercent();
       case 'AT':
         return this.parseAt();
-      case 'DATE_SIGIL':
-        this.pos += 1;
-        return temporal.parseDate(tok.value);
-      case 'TIME_SIGIL':
-        this.pos += 1;
-        return temporal.parseTime(tok.value);
-      case 'INSTANT_SIGIL':
-        this.pos += 1;
-        return temporal.parseInstant(tok.value);
-      case 'REGEX_SIGIL':
-        this.pos += 1;
-        return new DXNRegex(tok.value.pattern, flagsStringToObject(tok.value.flags));
       default:
         throw new ParseError(`unexpected token ${tok.type}`, tok.start);
     }
@@ -239,12 +265,15 @@ class Parser {
     return Number(text);
   }
 
-  /** @param {string} text */
-  parseRationalToken(text) {
+  /**
+   * @param {string} text
+   * @param {number} offset where the rational starts
+   */
+  parseRationalToken(text, offset) {
     const slash = text.indexOf('/');
     const numerator = BigInt(text.slice(0, slash));
     const denominator = BigInt(text.slice(slash + 1));
-    if (denominator === 0n) throw new ParseError(`rational denominator must not be zero: ${text}`, 0);
+    if (denominator === 0n) throw new ParseError(`rational denominator must not be zero: ${text}`, offset);
     return new DXNRational(numerator, denominator);
   }
 
@@ -337,7 +366,7 @@ class Parser {
     }
     this.begin('struct', at);
     try {
-      return this.parseStructBody();
+      return this.parseStructBody(this.tokens[at].start);
     } finally {
       this.end();
     }
@@ -346,9 +375,10 @@ class Parser {
   /**
    * The rest of a struct after its `%`: its name, its version, and its
    * keyed or positional body.
+   * @param {number} start where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
-  parseStructBody() {
+  parseStructBody(start) {
     const name = this.next('IDENTIFIER').value;
     const version = this.parseStructVersion();
     if (this.at('LBRACE')) {
@@ -364,10 +394,10 @@ class Parser {
         if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
         else extra.push([key, value]);
       }
-      return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra);
+      return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra, start);
     }
     const { values, extra } = this.parsePositionalBody();
-    return this.materializeStruct(name, { type: 'positional', values }, version, extra);
+    return this.materializeStruct(name, { type: 'positional', values }, version, extra, start);
   }
 
   /**
@@ -400,6 +430,7 @@ class Parser {
         this.rewrapAsEntry(keyAt);
         this.next('ARROW');
         this.mark('arrow');
+        this.keyAllowed(value, start);
         entries.push([value, this.parseValue()]);
         this.end();
       } else if (entries.length > 0) {
@@ -437,9 +468,10 @@ class Parser {
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
    * @param {number | null} [version]
    * @param {Array<[unknown, unknown]>} [extra]
+   * @param {number} [start] where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
-  materializeStruct(name, fields, version = null, extra = []) {
+  materializeStruct(name, fields, version = null, extra = [], start = 0) {
     if (!this.registry) return new DXNStruct(name, fields, version, extra);
     try {
       // Fail-fast, decode-time enforcement — a schema violation is an
@@ -451,9 +483,16 @@ class Parser {
       return /** @type {Validated} */ (read.value);
     } catch (err) {
       // A schema violation keeps its own category (DXN.md §5); it is not
-      // a syntax error for having been found while parsing.
-      if (err instanceof DXNError || err instanceof SchemaValidationError) throw err;
-      throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, this.pos);
+      // a syntax error for having been found while parsing. It is placed
+      // at this struct's `%` unless a struct inside it was already where
+      // it was found -- the innermost place wins, as the reference's.
+      // So does any refusal that names its own category -- a resolver's
+      // `schema/compile` for a schema file it cannot use, say.
+      if (err instanceof DXNError || err instanceof SchemaValidationError || hasCategory(err)) {
+        if (typeof (/** @type {any} */ (err).offset) !== 'number') /** @type {any} */ (err).offset = start;
+        throw err;
+      }
+      throw new ParseError(`struct ${JSON.stringify(name)} violates its schema: ${errorMessage(err)}`, start);
     }
   }
 
@@ -475,9 +514,11 @@ class Parser {
         this.mark('key');
         pairs.push([key, this.parseValue()]);
       } else {
+        const keyStart = this.peek().start;
         const key = this.parseValue();
         this.next('ARROW');
         this.mark('arrow');
+        this.keyAllowed(key, keyStart);
         pairs.push([key, this.parseValue()]);
       }
       this.end();
@@ -485,6 +526,23 @@ class Parser {
     this.next('RBRACE');
     if (ownNode) this.end();
     return pairs;
+  }
+
+  /**
+   * Refuses `key` as a map key (DXN.md §1.6) unless it may be one,
+   * placed at `offset`, where the key was written -- as the reference
+   * places it. Checked here rather than once the map is built, where
+   * nothing says which entry it was.
+   * @param {unknown} key
+   * @param {number} offset
+   */
+  keyAllowed(key, offset) {
+    try {
+      checkKey(key);
+    } catch (err) {
+      /** @type {any} */ (err).offset = offset;
+      throw err;
+    }
   }
 
   /**
@@ -503,6 +561,11 @@ class Parser {
   /**
    * `@{...}` (set), or `@identifier value` (tag_form). Discard is
    * already stripped in `parseValue`.
+   *
+   * `@regex(im) "..."`: a regex's flags in a header against its tag, as
+   * `%Name(3)` carries a struct's version (`DXN.md` §1.2). A header on
+   * any other tag is refused. The tag node's `name` is the head's last
+   * token, its `)` when it has one, so a formatter writes the head whole.
    * @returns {unknown}
    */
   parseAt() {
@@ -513,10 +576,36 @@ class Parser {
     const nameTok = this.next('IDENTIFIER');
     this.mark('name');
     try {
-      return this.dispatchTag(nameTok.value, nameTok.start);
+      if (!this.at('LPAREN')) return this.dispatchTag(nameTok.value, nameTok.start);
+      this.next('LPAREN');
+      const flags = this.next('IDENTIFIER').value;
+      this.next('RPAREN');
+      this.mark('name');
+      if (nameTok.value !== 'regex') {
+        throw new ParseError(`@${nameTok.value} takes no (...) header; only @regex(flags) does`, nameTok.start);
+      }
+      return this.parseRegex(flags, nameTok.start);
     } finally {
       this.end();
     }
+  }
+
+  /**
+   * A regex: its pattern a string, its flags the header's letters, each
+   * once (`DXN.md` §1.2). The pattern is not compiled: PCRE's syntax and
+   * the `x`/`f`/`r` flags have no `RegExp` equivalent (see `DXNRegex`).
+   * @param {string} flags the header's letters, `''` when there is none.
+   * @param {number} offset
+   * @returns {DXNRegex}
+   */
+  parseRegex(flags, offset) {
+    const letters = Array.from(flags);
+    if (!letters.every((l) => REGEX_FLAGS.includes(/** @type {any} */ (l))) || new Set(letters).size !== letters.length) {
+      throw new ParseError(`@regex(${flags}): the flags are i m s u x f r, each once`, offset);
+    }
+    const pattern = this.parseValue();
+    if (typeof pattern !== 'string') throw new ParseError('@regex takes its pattern as a string', offset);
+    return new DXNRegex(pattern, Object.fromEntries(REGEX_FLAGS.map((f) => [f, letters.includes(f)])));
   }
 
   /**
@@ -555,14 +644,43 @@ class Parser {
       }
       case 'uuid':
         return DXNUUID.fromString(this.parseStringValue(name, offset));
+      case 'objectid':
+        return DXNObjectId.fromString(this.parseStringValue(name, offset));
+      case 'ip':
+        return DXNIp.fromString(this.parseStringValue(name, offset));
       case 'uri':
         return DXNURI.fromString(this.parseStringValue(name, offset));
       case 'bytes':
         return new DXNBytes(new Uint8Array(Buffer.from(this.parseStringValue(name, offset), 'base64')));
+      case 'bits': {
+        // `@bits {"..." n}` (DXN.md §1.4): base64 and a bit count; a whole
+        // number of bytes reads as bytes, which is what it is.
+        const inner = this.parseValue();
+        const wanted = '@bits takes {"base64" bit-count}, the count matching the bytes';
+        if (!(inner instanceof DXNTuple) || inner.items.length !== 2) throw new ParseError(wanted, offset);
+        const [text, count] = inner.items;
+        if (typeof text !== 'string' || typeof count !== 'bigint') throw new ParseError(wanted, offset);
+        try {
+          return DXNBits.from(new Uint8Array(Buffer.from(text, 'base64')), count);
+        } catch {
+          throw new ParseError(wanted, offset);
+        }
+      }
+      // Dates and times are ISO 8601 strings under their tag (DXN.md
+      // §1.2, Jan, 2026-10-20); a string not of the form its tag names
+      // is a syntax error.
+      case 'date':
+        return temporal.parseDate(this.parseStringValue(name, offset));
+      case 'time':
+        return temporal.parseTime(this.parseStringValue(name, offset));
       case 'datetime':
-        return temporal.parseOffsetDateTime(this.parseStringValue(name, offset));
+        return temporal.parseDateTime(this.parseStringValue(name, offset));
+      case 'local-datetime':
+        return temporal.parseLocalDateTime(this.parseStringValue(name, offset));
       case 'duration':
         return temporal.parseDuration(this.parseStringValue(name, offset));
+      case 'regex':
+        return this.parseRegex('', offset);
       default:
         throw new ParseError(`unhandled built-in tag ${name}`, offset);
     }
@@ -578,19 +696,6 @@ class Parser {
     if (typeof value !== 'string') throw new ParseError(`@${tagName} requires a string argument`, offset);
     return value;
   }
-}
-
-/** @param {string} flags @returns {{i: boolean, m: boolean, s: boolean, u: boolean, x: boolean, f: boolean, r: boolean}} */
-function flagsStringToObject(flags) {
-  return {
-    i: flags.includes('i'),
-    m: flags.includes('m'),
-    s: flags.includes('s'),
-    u: flags.includes('u'),
-    x: flags.includes('x'),
-    f: flags.includes('f'),
-    r: flags.includes('r')
-  };
 }
 
 /**
@@ -642,4 +747,15 @@ function strictly(registry, strict) {
   return registry && strict !== undefined ? registry.putStrict(strict) : registry;
 }
 
-module.exports = { parse, parseTree, ParseError, LexError };
+
+/**
+ * Whether `err` names its own DXN.md §5 category, which is then its own
+ * rather than a parser's `syntax`.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function hasCategory(err) {
+  return err instanceof Error && typeof (/** @type {any} */ (err).category) === 'string';
+}
+
+module.exports = { parse, parseTree, ParseError, LexError, BUILT_IN_TAGS };

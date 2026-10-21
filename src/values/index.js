@@ -11,12 +11,15 @@ import DXNDecimal from './decimal.js';
 import DXNRational from './rational.js';
 import DXNDate from './date.js';
 import DXNTime from './time.js';
-import DXNTimestamp from './timestamp.js';
 import DXNDateTime from './date-time.js';
+import DXNLocalDateTime from './local-date-time.js';
 import DXNDuration from './duration.js';
 import DXNUUID from './uuid.js';
+import DXNObjectId from './object-id.js';
+import DXNIp from './ip.js';
 import DXNURI from './uri.js';
 import DXNBytes from './bytes.js';
+import DXNBits from './bits.js';
 import DXNRegex from './regex.js';
 import DXNCustomTag from './custom-tag.js';
 import { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK } from './equality.js';
@@ -35,12 +38,15 @@ export {
   DXNRational,
   DXNDate,
   DXNTime,
-  DXNTimestamp,
   DXNDateTime,
+  DXNLocalDateTime,
   DXNDuration,
   DXNUUID,
+  DXNObjectId,
+  DXNIp,
   DXNURI,
   DXNBytes,
+  DXNBits,
   DXNRegex,
   DXNCustomTag,
   dxnEquals,

@@ -87,9 +87,11 @@ describe('canonical', () => {
   });
 
   it('writes dates and times, dropping trailing zeros from a fraction', () => {
-    expect(canonicalOf('~D[2026-10-17]')).to.equal('~D[2026-10-17]');
-    expect(canonicalOf('~T[10:00:00.500000]')).to.equal('~T[10:00:00.5]');
-    expect(canonicalOf('~U[2026-10-17 10:00:00Z]')).to.equal('~U[2026-10-17 10:00:00Z]');
+    expect(canonicalOf('@date "2026-10-17"')).to.equal('@date "2026-10-17"');
+    expect(canonicalOf('@time "10:00:00.500000"')).to.equal('@time "10:00:00.5"');
+    expect(canonicalOf('@time "10:00:00.000"')).to.equal('@time "10:00:00"');
+    expect(canonicalOf('@datetime "2026-10-17T10:00:00Z"')).to.equal('@datetime "2026-10-17T10:00:00Z"');
+    expect(canonicalOf('@datetime "2026-10-17T10:00:00.250000Z"')).to.equal('@datetime "2026-10-17T10:00:00.25Z"');
     expect(canonicalOf('@datetime "2026-10-17T10:00:00+02:00"')).to.equal('@datetime "2026-10-17T10:00:00+02:00"');
   });
 

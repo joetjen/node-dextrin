@@ -195,11 +195,58 @@ describe('Document', () => {
   });
 
   describe('format', () => {
+    // Jan, 2026-10-20: a nested collection that fits goes on one line, as
+    // the pretty printer writes it -- unless it holds a comment or a blank
+    // line, which keep it over lines.
+    describe('layout', () => {
+      const formatted = (/** @type {string} */ text, opts = {}) => Document.format(Document.parse(text), opts);
+
+      it('writes a nested collection that fits on one line', () => {
+        expect(formatted('%{deps: ["a" "b"], at: %{x: 1, y: 2}}')).to.equal('%{\n  deps: ["a" "b"]\n  at: %{x: 1 y: 2}\n}');
+      });
+
+      // A regex's flags are its tag's header (DXN.md §1.2): written
+      // against the tag, as `%Name(3)` is.
+      it("writes a regex's header against its tag", () => {
+        expect(formatted('%{a: @regex(im) "x", b: @regex (i) "y"}')).to.equal('%{\n  a: @regex(im) "x"\n  b: @regex(i) "y"\n}');
+      });
+
+      it('breaks the top level however short it is', () => {
+        expect(formatted('[1]')).to.equal('[\n  1\n]');
+      });
+
+      it('keeps one holding a comment over lines', () => {
+        expect(formatted('%{deps: ["a" # why\n]}')).to.equal('%{\n  deps: [\n    "a"  # why\n  ]\n}');
+      });
+
+      it('and one with a blank line between its entries', () => {
+        expect(formatted('%{deps: ["a"\n\n"b"]}')).to.equal('%{\n  deps: [\n    "a"\n\n    "b"\n  ]\n}');
+      });
+
+      it('counts the indent and the key in the width', () => {
+        expect(formatted('%{key: [1 2 3]}', { width: 14 })).to.equal('%{\n  key: [1 2 3]\n}');
+        expect(formatted('%{key: [1 2 3]}', { width: 13 })).to.equal('%{\n  key: [\n    1\n    2\n    3\n  ]\n}');
+      });
+    });
+
     it('lays a document out and keeps its comments', () => {
       const text = '# top\n\n%{name: "acme", # the name\n deps: ["a" # temporary\n# still about a\n "b"\n\n# pinned\n "c"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n';
       expect(Document.format(Document.parse(text))).to.equal(
-        '# top\n\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"  # temporary\n         # still about a\n    "b"\n\n    # pinned\n    "c"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end'
+        '# top\n\n%{\n  name: "acme"  # the name\n  deps: [\n    "a"  # temporary\n         # still about a\n    "b"\n\n    # pinned\n    "c"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end\n'
       );
+    });
+
+    // The header is `@dxn` and its version, one space between them,
+    // however they were spaced.
+    it('keeps one space between the header tag and its version', () => {
+      expect(Document.format(Document.parse('@dxn   "1.0"\n[1]'))).to.equal('@dxn "1.0"\n[\n  1\n]');
+    });
+
+    // A formatter run on save must not take a file's last newline away;
+    // one the source did not end with, it does not add.
+    it('ends with a newline exactly when the source did', () => {
+      expect(Document.format(Document.parse('%{a: 1}\n'))).to.equal('%{\n  a: 1\n}\n');
+      expect(Document.format(Document.parse('%{a: 1}'))).to.equal('%{\n  a: 1\n}');
     });
 
     it('a document with no comments comes out as the pretty printer writes its value', () => {

@@ -35,14 +35,14 @@ class Registry {
     this.structs = new Map();
     /** @type {Map<string, (name: string, version: number, fields: {[k: string]: unknown}) => unknown>} struct name -> materializer. */
     this.materializers = new Map();
-    /** @type {((name: string) => import('./schema/compiled.cjs') | undefined) | null} */
+    /** @type {((name: string) => import('./schema/compiled.cjs') | import('./schema/compiled.cjs')[] | undefined) | null} */
     this.resolver = null;
     /** @type {Map<string, unknown>} named type -> compiled TypeExpr. */
     this.typeAliases = new Map();
     /** @type {Map<string, Function>} struct name -> JS class. */
     this.structModules = new Map();
     /** @type {boolean} */
-    this.trusted = true;
+    this.trusted = false;
     /** @type {boolean} refuse extra fields on schema-backed structs (`putStrict`). */
     this.strict = false;
   }
@@ -78,12 +78,13 @@ class Registry {
   }
 
   /**
-   * Marks (or unmarks) this registry as decoding a *trusted* source —
-   * the default. Currently the one thing this affects is `keyword`:
-   * trusted (the default) decodes it as a real, global `Symbol.for`;
-   * untrusted decodes it as `DXNKeyword` instead, so no decode path is
-   * ever forced through the global symbol registry's own
-   * never-garbage-collected interning for attacker-controlled text.
+   * Marks (or unmarks) this registry as decoding a *trusted* source, vs.
+   * an untrusted one -- the default. Currently the one thing this
+   * affects is `keyword`: untrusted (the default) decodes it as
+   * `DXNKeyword`, so no decode path is ever forced through the global
+   * symbol registry's never-garbage-collected interning by the input;
+   * trusted decodes it as a real, global `Symbol.for`. A decode's own
+   * `trusted:` option wins over this.
    * `symbol` is deliberately unaffected either way.
    * @param {boolean} trusted
    * @returns {Registry}
@@ -212,7 +213,15 @@ class Registry {
     return copy;
   }
 
-  /** @param {(name: string) => import('./schema/compiled.cjs') | undefined} resolver @returns {Registry} */
+  /**
+   * A lazy source of schemas, asked on a miss for a name: every version
+   * it finds -- one compiled schema or a list of them, all loaded -- or
+   * undefined. It throws (`schema/compile`) when the schemas it found
+   * cannot be used: two files with one version, a file that is not the
+   * version its name says, ...
+   * @param {(name: string) => import('./schema/compiled.cjs') | import('./schema/compiled.cjs')[] | undefined} resolver
+   * @returns {Registry}
+   */
   putResolver(resolver) {
     const copy = this.clone();
     copy.resolver = resolver;
@@ -221,8 +230,8 @@ class Registry {
 
   /**
    * Looks up a compiled schema by struct name: the latest version, or
-   * with `version` exactly that one. Only the latest consults the lazy
-   * resolver (if any) on a miss, caching the result. Whether schemas
+   * with `version` exactly that one. A name not loaded at all consults
+   * the lazy resolver (if any), which loads every version it finds. Whether schemas
    * are all compiled up front or resolved on demand (a resolver reading
    * a file, calling a schema service, ...) is entirely the caller's
    * choice — this is what makes both paths look identical to
@@ -234,18 +243,36 @@ class Registry {
    */
   fetchStructSchema(name, version) {
     const versions = this.structs.get(name);
-    if (version !== undefined) {
-      const exact = versions?.get(version);
-      return exact ? { compiled: exact, registry: this } : undefined;
-    }
     if (versions && versions.size > 0) {
+      if (version !== undefined) {
+        const exact = versions.get(version);
+        return exact ? { compiled: exact, registry: this } : undefined;
+      }
       const latest = Math.max(...versions.keys());
       return { compiled: /** @type {import('./schema/compiled.cjs')} */ (versions.get(latest)), registry: this };
     }
+    const resolved = this.resolve(name);
+    if (!resolved || version === undefined) return resolved;
+    return resolved.registry.fetchStructSchema(name, version);
+  }
+
+  /**
+   * What the resolver answers for `name`, every version of it loaded --
+   * so an older struct reaches the materializer (DXN.md §4.6, §4.8) --
+   * and the latest answered. A resolver's refusal is thrown on.
+   * @param {string} name
+   * @returns {{compiled: import('./schema/compiled.cjs'), registry: Registry} | undefined}
+   */
+  resolve(name) {
     if (!this.resolver) return undefined;
     const resolved = this.resolver(name);
-    if (!resolved) return undefined;
-    return { compiled: resolved, registry: this.putStructSchema(name, resolved) };
+    const all = resolved === undefined ? [] : Array.isArray(resolved) ? resolved : [resolved];
+    if (all.length === 0) return undefined;
+    /** @type {Registry} */
+    let registry = this;
+    for (const compiled of all) registry = registry.putStructSchema(name, compiled);
+    const latest = all.reduce((a, b) => (b.version > a.version ? b : a));
+    return { compiled: latest, registry };
   }
 
   /**
@@ -259,7 +286,14 @@ class Registry {
    * @returns {DXNStruct}
    */
   asWritten(struct) {
-    const found = this.fetchStructSchema(struct.name);
+    // No schema to stand behind a version: the struct keeps its own. A
+    // resolver's refusal surfaces where the struct is read or checked.
+    let found;
+    try {
+      found = this.fetchStructSchema(struct.name);
+    } catch {
+      found = undefined;
+    }
     return found ? new DXNStruct(struct.name, struct.fields, found.compiled.version) : struct;
   }
 

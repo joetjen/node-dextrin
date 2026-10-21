@@ -21,7 +21,12 @@
  * document, makes its `edits` in order -- `replace`, `delete`, `insert`,
  * `update`, their `path`, `value` and `where` written as DXN text -- and
  * answers the document rendered, as `text`; a refused edit answers
- * `document/<reason>`. Any of them may answer `error` instead: the error's category
+ * `document/<reason>`. `media-type` answers the form `media-type` names
+ * (DXN.md §6) as `form` -- `text`, `binary`, `schema` or `none`;
+ * `identify` whether `text` is worth decoding as its `form`, `text` or
+ * `schema`, and `identify-binary` whether `binary`, base64, is a `.dxnb`
+ * document, each as `identified`: `true` or `false`. Any of them may
+ * answer `error` instead: the error's category
  * (`DXN.md` §5), never its message. An error with no category yet is
  * `uncategorised`, which no case expects, so it shows as a disagreement
  * rather than passing by accident.
@@ -34,6 +39,7 @@ const { canonical } = require('./canonical.cjs');
 const Registry = require('./registry.cjs');
 const Schema = require('./schema.cjs');
 const Document = require('./document.cjs');
+const Format = require('./format.cjs');
 
 /**
  * The answer to a decoded JSON request: one result per case, in order.
@@ -45,7 +51,7 @@ function answer(request) {
 }
 
 /**
- * @typedef {{id: string, operation: string, text?: string, binary?: string, schemas?: string[], strict?: boolean, edits?: Array<Record<string, string>>}} Case
+ * @typedef {{id: string, operation: string, text?: string, binary?: string, schemas?: string[], strict?: boolean, edits?: Array<Record<string, string>>, 'media-type'?: string, form?: string}} Case
  */
 
 /** @param {Case} c @returns {Record<string, string>} */
@@ -66,6 +72,12 @@ function outcome(c) {
         const value = Schema.validateEncodeTree(parser.parse(String(c.text), opts), registry);
         return { binary: Buffer.from(binaryEncoder.encode(value, { registry })).toString('base64') };
       }
+      case 'media-type':
+        return { form: Format.form(String(c['media-type'])) ?? 'none' };
+      case 'identify':
+        return { identified: String(Format.identifies(String(c.text), c.form === 'schema' ? 'schema' : 'text')) };
+      case 'identify-binary':
+        return { identified: String(Format.identifies(new Uint8Array(Buffer.from(String(c.binary), 'base64')), 'binary')) };
       default:
         return { error: `unsupported operation ${JSON.stringify(c.operation)}` };
     }

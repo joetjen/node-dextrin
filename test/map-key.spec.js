@@ -4,7 +4,7 @@ import DXNChar from '../src/values/char.js';
 import DXNMap from '../src/values/map.js';
 import DXNOrderedMap from '../src/values/ordered-map.js';
 
-// DXN.md §1.6: a map key is a string, keyword, integer, uuid, date,
+// DXN.md §1.6: a map key is a string, keyword, integer, uuid, objectid, date,
 // bytes, symbol or char, and anything else is refused as key/not-allowed
 // -- in text, in binary, and when encoding. Two keys are the same key
 // exactly when their canonical forms are.
@@ -13,7 +13,7 @@ const hex = (s) => new Uint8Array(Buffer.from(s, 'hex'));
 
 describe('map keys', () => {
   it('decodes the eight allowed types', () => {
-    const m = decode('%{"a" => 1, :b => 2, 3 => 3, sym => 4, ?c => 5, ~D[2026-10-17] => 6, @bytes "AAE=" => 7}');
+    const m = decode('%{"a" => 1, :b => 2, 3 => 3, sym => 4, ?c => 5, @date "2026-10-17" => 6, @bytes "AAE=" => 7}');
     expect(m.size).to.equal(7);
   });
 

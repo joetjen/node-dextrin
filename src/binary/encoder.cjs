@@ -5,7 +5,7 @@
  * types plus a fixed tag dispatch table, matching `DXN.md` §2.2's
  * table row order. Mirrors `Dextrin.Binary.Encoder` structurally; see
  * that module's own moduledoc for why this is hand-rolled rather than
- * built on a generic CBOR library (bignum precision, timestamp
+ * built on a generic CBOR library (bignum precision, datetime
  * integer-only encoding, the private tag block — the same reasoning
  * applies here, arguably more so, since generic JS CBOR packages are
  * no more likely to get these right by default).
@@ -27,7 +27,8 @@
 
 const { checkPairs } = require('../map-key.cjs');
 const { unsupported } = require('./errors.cjs');
-const { head, floatItem, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
+const { head, tag, arrayOf, mapOf, textItem, bytesItem, integerItem } = require('./writer.cjs');
+const { shortestFloatItem } = require('./float.cjs');
 const Tags = require('./tags.cjs');
 const Field = require('../schema/field.cjs');
 const { SchemaValidationError } = require('../schema/validator.cjs');
@@ -44,18 +45,22 @@ const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
 const DXNDate = require('../values/date.cjs');
 const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
 const DXNDateTime = require('../values/date-time.cjs');
+const DXNLocalDateTime = require('../values/local-date-time.cjs');
 const DXNDuration = require('../values/duration.cjs');
+const { daysFromCivil } = require('../values/calendar.cjs');
+const { timeNanos } = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 
 const MAGIC = Buffer.from('DX', 'ascii');
 const VERSION = Buffer.from([1]);
-const EPOCH_MS = Date.UTC(1970, 0, 1);
 
 /**
  * @param {unknown} value
@@ -78,7 +83,9 @@ function encodeItem(value, opts) {
   if (value === true) return head(7, 21n);
 
   if (typeof value === 'bigint') return integerItem(value);
-  if (typeof value === 'number') return floatItem(value);
+  // The shortest of CBOR's three widths that holds it exactly (DXN.md
+  // §2.2, Jan, 2026-10-20: the smallest representation).
+  if (typeof value === 'number') return shortestFloatItem(value);
   if (typeof value === 'string') return textItem(value);
   if (typeof value === 'symbol') return tag(Tags.T_KEYWORD, textItem(value.description ?? ''));
 
@@ -93,6 +100,8 @@ function encodeItem(value, opts) {
   if (value instanceof DXNSymbol) return tag(Tags.T_SYMBOL, textItem(value.name));
   if (value instanceof DXNKeyword) return tag(Tags.T_KEYWORD, textItem(value.name));
   if (value instanceof DXNBytes) return bytesItem(value.data);
+  // Bits that are not whole bytes (DXN.md §2.3): T_BITS around [bytes, count].
+  if (value instanceof DXNBits) return tag(Tags.T_BITS, arrayOf([bytesItem(value.data), integerItem(BigInt(value.bitLength))]));
 
   if (value instanceof DXNList) return arrayOf(value.items.map((v) => encodeItem(v, opts)));
   if (value instanceof DXNTuple) return tag(Tags.T_TUPLE, arrayOf(value.items.map((v) => encodeItem(v, opts))));
@@ -113,20 +122,32 @@ function encodeItem(value, opts) {
   if (value instanceof DXNStruct) return encodeStruct(value, opts);
 
   if (value instanceof DXNDate) return tag(Tags.T_DATE, integerItem(epochDays(value)));
-  if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(totalMicroseconds(value)));
-  if (value instanceof DXNTimestamp) return tag(Tags.T_TIMESTAMP, integerItem(value.epochMicroseconds));
-  // A native `Date` is an instant: it always means a timestamp, with or
-  // without a schema (DXN.md §4.7).
-  if (value instanceof Date) return encodeItem(DXNTimestamp.fromDate(value), opts);
+  // Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20): a time since
+  // midnight, a datetime since the epoch with its offset in minutes (UTC
+  // is offset 0), a local date-time since 1970-01-01T00:00 on the wall
+  // clock.
+  if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(timeNanos(value)));
+  // A native `Date` is an instant: it always means a datetime in UTC,
+  // with or without a schema (DXN.md §4.7).
+  if (value instanceof Date) return encodeItem(DXNDateTime.fromDate(value), opts);
+  // In UTC, the bare nanoseconds; otherwise with the offset (the
+  // smallest representation, DXN.md §2.2).
   if (value instanceof DXNDateTime) {
-    return tag(Tags.T_DATETIME_OFFSET, arrayOf([integerItem(value.epochMicroseconds), integerItem(BigInt(value.offsetMinutes))]));
+    if (value.offsetMinutes === 0) return tag(Tags.T_DATETIME, integerItem(value.epochNanoseconds));
+    return tag(Tags.T_DATETIME, arrayOf([integerItem(value.epochNanoseconds), integerItem(BigInt(value.offsetMinutes))]));
   }
+  if (value instanceof DXNLocalDateTime) return tag(Tags.T_LOCAL_DATETIME, integerItem(value.localNanoseconds));
   if (value instanceof DXNDuration) return encodeDuration(value);
 
   if (value instanceof DXNUUID) return tag(Tags.T_UUID, bytesItem(value.bytes));
+  if (value instanceof DXNObjectId) return tag(Tags.T_OBJECTID, bytesItem(value.bytes));
+  if (value instanceof DXNIp) return encodeIp(value);
   if (value instanceof DXNURI) return tag(Tags.T_URI, textItem(value.value));
+  // With no flags, the bare pattern (the smallest representation).
   if (value instanceof DXNRegex) {
-    return tag(Tags.T_REGEX, arrayOf([textItem(value.pattern), integerItem(BigInt(Tags.regexFlagsToByte(value.flags)))]));
+    const flags = Tags.regexFlagsToByte(value.flags);
+    if (flags === 0) return tag(Tags.T_REGEX, textItem(value.pattern));
+    return tag(Tags.T_REGEX, arrayOf([textItem(value.pattern), integerItem(BigInt(flags))]));
   }
 
   if (value instanceof DXNCustomTag) {
@@ -232,25 +253,28 @@ function positionalValues(value, registry) {
 
 /** @param {DXNDate} date @returns {bigint} */
 function epochDays(date) {
-  const ms = Date.UTC(date.year, date.month - 1, date.day) - EPOCH_MS;
-  return BigInt(ms / 86_400_000);
+  return BigInt(daysFromCivil(date.year, date.month, date.day));
 }
 
-/** @param {DXNTime} time @returns {bigint} */
-function totalMicroseconds(time) {
-  return (
-    BigInt(time.hour) * 3_600_000_000n +
-    BigInt(time.minute) * 60_000_000n +
-    BigInt(time.second) * 1_000_000n +
-    BigInt(time.microsecond)
-  );
+/**
+ * RFC 9164, its smallest form: an address as its raw bytes, a prefix as
+ * its length and the bytes without their trailing zero bytes.
+ * @param {DXNIp} ip
+ * @returns {Buffer}
+ */
+function encodeIp(ip) {
+  const ipTag = ip.version === 4 ? Tags.T_IPV4 : Tags.T_IPV6;
+  if (ip.prefix === null) return tag(ipTag, bytesItem(ip.address));
+  let end = ip.address.length;
+  while (end > 0 && ip.address[end - 1] === 0) end -= 1;
+  return tag(ipTag, arrayOf([integerItem(BigInt(ip.prefix)), bytesItem(ip.address.subarray(0, end))]));
 }
 
 /** @param {DXNDuration} d @returns {Buffer} */
 function encodeDuration(d) {
   const bitmask = Tags.durationBitmask(d);
   const fields = Tags.durationFieldsPresent(bitmask);
-  const items = [integerItem(BigInt(bitmask)), ...fields.map((f) => integerItem(BigInt(/** @type {number} */ (d[f]))))];
+  const items = [integerItem(BigInt(bitmask)), ...fields.map((f) => integerItem(BigInt(/** @type {number | bigint} */ (d[f]))))];
   return tag(Tags.T_DURATION, arrayOf(items));
 }
 

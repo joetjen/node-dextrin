@@ -8,13 +8,17 @@ const { dxnEquals, dxnCompare } = require('./equality.cjs');
  * bitmask (`DXN.md` §2.3). `years`/`months` are calendar-relative
  * (variable length) and not reducible to a single elapsed-time scalar,
  * so all seven fields are tracked independently rather than folded
- * into one — mirrors `Dextrin.Duration` exactly. No conversion helper
+ * into one — mirrors `Dextrin.Duration` exactly. Seconds and their
+ * fraction are one field, `nanoseconds` (Jan, 2026-10-20), a `BigInt`
+ * where the others are numbers: a `number` holds only some 104 days of
+ * nanoseconds exactly. No conversion helper
  * to a native JS type: nothing in JS represents a calendar-relative
  * duration this way either.
  */
 class DXNDuration {
   /**
-   * @param {{years?: number|null, months?: number|null, weeks?: number|null, days?: number|null, hours?: number|null, minutes?: number|null, microseconds?: number|null}} [fields]
+   * @param {{years?: number|null, months?: number|null, weeks?: number|null, days?: number|null, hours?: number|null, minutes?: number|null, nanoseconds?: bigint|number|null}} [fields]
+   *   `nanoseconds` may be given as an integer `number`; it is held as a `BigInt`.
    */
   constructor(fields = {}) {
     /** @type {number | null} */
@@ -29,8 +33,8 @@ class DXNDuration {
     this.hours = validateField('hours', fields.hours);
     /** @type {number | null} */
     this.minutes = validateField('minutes', fields.minutes);
-    /** @type {number | null} */
-    this.microseconds = validateField('microseconds', fields.microseconds);
+    /** @type {bigint | null} */
+    this.nanoseconds = validateNanoseconds(fields.nanoseconds);
   }
 
   /** @param {unknown} other @returns {boolean} */
@@ -55,6 +59,17 @@ function validateField(name, value) {
   if (value === undefined || value === null) return null;
   if (!Number.isInteger(value)) throw new TypeError(`DXNDuration ${name} must be an integer or null`);
   return value;
+}
+
+/**
+ * @param {bigint | number | null | undefined} value
+ * @returns {bigint | null}
+ */
+function validateNanoseconds(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'bigint') return value;
+  if (!Number.isSafeInteger(value)) throw new TypeError('DXNDuration nanoseconds must be a BigInt, an integer, or null');
+  return BigInt(value);
 }
 
 module.exports = DXNDuration;

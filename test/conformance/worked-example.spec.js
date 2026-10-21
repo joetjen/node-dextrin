@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { decode, encode, decodeBinary, encodeBinary } from '../../src/dextrin.js';
 import DXNUUID from '../../src/values/uuid.js';
 import DXNDecimal from '../../src/values/decimal.js';
-import DXNTimestamp from '../../src/values/timestamp.js';
+import DXNDateTime from '../../src/values/date-time.js';
 import DXNTuple from '../../src/values/tuple.js';
 import DXNRegex from '../../src/values/regex.js';
 
@@ -20,15 +20,16 @@ const SOURCE = `
   active:  true
   score:   19.99M
   tags:    @{:admin :staff}
-  meta:    @ordered %{created: ~U[1990-01-01 00:00:00Z]}
+  meta:    @ordered %{created: @datetime "1990-01-01T00:00:00Z"}
   address: %Point[51.05, 13.74]
   result:  {:ok, 200}
-  handle:  ~r/^[a-z0-9_]{3,20}$/i
+  handle:  @regex(i) "^[a-z0-9_]{3,20}$"
 }
 `;
 
 describe('DXN.md §3 worked example', () => {
-  const value = decode(SOURCE);
+  // Trusted, so its keywords are the Symbol.for keys the assertions use.
+  const value = decode(SOURCE, { trusted: true });
 
   it('decodes the header without surfacing it in the result', () => {
     expect(value).to.be.instanceOf(Map);
@@ -49,7 +50,7 @@ describe('DXN.md §3 worked example', () => {
 
     const meta = value.get(Symbol.for('meta'));
     expect(meta.pairs).to.have.lengthOf(1);
-    expect(meta.pairs[0][1]).to.be.instanceOf(DXNTimestamp);
+    expect(meta.pairs[0][1]).to.be.instanceOf(DXNDateTime);
 
     // %Point[...] has no registered schema yet (Phase 4) — opaque DXNStruct.
     const address = value.get(Symbol.for('address'));

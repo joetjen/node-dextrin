@@ -13,7 +13,37 @@
  */
 
 const version = require('./version.cjs');
-const values = require('./values/index.cjs');
+const {
+  DXNChar,
+  DXNSymbol,
+  DXNKeyword,
+  DXNList,
+  DXNTuple,
+  DXNOrderedMap,
+  DXNMap,
+  DXNSortedSet,
+  DXNStruct,
+  DXNDecimal,
+  DXNRational,
+  DXNDate,
+  DXNTime,
+  DXNDateTime,
+  DXNLocalDateTime,
+  DXNDuration,
+  DXNUUID,
+  DXNObjectId,
+  DXNIp,
+  DXNURI,
+  DXNBytes,
+  DXNBits,
+  DXNRegex,
+  DXNCustomTag,
+  dxnEquals,
+  dxnCompare,
+  canonicalKey,
+  kindOf,
+  KIND_RANK,
+} = require('./values/index.cjs');
 const DXNError = require('./error.cjs');
 const Registry = require('./registry.cjs');
 const Schema = require('./schema.cjs');
@@ -32,13 +62,12 @@ const binaryDecoder = require('./binary/decoder.cjs');
  * malformed input, including a schema violation for any registered
  * `struct` name the text uses.
  *
- * `keyword` decodes as a real, global `Symbol.for(name)` by default
- * (`trusted: true`) — the closest native analog to a BEAM atom, and
- * like an atom, never garbage collected, so pass `trusted: false` for
- * any source you don't fully control (the default assumes you do —
- * your own config, your own application's data — not arbitrary
- * untrusted/network input). `trusted: false` decodes `keyword` as
- * `DXNKeyword` instead. `symbol` is unaffected either way.
+ * **Safe by default**: `keyword` decodes as `DXNKeyword`, so no input
+ * can fill the global symbol registry. Pass `trusted: true` (or a
+ * registry with `putTrusted(true)`) for a source you control -- your own
+ * config, your own application's data -- and it decodes as a real, global
+ * `Symbol.for(name)`, the closest native analog to a BEAM atom and, like
+ * one, never garbage collected. `symbol` is unaffected either way.
  *
  * `registry:` (a `Registry` built via `schema.compile`) enables
  * schema-backed `struct` decoding and custom-tag decoding for any
@@ -61,9 +90,12 @@ function decode(text, opts = {}) {
 /**
  * Encodes a value back to `.dxn` text. Single-line, minimal-whitespace
  * by default; pass `pretty: true` for multi-line, indented output
- * instead (`indent:` then sets spaces per nesting level, default 2).
- * Both produce the exact same value on the way back through `decode`
- * — `pretty`/`indent` are a rendering choice, never a semantic one.
+ * instead: the top-level collection one entry per line, a nested one on
+ * one line when it fits (`indent:` then sets spaces per nesting level,
+ * default 2, and `width:` the columns that line must fit in, default
+ * 80). Both produce the exact same value on the way back through
+ * `decode` — `pretty`/`indent`/`width` are a rendering choice, never a
+ * semantic one.
  * Throws `DXNError` for a value with no DXN representation, or that
  * fails schema validation.
  *
@@ -81,7 +113,7 @@ function decode(text, opts = {}) {
  * a value is.
  *
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, width?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {
@@ -156,5 +188,59 @@ function maybeValidateEncode(value, opts) {
 const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');
 const Document = require('./document.cjs');
+const Format = require('./format.cjs');
+const SchemaDocs = require('./schema/docs.cjs');
+const SchemaTree = require('./schema/tree.cjs');
+const SchemaLayout = require('./schema/layout.cjs');
 
-module.exports = { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };
+// One name at a time, not one object: `tsc` declares a class exported
+// this way as a type as well as a value -- `err: DXNError`, `r: Registry`
+// -- and a module as itself (`npm run types`); an object's members are
+// values only.
+module.exports.version = version;
+module.exports.decode = decode;
+module.exports.encode = encode;
+module.exports.decodeBinary = decodeBinary;
+module.exports.encodeBinary = encodeBinary;
+module.exports.canonical = canonical;
+module.exports.answer = answer;
+module.exports.DXNError = DXNError;
+module.exports.Registry = Registry;
+module.exports.Schema = Schema;
+module.exports.Std = Std;
+module.exports.FileResolver = FileResolver;
+module.exports.Document = Document;
+module.exports.Format = Format;
+module.exports.SchemaDocs = SchemaDocs;
+module.exports.SchemaTree = SchemaTree;
+module.exports.SchemaLayout = SchemaLayout;
+module.exports.DXNChar = DXNChar;
+module.exports.DXNSymbol = DXNSymbol;
+module.exports.DXNKeyword = DXNKeyword;
+module.exports.DXNList = DXNList;
+module.exports.DXNTuple = DXNTuple;
+module.exports.DXNOrderedMap = DXNOrderedMap;
+module.exports.DXNMap = DXNMap;
+module.exports.DXNSortedSet = DXNSortedSet;
+module.exports.DXNStruct = DXNStruct;
+module.exports.DXNDecimal = DXNDecimal;
+module.exports.DXNRational = DXNRational;
+module.exports.DXNDate = DXNDate;
+module.exports.DXNTime = DXNTime;
+module.exports.DXNDateTime = DXNDateTime;
+module.exports.DXNLocalDateTime = DXNLocalDateTime;
+module.exports.DXNDuration = DXNDuration;
+module.exports.DXNUUID = DXNUUID;
+module.exports.DXNObjectId = DXNObjectId;
+module.exports.DXNIp = DXNIp;
+module.exports.DXNURI = DXNURI;
+module.exports.DXNBytes = DXNBytes;
+module.exports.DXNBits = DXNBits;
+module.exports.DXNRegex = DXNRegex;
+module.exports.DXNCustomTag = DXNCustomTag;
+module.exports.dxnEquals = dxnEquals;
+module.exports.dxnCompare = dxnCompare;
+module.exports.canonicalKey = canonicalKey;
+module.exports.kindOf = kindOf;
+module.exports.KIND_RANK = KIND_RANK;
+

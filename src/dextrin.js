@@ -1,87 +1,32 @@
-import { createRequire } from 'node:module';
-import version from './version.js';
-import * as values from './values/index.js';
-import DXNError from './error.js';
-import Registry from './registry.js';
+// The ES module entry: the CommonJS one, re-exported, as every other
+// `.js` file here is its `.cjs`.
+//
+// **One implementation, not two.** This kept its own copies of decode,
+// encode, decodeBinary and encodeBinary, reaching the rest through
+// `createRequire(import.meta.url)` -- which a bundler writing CommonJS
+// (the DXN VS Code extension's esbuild) cannot give it, so the bundle
+// broke at load. An `import` of the `.cjs` is what Node and every bundler
+// resolve alike.
+import dextrin from './dextrin.cjs';
 
-const require = createRequire(import.meta.url);
-const parser = require('./text/parser.cjs');
-const printer = require('./text/printer.cjs');
-const formatter = require('./text/formatter.cjs');
-const binaryEncoder = require('./binary/encoder.cjs');
-const binaryDecoder = require('./binary/decoder.cjs');
-const Schema = require('./schema.cjs');
-const Std = require('./schema/std.cjs');
-const FileResolver = require('./schema/file-resolver.cjs');
-const { canonical } = require('./canonical.cjs');
-const { answer } = require('./conformance.cjs');
-const Document = require('./document.cjs');
-
-/** @param {string} text @param {{trusted?: boolean, registry?: Registry}} [opts] @returns {unknown} */
-function decode(text, opts = {}) {
-  try {
-    return parser.parse(text, opts);
-  } catch (err) {
-    throw DXNError.wrap(err, 'parse');
-  }
-}
-
-/**
- * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, registry?: Registry, validate?: boolean, schema?: string}} [opts]
- * @returns {string}
- */
-function encode(value, opts = {}) {
-  try {
-    const validated = maybeValidateEncode(value, opts);
-    return opts.pretty ? formatter.pretty(validated, opts) : printer.print(validated, opts);
-  } catch (err) {
-    throw DXNError.wrap(err, 'encode');
-  }
-}
-
-/** @param {Uint8Array} bytes @param {{trusted?: boolean, registry?: Registry}} [opts] @returns {unknown} */
-function decodeBinary(bytes, opts = {}) {
-  try {
-    return binaryDecoder.decode(bytes, opts);
-  } catch (err) {
-    throw DXNError.wrap(err, 'binary');
-  }
-}
-
-/**
- * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, schema?: string, [k: string]: unknown}} [opts]
- * @returns {Buffer}
- */
-function encodeBinary(value, opts = {}) {
-  try {
-    const validated = maybeValidateEncode(value, opts);
-    return binaryEncoder.encode(validated, opts);
-  } catch (err) {
-    throw DXNError.wrap(err, 'binary');
-  }
-}
-
-/**
- * @param {unknown} value
- * @param {{registry?: Registry, validate?: boolean, schema?: string}} opts
- * @returns {unknown}
- */
-function maybeValidateEncode(value, opts) {
-  const registry = opts.registry ?? new Registry();
-
-  let result = value;
-  if (opts.validate ?? true) {
-    result = Schema.validateEncodeTree(result, registry);
-  }
-  if (opts.schema !== undefined) {
-    result = Schema.validateEncode(result, registry, opts.schema);
-  }
-  return result;
-}
-
-export { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document };
+export const {
+  version,
+  decode,
+  encode,
+  decodeBinary,
+  encodeBinary,
+  canonical,
+  answer,
+  DXNError,
+  Registry,
+  Schema,
+  Std,
+  FileResolver,
+  Document,
+  Format,
+  SchemaDocs,
+  SchemaTree,
+  SchemaLayout,
+} = dextrin;
 export * from './values/index.js';
-
-export default { version, decode, encode, decodeBinary, encodeBinary, canonical, answer, DXNError, Registry, Schema, Std, FileResolver, Document, ...values };
+export default dextrin;

@@ -23,8 +23,9 @@ describe('text/formatter', () => {
     expect(out).to.equal('%{\n  x: 1\n  y: 2\n}');
   });
 
+  // `width: 1` breaks every nested collection, so the indentation shows.
   it('nests indentation correctly for nested collections', () => {
-    const out = pretty(parse('[1 [2 3]]'));
+    const out = pretty(parse('[1 [2 3]]'), { width: 1 });
     expect(out).to.equal('[\n  1\n  [\n    2\n    3\n  ]\n]');
   });
 
@@ -45,7 +46,7 @@ describe('text/formatter', () => {
 
   it('produces a value that decodes back to the same thing as the single-line form', () => {
     const src =
-      '%{id: @uuid "550e8400-e29b-41d4-a716-446655440000", tags: @{:admin :staff}, meta: @ordered %{created: ~U[1990-01-01 00:00:00Z]}, result: {:ok, 200}}';
+      '%{id: @uuid "550e8400-e29b-41d4-a716-446655440000", tags: @{:admin :staff}, meta: @ordered %{created: @datetime "1990-01-01T00:00:00Z"}, result: {:ok, 200}}';
     const val = parse(src);
     expect(print(parse(pretty(val)))).to.equal(print(val));
   });
@@ -70,5 +71,44 @@ describe('text/formatter', () => {
 
   it('still renders a DXNStruct field name with colon shorthand, unaffected by the string-key fix', () => {
     expect(pretty(parse('%Point{id: 1}'))).to.equal('%Point{\n  id: 1\n}');
+  });
+
+  // Jan, 2026-10-20: the top-level collection always breaks, one entry
+  // per line; a nested one stays on one line when that line fits the
+  // width (80, `width`), its entries single-space separated.
+  describe('layout: a nested collection that fits stays on one line', () => {
+    it('breaks the top level however short it is', () => {
+      expect(pretty(parse('[1 2]'))).to.equal('[\n  1\n  2\n]');
+      expect(pretty(parse('%{a: 1}'))).to.equal('%{\n  a: 1\n}');
+    });
+
+    it('writes a nested collection that fits on one line', () => {
+      expect(pretty(parse('[[1 2] {3 "a"}]'))).to.equal('[\n  [1 2]\n  {3 "a"}\n]');
+      expect(pretty(parse('%{a: %{b: @array[1]}}'))).to.equal('%{\n  a: %{b: @array[1]}\n}');
+      expect(pretty(parse('[@ordered %{y: 2 x: 1}]'))).to.equal('[\n  @ordered %{y: 2 x: 1}\n]');
+      expect(pretty(parse('[%P{q: 1 r: "s"}]'))).to.equal('[\n  %P{q: 1 r: "s"}\n]');
+      expect(pretty(parse('[%P[1 2]]'))).to.equal('[\n  %P[1 2]\n]');
+    });
+
+    it('counts the indent and the key on the line it fits on', () => {
+      // "  key: [1 2 3]" is 14 columns.
+      expect(pretty(parse('%{key: [1 2 3]}'), { width: 14 })).to.equal('%{\n  key: [1 2 3]\n}');
+      expect(pretty(parse('%{key: [1 2 3]}'), { width: 13 })).to.equal('%{\n  key: [\n    1\n    2\n    3\n  ]\n}');
+    });
+
+    it('breaks one that does not fit, and lays out what it holds again', () => {
+      const long = 'x'.repeat(40);
+      expect(pretty(parse(`[[[1 2] "${long}" "${long}"]]`))).to.equal(
+        `[\n  [\n    [1 2]\n    "${long}"\n    "${long}"\n  ]\n]`
+      );
+    });
+
+    it('fits in 80 columns unless given a width', () => {
+      // '  ["' and '"]' leave 74 columns of 80 for the string.
+      const fits = 'x'.repeat(74);
+      expect(pretty(parse(`[["${fits}"]]`))).to.equal(`[\n  ["${fits}"]\n]`);
+      const over = 'x'.repeat(75);
+      expect(pretty(parse(`[["${over}"]]`))).to.equal(`[\n  [\n    "${over}"\n  ]\n]`);
+    });
   });
 });

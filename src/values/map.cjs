@@ -22,8 +22,14 @@ class DXNMap extends Map {
   /** @param {Iterable<[unknown, V]>} [entries] */
   constructor(entries) {
     super();
-    /** @type {Map<unknown, unknown>} identity → the key this map holds for it */
-    this.byIdentity = new Map();
+    /**
+     * Identity → the key this map holds for it. Not enumerable: it is how
+     * the map tells keys apart, not part of the value, so printing a map
+     * shows its entries alone.
+     * @type {Map<unknown, unknown>}
+     */
+    this.byIdentity;
+    Object.defineProperty(this, 'byIdentity', { value: new Map(), enumerable: false });
     if (entries) for (const [key, value] of entries) this.set(key, value);
   }
 

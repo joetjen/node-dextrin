@@ -17,7 +17,7 @@ JS-API-level) examples.
     host:     "db.internal"
     port:     5432
     pool:     10
-    timeout:  ~T[00:00:30]
+    timeout:  @time "00:00:30"
   }
   features: @{:billing :notifications}
 }
@@ -27,7 +27,7 @@ JS-API-level) examples.
 const fs = require('node:fs');
 const { decode } = require('@joetjen/dextrin');
 
-const config = decode(fs.readFileSync('config.dxn', 'utf8'));
+const config = decode(fs.readFileSync('config.dxn', 'utf8'), { trusted: true });
 config.get(Symbol.for('db')).get(Symbol.for('host'));
 //=> 'db.internal'
 config.get(Symbol.for('features')).has(Symbol.for('billing'));
@@ -35,13 +35,14 @@ config.get(Symbol.for('features')).has(Symbol.for('billing'));
 ```
 
 Shorthand keys (`db:`, `features:`) are DXN `keyword`s, which decode as
-real, global `Symbol.for(name)`s by default (`trusted: true`) — that's
-what makes the `.get(Symbol.for(...))` lookups above work directly. A
+real, global `Symbol.for(name)`s when the input is trusted (`trusted:
+true`, for your own config file) — that's what makes the
+`.get(Symbol.for(...))` lookups above work directly. A
 plain DXN `map` (`%{ ... }`) decodes as a native JS `Map`, and a `set`
 (`@{ ... }`) as a native `Set` — both already the closest native fit,
-no wrapper class needed. Pass `trusted: false` for a config file you
-don't fully trust the contents of, and match against `DXNKeyword`
-instances instead.
+no wrapper class needed. Without `trusted: true` -- the default, and
+what any file you don't fully control gets -- keywords decode as
+`DXNKeyword`s; match against those instead.
 
 ## An API payload with an explicit schema
 
@@ -68,13 +69,13 @@ const payload = `
   id:      @uuid "550e8400-e29b-41d4-a716-446655440000"
   email:   "ada@example.com"
   role:    :admin
-  created: ~U[2024-01-01 00:00:00Z]
+  created: @datetime "2024-01-01T00:00:00Z"
 }
 `;
 
 decode(payload, { registry });
 //=> DXNStruct { name: 'User', version: 1, fields: { type: 'keyed', pairs: [
-//     ['id', DXNUUID {...}], ['email', 'ada@example.com'], ['role', Symbol(admin)], ['created', DXNTimestamp {...}]
+//     ['id', DXNUUID {...}], ['email', 'ada@example.com'], ['role', Symbol(admin)], ['created', DXNDateTime {...}]
 //   ] } }
 ```
 
@@ -88,8 +89,8 @@ present, matching how every other decoded field is looked up.
 const { decode, encodeBinary, decodeBinary } = require('@joetjen/dextrin');
 
 const events = [
-  decode('%{type: :login, user_id: 1, at: ~U[2024-01-01 08:00:00Z]}'),
-  decode('%{type: :purchase, user_id: 1, amount: 19.99M, at: ~U[2024-01-01 08:05:00Z]}'),
+  decode('%{type: :login, user_id: 1, at: @datetime "2024-01-01T08:00:00Z"}'),
+  decode('%{type: :purchase, user_id: 1, amount: 19.99M, at: @datetime "2024-01-01T08:05:00Z"}'),
 ];
 
 const encoded = events.map((event) => encodeBinary(event));
@@ -97,8 +98,8 @@ const encoded = events.map((event) => encodeBinary(event));
 const decoded = encoded.map((bytes) => decodeBinary(bytes));
 ```
 
-`.dxnb` is a good fit here specifically because `timestamp` uses tag
-1's *integer* microsecond form (never the lossy float form) and
+`.dxnb` is a good fit here specifically because a `datetime` is
+*integer* nanoseconds and its offset (never a lossy float) and
 `decimal` maps directly to CBOR tag 4 — money and event timestamps
 round-trip exactly, unlike JSON-over-the-wire where both would need
 an app-level convention.
@@ -125,18 +126,18 @@ registry = registry.putStructMaterializer('Money', (_name, _version, { amount, c
 }));
 
 decode('%Money{amount: 19.99M, currency: :usd}', { registry });
-//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: Symbol(usd) }
+//=> { amount: DXNDecimal { sign: 1, unscaledValue: 1999n, exponent: -2 }, currency: DXNKeyword { name: 'usd' } }
 ```
 
 What a materializer answers is checked against the latest schema, so it
 has to stay a value of the schema's own shape: answering
-`currency: currency.description` (the string `'usd'`) would be refused
+`currency: currency.name` (the string `'usd'`) would be refused
 (`schema/materializer`), because the schema declares
 `{:enum :usd :eur :gbp}`, not a string.
 
-`currency` decodes as a trusted `keyword` (`Symbol.for('usd')`) —
-`.description` reads the interned name back out, the native-`Symbol`
-equivalent of Elixir's `Atom.to_string/1`.
+`currency` decodes as a `keyword` -- a `DXNKeyword` by default, whose
+`.name` is `'usd'`, or `Symbol.for('usd')` when decoded with `trusted:
+true`, whose `.description` is.
 
 ## A schema, version by version
 
@@ -267,11 +268,10 @@ decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', { registry }
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with
 its name, and memoized in the registry for the rest of that decode.
-`FileResolver` also understands a namespaced `Namespace/Name` field
-reference (resolving to `<searchPath>/Namespace.dxns`'s `Name` entry,
-for a file that defines a differently-named schema than its own file
-stem) — but keep the *struct literal itself* written under its own
-bare schema name (`%Address{...}`, never `%Namespace/Name{...}`),
-since a reference's declared name is checked against the referenced
-value's own compiled schema name exactly, and that name is always the
-bare entry name a `.dxns` file defines it under.
+`FileResolver` also understands a namespaced field reference: a field
+typed `geo/Address` is found as the entry `Address` in
+`<searchPath>/geo.dxns`, or in a versioned file of its own
+(`geo/Address-v2.dxns`, `geo/Address/v2.dxns`, `geo.Address-v2.dxns` --
+DXN.md §4.6). A struct in that field is written under the same name,
+`%geo/Address{...}`: a field takes a struct of exactly the name it
+references.

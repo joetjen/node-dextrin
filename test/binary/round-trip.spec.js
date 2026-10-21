@@ -41,16 +41,22 @@ const CASES = {
   'sorted-set': '@sorted-set @{3 1 2}',
   'struct (positional)': '%Point[1, 2]',
   array: '@array[1 2 3]',
-  date: '~D[2024-03-15]',
-  time: '~T[12:30:00]',
-  'time (fractional)': '~T[12:30:00.5]',
-  timestamp: '~U[1990-01-01 00:00:00Z]',
+  date: '@date "2024-03-15"',
+  'date before the year 100': '@date "0050-03-01"',
+  time: '@time "12:30:00"',
+  'time (fractional)': '@time "12:30:00.5"',
+  'time to the nanosecond': '@time "12:00:00.123456789"',
+  'local datetime': '@local-datetime "1990-01-01T12:00:00.5"',
+  'datetime to the nanosecond': '@datetime "1990-01-01T12:00:00.000000001+02:00"',
+  instant: '@datetime "1990-01-01T00:00:00Z"',
   datetime: '@datetime "2024-03-15T12:00:00+05:00"',
   duration: '@duration "P1Y2M3DT4H5M6.5S"',
   uuid: '@uuid "550e8400-e29b-41d4-a716-446655440000"',
   uri: '@uri "https://example.com"',
   bytes: '@bytes "aGVsbG8="',
-  regex: '~r/^[a-z0-9_]{3,20}$/i',
+  regex: '@regex(i) "^[a-z0-9_]{3,20}$"',
+  'regex all flags': '@regex(imsuxfr) "^a.b$"',
+  'regex inline flags': '@regex "(?i)^a.b$"',
   'custom tag': '@my-app/money 100'
 };
 
@@ -73,8 +79,8 @@ describe('.dxnb binary round-trip, by type', () => {
   });
 
   it('round-trips trusted keyword decode (global Symbol.for) through binary too', () => {
-    const value = parse(':ok');
-    const decoded = decode(encode(value));
+    const value = parse(':ok', { trusted: true });
+    const decoded = decode(encode(value), { trusted: true });
     expect(decoded).to.equal(Symbol.for('ok'));
   });
 });

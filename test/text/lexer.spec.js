@@ -48,24 +48,18 @@ describe('text/lexer', () => {
     expect(tokenize('_foo')[0]).to.include({ type: 'IDENTIFIER', value: '_foo' });
   });
 
-  it('lexes compound sigils as single tokens requiring no internal whitespace', () => {
-    expect(types('~D[2024-01-01]')).to.deep.equal(['DATE_SIGIL', 'EOF']);
-    expect(types('~T[12:00:00]')).to.deep.equal(['TIME_SIGIL', 'EOF']);
-    expect(types('~U[2024-01-01 12:00:00Z]')).to.deep.equal(['INSTANT_SIGIL', 'EOF']);
-    expect(types('~r/abc/i')).to.deep.equal(['REGEX_SIGIL', 'EOF']);
+  // DXN 0.2's sigils are gone (Jan, 2026-10-20): `~` begins no token.
+  it('refuses a sigil: "~" begins no token', () => {
+    for (const old of ['~D[2024-01-01]', '~T[12:00:00]', '~U[2024-01-01 12:00:00Z]', '~r/abc/i']) {
+      expect(() => tokenize(old), old).to.throw(LexError);
+    }
   });
 
-  it('captures a regex sigil pattern and flags separately', () => {
-    const [tok] = tokenize('~r/^a+$/im');
-    expect(tok.value).to.deep.equal({ pattern: '^a+$', flags: 'im' });
+  it('lexes a regex header as parentheses around an identifier', () => {
+    expect(types('@regex(im) "a"')).to.deep.equal(['AT', 'IDENTIFIER', 'LPAREN', 'IDENTIFIER', 'RPAREN', 'STRING', 'EOF']);
   });
 
-  it('honors an escaped delimiter inside a regex pattern', () => {
-    const [tok] = tokenize('~r/a\\/b/');
-    expect(tok.value.pattern).to.equal('a\\/b');
-  });
-
-  it('lexes brackets, braces, and the sigil characters as their own tokens', () => {
+  it('lexes brackets, braces, and the leader characters as their own tokens', () => {
     expect(types('[]{}%@')).to.deep.equal(['LBRACKET', 'RBRACKET', 'LBRACE', 'RBRACE', 'PERCENT', 'AT', 'EOF']);
   });
 

@@ -1,0 +1,41 @@
+// A TypeScript program using the package as the DXN VS Code extension
+// does, typechecked against the declarations `npm run types` writes
+// (`npm run typecheck:consumer`). It is never run; that it compiles is
+// the test.
+import { decode, encode, Document, DXNError, Format, Registry, Schema, SchemaDocs, Std } from '@joetjen/dextrin';
+import dextrin = require('@joetjen/dextrin');
+
+const value: unknown = decode('%{a: 1}');
+const text: string = encode(value, { pretty: true });
+const doc = Document.parse('%{a: 1} # one\n');
+const laidOut: string = Document.format(doc);
+const registry: Registry = Schema.compile(decode('%{U: %schema{a: :string}}'), Std.registry());
+
+try {
+  decode('%{1.5 => 1}', { registry });
+} catch (err) {
+  if (err instanceof DXNError) {
+    const refusal: DXNError = err;
+    void refusal;
+    const where: number | undefined = err.offset;
+    const category: string | null = err.category;
+    void where;
+    void category;
+  }
+}
+
+const same: string = dextrin.encode(dextrin.decode('[1]'));
+void text;
+void laidOut;
+void same;
+
+// Format (DXN.md §6): a form's names, and whether a body is worth decoding as one.
+const textType: string = Format.mediaType('text');
+const named: 'text' | 'binary' | 'schema' | null = Format.form(textType);
+const worth: boolean = Format.identifies('%{a: 1}', 'text');
+void named;
+void worth;
+
+// SchemaDocs: a directory of .dxns as HTML pages, each a path and its content.
+const pages: Array<[string, string]> = SchemaDocs.site('example/schemas', { title: 'Acme schemas' });
+void pages;

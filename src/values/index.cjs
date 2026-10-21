@@ -49,10 +49,12 @@
  *   | DXNArray
  *   | import('./date.cjs')
  *   | import('./time.cjs')
- *   | import('./timestamp.cjs')
  *   | import('./date-time.cjs')
+ *   | import('./local-date-time.cjs')
  *   | import('./duration.cjs')
  *   | import('./uuid.cjs')
+ *   | import('./object-id.cjs')
+ *   | import('./ip.cjs')
  *   | import('./uri.cjs')
  *   | import('./bytes.cjs')
  *   | import('./regex.cjs')
@@ -67,27 +69,61 @@
  * @typedef {DXNValue[]} DXNArray
  */
 
-module.exports = {
-  DXNChar: require('./char.cjs'),
-  DXNSymbol: require('./symbol.cjs'),
-  DXNKeyword: require('./keyword.cjs'),
-  DXNList: require('./list.cjs'),
-  DXNTuple: require('./tuple.cjs'),
-  DXNOrderedMap: require('./ordered-map.cjs'),
-  DXNMap: require('./map.cjs'),
-  DXNSortedSet: require('./sorted-set.cjs'),
-  DXNStruct: require('./struct.cjs'),
-  DXNDecimal: require('./decimal.cjs'),
-  DXNRational: require('./rational.cjs'),
-  DXNDate: require('./date.cjs'),
-  DXNTime: require('./time.cjs'),
-  DXNTimestamp: require('./timestamp.cjs'),
-  DXNDateTime: require('./date-time.cjs'),
-  DXNDuration: require('./duration.cjs'),
-  DXNUUID: require('./uuid.cjs'),
-  DXNURI: require('./uri.cjs'),
-  DXNBytes: require('./bytes.cjs'),
-  DXNRegex: require('./regex.cjs'),
-  DXNCustomTag: require('./custom-tag.cjs'),
-  ...require('./equality.cjs')
-};
+// One name at a time, not one object: `tsc` declares a class exported
+// this way as a type as well as a value, so a TypeScript user can write
+// `x: DXNStruct` (`npm run types`); an object's members are values only.
+const DXNChar = require('./char.cjs');
+const DXNSymbol = require('./symbol.cjs');
+const DXNKeyword = require('./keyword.cjs');
+const DXNList = require('./list.cjs');
+const DXNTuple = require('./tuple.cjs');
+const DXNOrderedMap = require('./ordered-map.cjs');
+const DXNMap = require('./map.cjs');
+const DXNSortedSet = require('./sorted-set.cjs');
+const DXNStruct = require('./struct.cjs');
+const DXNDecimal = require('./decimal.cjs');
+const DXNRational = require('./rational.cjs');
+const DXNDate = require('./date.cjs');
+const DXNTime = require('./time.cjs');
+const DXNDateTime = require('./date-time.cjs');
+const DXNLocalDateTime = require('./local-date-time.cjs');
+const DXNDuration = require('./duration.cjs');
+const DXNUUID = require('./uuid.cjs');
+const DXNObjectId = require('./object-id.cjs');
+const DXNIp = require('./ip.cjs');
+const DXNURI = require('./uri.cjs');
+const DXNBytes = require('./bytes.cjs');
+const DXNBits = require('./bits.cjs');
+const DXNRegex = require('./regex.cjs');
+const DXNCustomTag = require('./custom-tag.cjs');
+const { dxnEquals, dxnCompare, canonicalKey, kindOf, KIND_RANK } = require('./equality.cjs');
+
+module.exports.DXNChar = DXNChar;
+module.exports.DXNSymbol = DXNSymbol;
+module.exports.DXNKeyword = DXNKeyword;
+module.exports.DXNList = DXNList;
+module.exports.DXNTuple = DXNTuple;
+module.exports.DXNOrderedMap = DXNOrderedMap;
+module.exports.DXNMap = DXNMap;
+module.exports.DXNSortedSet = DXNSortedSet;
+module.exports.DXNStruct = DXNStruct;
+module.exports.DXNDecimal = DXNDecimal;
+module.exports.DXNRational = DXNRational;
+module.exports.DXNDate = DXNDate;
+module.exports.DXNTime = DXNTime;
+module.exports.DXNDateTime = DXNDateTime;
+module.exports.DXNLocalDateTime = DXNLocalDateTime;
+module.exports.DXNDuration = DXNDuration;
+module.exports.DXNUUID = DXNUUID;
+module.exports.DXNObjectId = DXNObjectId;
+module.exports.DXNIp = DXNIp;
+module.exports.DXNURI = DXNURI;
+module.exports.DXNBytes = DXNBytes;
+module.exports.DXNBits = DXNBits;
+module.exports.DXNRegex = DXNRegex;
+module.exports.DXNCustomTag = DXNCustomTag;
+module.exports.dxnEquals = dxnEquals;
+module.exports.dxnCompare = dxnCompare;
+module.exports.canonicalKey = canonicalKey;
+module.exports.kindOf = kindOf;
+module.exports.KIND_RANK = KIND_RANK;

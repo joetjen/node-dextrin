@@ -29,14 +29,12 @@ const DXNSortedSet = require('../values/sorted-set.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const DXNDecimal = require('../values/decimal.cjs');
 const DXNRational = require('../values/rational.cjs');
-const DXNDate = require('../values/date.cjs');
-const DXNTime = require('../values/time.cjs');
-const DXNTimestamp = require('../values/timestamp.cjs');
-const DXNDateTime = require('../values/date-time.cjs');
-const DXNDuration = require('../values/duration.cjs');
 const DXNUUID = require('../values/uuid.cjs');
+const DXNObjectId = require('../values/object-id.cjs');
+const DXNIp = require('../values/ip.cjs');
 const DXNURI = require('../values/uri.cjs');
 const DXNBytes = require('../values/bytes.cjs');
+const DXNBits = require('../values/bits.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 
@@ -72,10 +70,13 @@ function print(value, opts = {}) {
   }
   if (value instanceof DXNKeyword) return ':' + keywordName(value.name);
   if (value instanceof DXNBytes) return tagForm('bytes', quoteString(Buffer.from(value.data).toString('base64')), opts);
+  if (value instanceof DXNBits) return tagForm('bits', bitsBody(value), opts);
 
   if (value instanceof DXNList) return '[' + value.items.map((v) => print(v, opts)).join(' ') + ']';
   if (value instanceof DXNTuple) return '{' + value.items.map((v) => print(v, opts)).join(' ') + '}';
-  if (Array.isArray(value)) return tagForm('array', '[' + value.map((v) => print(v, opts)).join(' ') + ']', opts);
+  // `@array[`, the bracket against the tag, is the preferred spelling
+  // (Jan, 2026-10-20); `@array [` still reads.
+  if (Array.isArray(value)) return '@array[' + value.map((v) => print(v, opts)).join(' ') + ']';
 
   if (value instanceof Set) return '@{' + Array.from(value).map((v) => print(v, opts)).join(' ') + '}';
   if (value instanceof DXNSortedSet) {
@@ -93,19 +94,20 @@ function print(value, opts = {}) {
 
   if (value instanceof DXNStruct) return printStruct(value, opts);
 
-  if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
-  if (value instanceof DXNTime) return `~T[${temporal.formatTime(value)}]`;
-  if (value instanceof DXNTimestamp) return `~U[${temporal.formatInstant(value)}]`;
-  // A native `Date` is an instant: it always means a timestamp, with or
-  // without a schema (DXN.md §4.7).
-  if (value instanceof Date) return print(DXNTimestamp.fromDate(value), opts);
-  if (value instanceof DXNDateTime) return tagForm('datetime', quoteString(temporal.formatOffsetDateTime(value)), opts);
-  if (value instanceof DXNDuration) return tagForm('duration', quoteString(temporal.formatDuration(value)), opts);
+  // Dates and times are ISO 8601 strings under their tag (DXN.md §1.2,
+  // Jan, 2026-10-20), written by text/temporal.cjs. A native `Date` is an
+  // instant: it always means a datetime in UTC, with or without a schema
+  // (DXN.md §4.7).
+  const temporalForm = temporal.tagged(value);
+  if (temporalForm) return tagForm(temporalForm.tag, quoteString(temporalForm.text), opts);
 
   if (value instanceof DXNUUID) return tagForm('uuid', quoteString(value.toString()), opts);
+  if (value instanceof DXNObjectId) return tagForm('objectid', quoteString(value.toString()), opts);
+  if (value instanceof DXNIp) return tagForm('ip', quoteString(value.toString()), opts);
   if (value instanceof DXNURI) return tagForm('uri', quoteString(value.value), opts);
 
-  if (value instanceof DXNRegex) return `~r/${value.pattern}/${printRegexFlags(value.flags)}`;
+  // `@regex "pattern"`, its flags in a header when it has any (DXN.md §1.2).
+  if (value instanceof DXNRegex) return regexForm(printRegexFlags(value.flags), quoteString(value.pattern));
 
   if (value instanceof DXNCustomTag) return tagForm(value.name, print(value.value, opts), opts);
 
@@ -149,6 +151,8 @@ function printFloat(n) {
   if (Number.isNaN(n)) return 'NaN';
   if (n === Infinity) return 'Infinity';
   if (n === -Infinity) return '-Infinity';
+  // `String(-0)` is "0": the sign is written, as every reader keeps it.
+  if (Object.is(n, -0)) return '-0.0';
   const s = String(n);
   // JS omits the decimal point for integer-valued floats (`String(1)`
   // === "1"), which `.dxn` needs to stay distinct from `integer` —
@@ -185,10 +189,21 @@ function tagForm(name, printedValue, opts) {
 }
 
 /**
+ * The flags set, in `DXN.md` §2.3's bit order.
  * @param {{i: boolean, m: boolean, s: boolean, u: boolean, x: boolean, f: boolean, r: boolean}} flags
  */
 function printRegexFlags(flags) {
   return REGEX_FLAG_ORDER.filter((f) => flags[f]).join('');
+}
+
+/**
+ * `@regex "pattern"`, or `@regex(flags) "pattern"` (DXN.md §1.2) — what
+ * the canonical form writes too.
+ * @param {string} flags
+ * @param {string} pattern already quoted.
+ */
+function regexForm(flags, pattern) {
+  return flags === '' ? `@regex ${pattern}` : `@regex(${flags}) ${pattern}`;
 }
 
 /**
@@ -304,4 +319,14 @@ function describeForError(value) {
   }
 }
 
-module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead };
+/**
+ * The body of `@bits {"..." n}` (DXN.md §1.5): the bytes in base64, the
+ * unused bits zero (as DXNBits holds them), and the count.
+ * @param {DXNBits} bits
+ * @returns {string}
+ */
+function bitsBody(bits) {
+  return `{${quoteString(Buffer.from(bits.data).toString('base64'))} ${bits.bitLength}}`;
+}
+
+module.exports = { print, isBareIdentifier, quoteString, keywordEntryName, writtenHead, printRegexFlags, regexForm };

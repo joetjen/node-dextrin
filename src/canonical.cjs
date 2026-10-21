@@ -20,7 +20,7 @@
  */
 
 const temporal = require('./text/temporal.cjs');
-const { isBareIdentifier } = require('./text/printer.cjs');
+const { isBareIdentifier, printRegexFlags, regexForm } = require('./text/printer.cjs');
 const { unsupported } = require('./binary/errors.cjs');
 const DXNError = require('./error.cjs');
 const DXNChar = require('./values/char.cjs');
@@ -33,14 +33,12 @@ const DXNSortedSet = require('./values/sorted-set.cjs');
 const DXNStruct = require('./values/struct.cjs');
 const DXNDecimal = require('./values/decimal.cjs');
 const DXNRational = require('./values/rational.cjs');
-const DXNDate = require('./values/date.cjs');
-const DXNTime = require('./values/time.cjs');
-const DXNTimestamp = require('./values/timestamp.cjs');
-const DXNDateTime = require('./values/date-time.cjs');
-const DXNDuration = require('./values/duration.cjs');
 const DXNUUID = require('./values/uuid.cjs');
+const DXNObjectId = require('./values/object-id.cjs');
+const DXNIp = require('./values/ip.cjs');
 const DXNURI = require('./values/uri.cjs');
 const DXNBytes = require('./values/bytes.cjs');
+const DXNBits = require('./values/bits.cjs');
 const DXNRegex = require('./values/regex.cjs');
 const DXNCustomTag = require('./values/custom-tag.cjs');
 
@@ -76,6 +74,7 @@ function text(value) {
   }
   if (value instanceof DXNKeyword) return keyword(value.name);
   if (value instanceof DXNBytes) return '@bytes ' + quoted(Buffer.from(value.data).toString('base64'));
+  if (value instanceof DXNBits) return '@bits {' + quoted(Buffer.from(value.data).toString('base64')) + ' ' + value.bitLength + '}';
   if (value instanceof DXNList) return '[' + value.items.map(text).join(' ') + ']';
   if (value instanceof DXNTuple) return '{' + value.items.map(text).join(' ') + '}';
   if (Array.isArray(value)) return '@array[' + value.map(text).join(' ') + ']';
@@ -84,15 +83,17 @@ function text(value) {
   if (value instanceof DXNOrderedMap) return '@ordered %{' + entries(value.pairs, false) + '}';
   if (value instanceof Map) return '%{' + entries(Array.from(value.entries()), true) + '}';
   if (value instanceof DXNStruct) return struct(value);
-  if (value instanceof DXNDate) return `~D[${temporal.formatDate(value)}]`;
-  if (value instanceof DXNTime) return `~T[${trimmed(temporal.formatTime(value))}]`;
-  if (value instanceof DXNTimestamp) return `~U[${trimmedInstant(temporal.formatInstant(value))}]`;
-  if (value instanceof Date) return text(DXNTimestamp.fromDate(value));
-  if (value instanceof DXNDateTime) return '@datetime ' + quoted(trimmedInstant(temporal.formatOffsetDateTime(value)));
-  if (value instanceof DXNDuration) return '@duration ' + quoted(temporal.formatDuration(value));
+  // Dates and times are ISO 8601 strings under their tag (DXN.md §1.5,
+  // Jan, 2026-10-20): the fraction without trailing zeros, Z for a zero
+  // offset. A native `Date` is a datetime in UTC.
+  const temporalForm = temporal.tagged(value);
+  if (temporalForm) return `@${temporalForm.tag} ${quoted(temporalForm.text)}`;
   if (value instanceof DXNUUID) return '@uuid ' + quoted(value.toString().toLowerCase());
+  if (value instanceof DXNObjectId) return '@objectid ' + quoted(value.toString());
+  if (value instanceof DXNIp) return '@ip ' + quoted(value.toString());
   if (value instanceof DXNURI) return '@uri ' + quoted(value.value);
-  if (value instanceof DXNRegex) return `~r/${value.pattern}/${regexFlags(value.flags)}`;
+  // Its flags in §2.3's bit order.
+  if (value instanceof DXNRegex) return regexForm(printRegexFlags(value.flags), quoted(value.pattern));
   if (value instanceof DXNCustomTag) return `@${value.name} ${text(value.value)}`;
   throw unsupported(describe(value));
 }
@@ -257,39 +258,7 @@ function charBody(cp) {
   return String.fromCodePoint(cp);
 }
 
-// ---- time and the rest ----------------------------------------------------------
-
-/**
- * `HH:MM:SS.ffffff` with the trailing zeros of the fraction removed, and
- * the fraction itself when it is zero.
- * @param {string} clock
- * @returns {string}
- */
-function trimmed(clock) {
-  const [seconds, fraction] = clock.split('.');
-  if (fraction === undefined) return clock;
-  const kept = fraction.replace(/0+$/, '');
-  return kept === '' ? seconds : `${seconds}.${kept}`;
-}
-
-/**
- * An instant's text with its clock trimmed, the date and the zone kept.
- * @param {string} instant
- * @returns {string}
- */
-function trimmedInstant(instant) {
-  return instant.replace(/(\d\d:\d\d:\d\d)(\.\d+)?/, (_whole, clock, fraction) =>
-    trimmed(fraction === undefined ? clock : clock + fraction)
-  );
-}
-
-/** @param {Record<string, boolean>} flags @returns {string} */
-function regexFlags(flags) {
-  return Object.keys(flags)
-    .filter((flag) => flags[flag])
-    .sort()
-    .join('');
-}
+// ---- the rest -----------------------------------------------------------------
 
 /** @param {unknown} value @returns {string} */
 function describe(value) {

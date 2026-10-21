@@ -2,9 +2,13 @@
 
 /**
  * @fileoverview A document laid out the way the pretty printer lays out a
- * value -- every non-empty collection over lines, one entry per line,
- * indented -- with every comment kept beside the entry it belongs to,
- * mirroring `Dextrin.Document.Formatter`.
+ * value -- the top-level collection over lines, one entry per line,
+ * indented; a nested one on one line when that line fits the width
+ * (`width`, 80) -- with every comment kept beside the entry it belongs
+ * to, mirroring `Dextrin.Document.Formatter`. A nested collection holding
+ * a comment, or a blank line between its entries, is laid out over lines
+ * whatever its width: the comment needs its line, and the blank line is
+ * the author's grouping.
  *
  * **Layout only.** Every token is written exactly as it was -- a
  * literal's spelling, a key's form, an escape -- and only the space
@@ -26,23 +30,45 @@
  * @typedef {import('../document.cjs').Doc} Doc
  * @typedef {{blank: boolean, lines: string[]}} Block
  * @typedef {{node: SyntaxNode, above: Block[], blank: boolean, trailing: string[]}} Slot
+ * @typedef {{step: string, width: number, room: number, flat: boolean}} Ctx the indent step, the
+ *   width, the room left on the current line, and whether this is inside a one-line collection.
  */
 
 /**
- * The text of `doc`, laid out. `indent` is the spaces per level (2).
+ * The text of `doc`, laid out. `indent` is the spaces per level (2),
+ * `width` the columns a nested collection's one line must fit in (80).
  * @param {Doc} doc
- * @param {{indent?: number}} [opts]
+ * @param {{indent?: number, width?: number}} [opts]
  * @returns {string}
  */
 function format(doc, opts = {}) {
-  const step = ' '.repeat(opts.indent ?? 2);
+  const width = opts.width ?? 80;
+  /** @type {Ctx} */
+  const ctx = { step: ' '.repeat(opts.indent ?? 2), width, room: width, flat: false };
   const tree = doc.tree;
   const header = tree.children.filter((n) => n.kind === 'header');
-  const head = header.map((n) => `${tokensText(doc, n.first, n.last)}\n`).join('');
+  const head = header.map((n) => `${headerText(doc, n)}\n`).join('');
   const value = /** @type {SyntaxNode} */ (tree.children.find((n) => n.kind === 'value'));
   const from = header.length > 0 ? doc.tokens[header[header.length - 1].last].end : 0;
   const sequence = [{ gap: doc.source.slice(from, start(doc, value)) }, { node: value }, { gap: doc.source.slice(end(doc, value)) }];
-  return head + lines(slots(sequence, false), '', (node) => valueText(doc, node, '', step));
+  // It ends with a newline exactly when the source did: a formatter run
+  // on save keeps a file's last newline, and a comment-free document
+  // without one comes out exactly as the pretty printer writes its value.
+  const ending = doc.source.endsWith('\n') ? '\n' : '';
+  return head + lines(slots(sequence, false), '', (node) => valueText(doc, node, '', ctx)) + ending;
+}
+
+/**
+ * The header, `@dxn "1.0"`: the tag, one space, and the version, each as
+ * written, however they were spaced. The tag is two tokens here (`@`,
+ * `dxn`), so the space goes before the version alone.
+ *
+ * @param {Doc} doc
+ * @param {SyntaxNode} node
+ */
+function headerText(doc, node) {
+  const texts = doc.tokens.slice(node.first, node.last + 1).map((t) => doc.source.slice(t.start, t.end));
+  return `${texts.slice(0, -1).join('')} ${texts[texts.length - 1]}`;
 }
 
 // ---- slots: which comment belongs where -------------------------------------
@@ -139,27 +165,27 @@ function trailed(text, comments) {
 
 // ---- values -----------------------------------------------------------------
 
-/** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {string} step @returns {string} */
-function valueText(doc, node, indent, step) {
+/** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {Ctx} ctx @returns {string} */
+function valueText(doc, node, indent, ctx) {
   return node.children
     .map((child) => {
       if (child.kind === 'discard') {
         const inner = /** @type {SyntaxNode} */ (child.children.find((c) => c.kind === 'value'));
-        return `@_ ${valueText(doc, inner, indent, step)}`;
+        return `@_ ${valueText(doc, inner, indent, { ...ctx, room: ctx.room - 3 })}`;
       }
-      return bodyText(doc, child, indent, step);
+      return bodyText(doc, child, indent, ctx);
     })
     .join(' ');
 }
 
-/** @param {Doc} doc @param {SyntaxNode} body @param {string} indent @param {string} step @returns {string} */
-function bodyText(doc, body, indent, step) {
+/** @param {Doc} doc @param {SyntaxNode} body @param {string} indent @param {Ctx} ctx @returns {string} */
+function bodyText(doc, body, indent, ctx) {
   const inner = body.children[0];
   if (!inner) return tokensText(doc, body.first, body.last);
-  if (['list', 'tuple', 'set', 'map'].includes(inner.kind)) return collection(doc, inner, '', indent, step);
+  if (['list', 'tuple', 'set', 'map'].includes(inner.kind)) return collection(doc, inner, '', indent, ctx);
   if (inner.kind === 'struct') {
     const part = /** @type {SyntaxNode} */ (inner.children.find((c) => c.kind === 'keyed' || c.kind === 'positional'));
-    return collection(doc, part, tokensText(doc, inner.first, part.first - 1), indent, step);
+    return collection(doc, part, tokensText(doc, inner.first, part.first - 1), indent, ctx);
   }
   if (inner.kind === 'tag') {
     // A tag and its value. Written together, `@array[1 2]` -- the spec's
@@ -168,8 +194,8 @@ function bodyText(doc, body, indent, step) {
     const value = /** @type {SyntaxNode} */ (inner.children.find((c) => c.kind === 'value'));
     const name = tokensText(doc, inner.first, /** @type {number} */ (inner.name));
     const gap = doc.source.slice(doc.tokens[/** @type {number} */ (inner.name)].end, start(doc, value));
-    if (gap === '') return name + valueText(doc, value, indent, step);
-    return between(name, commentsIn(gap), (deeper) => valueText(doc, value, deeper, step), indent, step);
+    if (gap === '') return name + valueText(doc, value, indent, { ...ctx, room: ctx.room - columns(name) });
+    return between(name, commentsIn(gap), (deeper, at) => valueText(doc, value, deeper, at), indent, ctx);
   }
   return tokensText(doc, inner.first, inner.last);
 }
@@ -182,9 +208,9 @@ function bodyText(doc, body, indent, step) {
  * @param {SyntaxNode} node
  * @param {string} head
  * @param {string} indent
- * @param {string} step
+ * @param {Ctx} ctx
  */
-function collection(doc, node, head, indent, step) {
+function collection(doc, node, head, indent, ctx) {
   const openAt = /** @type {number} */ (node.open);
   const open = head + tokensText(doc, node.first, openAt);
   const close = tokensText(doc, node.last, node.last);
@@ -198,24 +224,62 @@ function collection(doc, node, head, indent, step) {
   sequence.push({ gap: doc.source.slice(from, doc.tokens[node.last].start) });
   const laid = slots(sequence, true);
   if (laid.entries.length === 0 && laid.open.length === 0 && laid.terminal.length === 0) return open + close;
-  const deeper = indent + step;
-  const body = lines(laid, deeper, (child) => item(doc, child, deeper, step));
+  if (ctx.flat) return oneLine(doc, laid, open, close, indent, ctx);
+  if (indent !== '' && plain(doc, node)) {
+    const text = oneLine(doc, laid, open, close, indent, { ...ctx, flat: true });
+    if (columns(text) <= ctx.room) return text;
+  }
+  const deeper = indent + ctx.step;
+  const atLine = { ...ctx, room: ctx.width - columns(deeper) };
+  const body = lines(laid, deeper, (child) => item(doc, child, deeper, atLine));
   return `${trailed(open, laid.open)}\n${body}\n${indent}${close}`;
 }
 
-/** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {string} step @returns {string} */
-function item(doc, node, indent, step) {
-  if (node.kind !== 'entry') return valueText(doc, node, indent, step);
+/**
+ * A collection's entries single-space separated between its brackets.
+ * @param {Doc} doc
+ * @param {{entries: Slot[]}} laid
+ * @param {string} open
+ * @param {string} close
+ * @param {string} indent
+ * @param {Ctx} ctx
+ */
+function oneLine(doc, laid, open, close, indent, ctx) {
+  return open + laid.entries.map((slot) => item(doc, slot.node, indent, ctx)).join(' ') + close;
+}
+
+/**
+ * Whether `node` holds no comment and no blank line between any of its
+ * tokens, however deep: what may go on one line.
+ * @param {Doc} doc
+ * @param {SyntaxNode} node
+ */
+function plain(doc, node) {
+  for (let i = node.first; i < node.last; i += 1) {
+    const gap = doc.source.slice(doc.tokens[i].end, doc.tokens[i + 1].start);
+    if (gap.includes('#') || (gap.match(/\n/g) ?? []).length >= 2) return false;
+  }
+  return true;
+}
+
+/** Columns, counted in code points. @param {string} text */
+function columns(text) {
+  return Array.from(text).length;
+}
+
+/** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {Ctx} ctx @returns {string} */
+function item(doc, node, indent, ctx) {
+  if (node.kind !== 'entry') return valueText(doc, node, indent, ctx);
   const values = node.children.filter((c) => c.kind === 'value');
   const value = values[values.length - 1];
-  const render = (/** @type {string} */ deeper) => valueText(doc, value, deeper, step);
+  const render = (/** @type {string} */ deeper, /** @type {Ctx} */ at) => valueText(doc, value, deeper, at);
   if (node.key !== undefined) {
     const gap = doc.source.slice(doc.tokens[node.key].end, start(doc, value));
-    return between(tokensText(doc, node.key, node.key), commentsIn(gap), render, indent, step);
+    return between(tokensText(doc, node.key, node.key), commentsIn(gap), render, indent, ctx);
   }
   const key = values[0];
   const gap = doc.source.slice(end(doc, key), start(doc, value));
-  return between(`${valueText(doc, key, indent, step)} =>`, commentsIn(gap), render, indent, step);
+  return between(`${valueText(doc, key, indent, ctx)} =>`, commentsIn(gap), render, indent, ctx);
 }
 
 /**
@@ -224,14 +288,15 @@ function item(doc, node, indent, step) {
  * line, a level deeper.
  * @param {string} prefix
  * @param {string[]} comments
- * @param {(indent: string) => string} render
+ * @param {(indent: string, ctx: Ctx) => string} render takes the indent of the value's line and the
+ *   room left on it.
  * @param {string} indent
- * @param {string} step
+ * @param {Ctx} ctx
  */
-function between(prefix, comments, render, indent, step) {
-  if (comments.length === 0) return `${prefix} ${render(indent)}`;
-  const deeper = indent + step;
-  return `${trailed(prefix, comments)}\n${deeper}${render(deeper)}`;
+function between(prefix, comments, render, indent, ctx) {
+  if (comments.length === 0) return `${prefix} ${render(indent, { ...ctx, room: ctx.room - columns(prefix) - 1 })}`;
+  const deeper = indent + ctx.step;
+  return `${trailed(prefix, comments)}\n${deeper}${render(deeper, { ...ctx, room: ctx.width - columns(deeper) })}`;
 }
 
 /** @param {string} gap @returns {string[]} */

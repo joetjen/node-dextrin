@@ -4,10 +4,16 @@
  * @fileoverview Multi-line, indented `.dxn` rendering — the `pretty:
  * true` option on the top-level `encode`, built on top of
  * `src/text/printer.cjs`. Mirrors `Dextrin.Text.Formatter`
- * structurally: every non-empty collection gets one entry per line,
- * indented one level deeper than its container; every empty
- * collection and every scalar falls through to the single-line
- * printer unchanged (there's nothing multi-line about `[]` or `42`).
+ * structurally: every empty collection and every scalar falls through
+ * to the single-line printer unchanged (there's nothing multi-line
+ * about `[]` or `42`).
+ *
+ * **The layout** (Jan, 2026-10-20): the top-level collection always
+ * breaks, one entry per line, however short it is. A nested collection
+ * is written on one line, its entries single-space separated, when that
+ * line -- its indent and its key included -- fits the width (`width`,
+ * 80); otherwise it breaks too, and what it holds is laid out again by
+ * the same rule. Columns are counted in code points.
  *
  * Comments cannot be preserved here, or by any formatter built on this
  * library's decode-then-reprint approach, for the same reason
@@ -26,23 +32,89 @@ const DXNOrderedMap = require('../values/ordered-map.cjs');
 const DXNStruct = require('../values/struct.cjs');
 
 const DEFAULT_INDENT = 2;
+const DEFAULT_WIDTH = 80;
 
 /**
+ * The options every function here passes on: the caller's, plus `$flat`
+ * (laying out a value inside a one-line one) and `$room` (the columns
+ * left on the current line after its indent and key).
+ * @typedef {{indent?: number, width?: number, registry?: import('../registry.cjs'), $flat?: boolean, $room?: number, [k: string]: unknown}} Opts
+ */
+/**
  * @param {unknown} value
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} [opts]
+ * @param {Opts} [opts]
  * @returns {string}
  */
 function pretty(value, opts = {}) {
-  return render(value, 0, opts);
+  return layout(value, 0, opts);
+}
+
+/**
+ * A nested value on one line when that fits the room its line leaves
+ * it, and laid out over lines otherwise. The top level (depth 0) and a
+ * value inside a one-line one go straight to `layout`.
+ * @param {unknown} value
+ * @param {number} depth
+ * @param {Opts} opts
+ * @returns {string}
+ */
+function render(value, depth, opts) {
+  if (depth === 0 || opts.$flat) return layout(value, depth, opts);
+  const oneLine = layout(value, depth, { ...opts, $flat: true });
+  return columns(oneLine) <= room(opts) ? oneLine : layout(value, depth, opts);
+}
+
+/** @param {string} text */
+function columns(text) {
+  return [...text].length;
+}
+
+/** @param {Opts} opts */
+function width(opts) {
+  return opts.width ?? DEFAULT_WIDTH;
+}
+
+/**
+ * The columns left for a value after its line's indent and key; the
+ * whole width when nothing said otherwise.
+ * @param {Opts} opts
+ */
+function room(opts) {
+  return opts.$room ?? width(opts);
+}
+
+/**
+ * `opts` with the room a value has after `used` columns of its line.
+ * @param {Opts} opts
+ * @param {number} used
+ * @returns {Opts}
+ */
+function withRoom(opts, used) {
+  return { ...opts, $room: width(opts) - used };
+}
+
+/**
+ * The rendered entries between `open` and `close`: single-space
+ * separated on one line, or one per line, indented.
+ * @param {string} open
+ * @param {string[]} rendered
+ * @param {string} close
+ * @param {string} innerIndent
+ * @param {string} outerIndent
+ * @param {Opts} opts
+ */
+function joined(open, rendered, close, innerIndent, outerIndent, opts) {
+  if (opts.$flat) return `${open}${rendered.join(' ')}${close}`;
+  return `${open}\n${rendered.map((line) => innerIndent + line).join('\n')}\n${outerIndent}${close}`;
 }
 
 /**
  * @param {unknown} value
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  * @returns {string}
  */
-function render(value, depth, opts) {
+function layout(value, depth, opts) {
   if (value instanceof DXNList && value.items.length > 0) {
     return bracketed('[', value.items, ']', depth, opts);
   }
@@ -106,7 +178,7 @@ function indentUnit(opts) {
  * A struct's extra fields as lines to render: a name like a field name,
  * any other map key as itself.
  * @param {DXNStruct} value
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  * @returns {Array<(depth: number) => string>}
  */
 function extraLines(value, opts) {
@@ -122,13 +194,12 @@ function extraLines(value, opts) {
  * @param {Array<(depth: number) => string>} lines each renders itself at a depth.
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function bracketedLines(open, lines, close, depth, opts) {
   const innerDepth = depth + 1;
   const unit = indentUnit(opts);
-  const body = lines.map((line) => unit.repeat(innerDepth) + line(innerDepth)).join('\n');
-  return `${open}\n${body}\n${unit.repeat(depth)}${close}`;
+  return joined(open, lines.map((line) => line(innerDepth)), close, unit.repeat(innerDepth), unit.repeat(depth), opts);
 }
 
 /**
@@ -136,15 +207,16 @@ function bracketedLines(open, lines, close, depth, opts) {
  * @param {unknown[]} items
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function bracketed(open, items, close, depth, opts) {
   const innerDepth = depth + 1;
   const unit = indentUnit(opts);
   const innerIndent = unit.repeat(innerDepth);
   const outerIndent = unit.repeat(depth);
-  const body = items.map((item) => innerIndent + render(item, innerDepth, opts)).join('\n');
-  return `${open}\n${body}\n${outerIndent}${close}`;
+  const itemOpts = withRoom(opts, columns(innerIndent));
+  const rendered = items.map((item) => render(item, innerDepth, itemOpts));
+  return joined(open, rendered, close, innerIndent, outerIndent, opts);
 }
 
 /**
@@ -152,15 +224,15 @@ function bracketed(open, items, close, depth, opts) {
  * @param {Array<[unknown, unknown]>} pairs
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function bracketedEntries(open, pairs, close, depth, opts) {
   const innerDepth = depth + 1;
   const unit = indentUnit(opts);
   const innerIndent = unit.repeat(innerDepth);
   const outerIndent = unit.repeat(depth);
-  const body = pairs.map(([key, value]) => innerIndent + renderEntry(key, value, innerDepth, opts)).join('\n');
-  return `${open}\n${body}\n${outerIndent}${close}`;
+  const rendered = pairs.map(([key, value]) => renderEntry(key, value, innerDepth, opts));
+  return joined(open, rendered, close, innerIndent, outerIndent, opts);
 }
 
 /**
@@ -168,15 +240,15 @@ function bracketedEntries(open, pairs, close, depth, opts) {
  * @param {Array<[string, unknown]>} pairs
  * @param {string} close
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function bracketedKeywordEntries(open, pairs, close, depth, opts) {
   const innerDepth = depth + 1;
   const unit = indentUnit(opts);
   const innerIndent = unit.repeat(innerDepth);
   const outerIndent = unit.repeat(depth);
-  const body = pairs.map(([name, value]) => innerIndent + renderKeywordEntry(name, value, innerDepth, opts)).join('\n');
-  return `${open}\n${body}\n${outerIndent}${close}`;
+  const rendered = pairs.map(([name, value]) => renderKeywordEntry(name, value, innerDepth, opts));
+  return joined(open, rendered, close, innerIndent, outerIndent, opts);
 }
 
 /**
@@ -189,23 +261,36 @@ function bracketedKeywordEntries(open, pairs, close, depth, opts) {
  * @param {string} name
  * @param {unknown} value
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function renderKeywordEntry(name, value, depth, opts) {
-  if (Printer.isBareIdentifier(name)) return `${name}: ${render(value, depth, opts)}`;
-  return `:${Printer.quoteString(name)} => ${render(value, depth, opts)}`;
+  const prefix = Printer.isBareIdentifier(name) ? `${name}: ` : `:${Printer.quoteString(name)} => `;
+  return prefix + render(value, depth, keyedRoom(opts, depth, prefix));
+}
+
+/**
+ * `opts` with the room a value has after `prefix` on a line indented
+ * `depth` levels.
+ * @param {Opts} opts
+ * @param {number} depth
+ * @param {string} prefix
+ * @returns {Opts}
+ */
+function keyedRoom(opts, depth, prefix) {
+  return withRoom(opts, columns(indentUnit(opts).repeat(depth) + prefix));
 }
 
 /**
  * @param {unknown} key
  * @param {unknown} value
  * @param {number} depth
- * @param {{indent?: number, registry?: import('../registry.cjs'), [k: string]: unknown}} opts
+ * @param {Opts} opts
  */
 function renderEntry(key, value, depth, opts) {
   const name = Printer.keywordEntryName(key);
   if (name !== null) return renderKeywordEntry(name, value, depth, opts);
-  return `${Printer.print(key, opts)} => ${render(value, depth, opts)}`;
+  const prefix = `${Printer.print(key, opts)} => `;
+  return prefix + render(value, depth, keyedRoom(opts, depth, prefix));
 }
 
 module.exports = { pretty };
