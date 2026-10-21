@@ -5,7 +5,7 @@ import DXNStruct from '../../src/values/struct.js';
 // One materializer per schema, `(schemaName, version, fields)` with
 // string-keyed fields, called for every decoded struct of its schema
 // whatever the version, its result validated against the latest schema
-// (DXN.md §4.8). Without one, the latest version comes back as a generic
+// (DXNS.md §8). Without one, the latest version comes back as a generic
 // `DXNStruct`.
 class UserRecord {
   constructor(name, email) {

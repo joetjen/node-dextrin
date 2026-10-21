@@ -82,7 +82,7 @@ describe('schema/validator', () => {
       expect(() => Validator.validateForEncode(compiled, 42n, registry)).to.throw(/expected a map/);
     });
 
-    it('never converts a value to make it match (DXN.md §4.7)', () => {
+    it('never converts a value to make it match (DXNS.md §7)', () => {
       const { compiled, registry } = schemaFor('%{ P: %schema{ amount: :rational } }', 'P');
       const struct = DXNStruct.keyed('P', [['amount', 0.5]]);
       expect(() => Validator.validateForEncode(compiled, struct, registry)).to.throw(/does not match/);

@@ -94,7 +94,7 @@ describe('dextrin (top-level API)', () => {
       expect(esm.encode(bad, { registry, validate: false })).to.equal('%Point(1){x:"not a float"}');
     });
 
-    it('encode never converts a mismatched field to its declared type (DXN.md §4.7)', () => {
+    it('encode never converts a mismatched field to its declared type (DXNS.md §7)', () => {
       const rationalRegistry = esm.Schema.compile(esm.decode('%{ P: %schema{ amount: :rational } }'), new esm.Registry());
       const struct = esm.DXNStruct.keyed('P', [['amount', 0.5]]);
       expect(() => esm.encode(struct, { registry: rationalRegistry })).to.throw(esm.DXNError, /does not match/);

@@ -25,7 +25,7 @@ class Compiled {
     this.fields = fields;
     /**
      * What a `{:doc %schema{...} %{...}}` around the entry says about it
-     * (DXN.md §4.1b), by name; empty when it says nothing.
+     * (DXNS.md §1b), by name; empty when it says nothing.
      * @type {{[k: string]: unknown}}
      */
     this.annotations = annotations;
@@ -38,7 +38,7 @@ class Compiled {
 
   /**
    * `instance` -- a registered application class instance -- as the
-   * keyed struct it is written as (DXN.md §4.3, §4.7). A field it does
+   * keyed struct it is written as (DXNS.md §3, §4.7). A field it does
    * not have, or holds as `undefined`, is absent, never null: a reader
    * refuses null unless the type admits it. An own property the schema
    * does not declare is an extra field, written back with the struct,

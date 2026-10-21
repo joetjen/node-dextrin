@@ -5,7 +5,7 @@ import DXNStruct from '../../src/values/struct.js';
 // Every struct written against a schema carries the version it was
 // written with -- `%Point(2){...}` in text and the type name "Point(2)"
 // in binary -- and that version is always the latest one loaded
-// (DXN.md §4.8).
+// (DXNS.md §8).
 class Point {
   constructor(x, y) {
     this.x = x;

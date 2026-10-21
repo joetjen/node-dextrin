@@ -4,7 +4,7 @@ import { decode, Registry, Schema } from '../../src/dextrin.js';
 // Sugar, the superset's group 9, as dextrin d1b050a
 // (design/schema-superset.md, Jan, 2026-10-20): protobuf's and MongoDB's
 // sized numbers, `:number`, `{:const v}` and `{:if I T E}`. Each says
-// nothing a longer form does not; DXN.md §4.1 gives the form each stands
+// nothing a longer form does not; DXNS.md §1 gives the form each stands
 // for.
 describe('schema sugar', () => {
   /** @param {string} type */

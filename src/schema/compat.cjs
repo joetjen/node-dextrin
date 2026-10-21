@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @fileoverview The version discipline check (DXN.md §4.8), mirroring
+ * @fileoverview The version discipline check (DXNS.md §8), mirroring
  * `Dextrin.Schema.Compat`: compares the schemas of a previous release
  * with the current ones.
  *

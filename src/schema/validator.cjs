@@ -99,7 +99,7 @@ function resolveFields(compiled, given, registry, opts) {
   const resolved = {};
   for (const field of compiled.fields) {
     // An absent optional field stays absent: null is not a stand-in for
-    // it (DXN.md §4.3), and each writer decides what absent means there.
+    // it (DXNS.md §3), and each writer decides what absent means there.
     const value = resolveField(field, given, registry, opts);
     if (value !== ABSENT) resolved[field.name] = value;
   }
@@ -198,7 +198,7 @@ function validateTreeForEncode(value, registry, opts = {}) {
  * @returns {Validated}
  */
 function checkCompiled(compiled, value, registry, opts) {
-  // An extra field never shadows a declared one (DXN.md §4.7), on the
+  // An extra field never shadows a declared one (DXNS.md §7), on the
   // way out as on the way in.
   if (value instanceof DXNStruct) {
     const declared = new Set(compiled.fieldNames());

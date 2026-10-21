@@ -97,7 +97,7 @@ function print(value, opts = {}) {
   // Dates and times are ISO 8601 strings under their tag (DXN.md §1.2,
   // Jan, 2026-10-20), written by text/temporal.cjs. A native `Date` is an
   // instant: it always means a datetime in UTC, with or without a schema
-  // (DXN.md §4.7).
+  // (DXNS.md §7).
   const temporalForm = temporal.tagged(value);
   if (temporalForm) return tagForm(temporalForm.tag, quoteString(temporalForm.text), opts);
 

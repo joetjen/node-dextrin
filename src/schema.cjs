@@ -33,7 +33,7 @@ const Compat = require('./schema/compat.cjs');
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
  * schema for each `%schema(N){}` entry, and a reusable named type for
  * every other entry. `names`, when given, maps each entry's key to the
- * full name a tree gives it (DXN.md §4.6) -- how `tree.cjs` compiles a
+ * full name a tree gives it (DXNS.md §6) -- how `tree.cjs` compiles a
  * file -- a bare symbol naming a sibling resolving to it.
  * @param {unknown} schemaDoc
  * @param {import('./registry.cjs')} baseRegistry
@@ -128,7 +128,7 @@ function conform(value, registry, name) {
 
 /**
  * What the `{:doc ... %{...}}` around the schema or named type `name` says
- * about it (DXN.md §4.1b): its annotations by name, `{}` when it has none,
+ * about it (DXNS.md §1b): its annotations by name, `{}` when it has none,
  * `undefined` when there is no such name -- as the registry's `fetch*`
  * answer a name it does not know. A schema answers for its latest
  * version. As the reference's `Dextrin.Schema.annotations/2`.
@@ -210,7 +210,7 @@ function describe(value) {
 }
 
 /**
- * The version discipline check (`schema/compat.cjs`, DXN.md §4.8):
+ * The version discipline check (`schema/compat.cjs`, DXNS.md §8):
  * `oldRegistry`'s schemas against `newRegistry`'s, as the problems -- a
  * version whose content changed without a new version, a version that
  * went down -- and what the latest versions' materializers have to

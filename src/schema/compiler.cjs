@@ -45,7 +45,7 @@ const PRIMITIVES = new Set([
   'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'objectid', 'ip', 'uri', 'bytes', 'bits', 'regex'
 ]);
 
-/** The sized integers' ranges (DXN.md §4.1's sugar). */
+/** The sized integers' ranges (DXNS.md §1's sugar). */
 const SIZED = new Map([
   ['int32', [-2_147_483_648n, 2_147_483_647n]],
   ['int64', [-9_223_372_036_854_775_808n, 9_223_372_036_854_775_807n]],
@@ -53,7 +53,7 @@ const SIZED = new Map([
   ['uint64', [0n, 18_446_744_073_709_551_615n]]
 ]);
 
-/** What a doc may say about a type (DXN.md §4.1b), in the order its refusal names them. */
+/** What a doc may say about a type (DXNS.md §1b), in the order its refusal names them. */
 const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
 
 class SchemaCompileError extends Error {
@@ -76,8 +76,8 @@ class SchemaCompileError extends Error {
  *
  * Every named type in a document sees every other, in any order, and may
  * reach itself through a guard -- a field, or a collection's elements
- * (DXN.md §4.5, Jan, 2026-10-20). `names` maps an entry's key to the
- * name it is registered under -- a tree's full names (DXN.md §4.6,
+ * (DXNS.md §5, Jan, 2026-10-20). `names` maps an entry's key to the
+ * name it is registered under -- a tree's full names (DXNS.md §6,
  * `layout.cjs`); a bare symbol naming a sibling resolves to it.
  *
  * @param {unknown} schemaDoc a decoded `.dxns` document (see `decode`).
@@ -462,7 +462,7 @@ function caseFields(value) {
 /**
  * Refuses a schema written in Dextrin 0.1's syntax -- `fields: @ordered
  * %{...}`, `closed: true`, `forbidden: [...]` -- saying so, and what a
- * schema is written as now (DXN.md §4.4), rather than that a field has no
+ * schema is written as now (DXNS.md §4), rather than that a field has no
  * known type. Only those shapes: now `fields`, `closed` and `forbidden`
  * are ordinary field names, whose values are type expressions. The format
  * stays 1.0 until 1.0.0 (Jan, 2026-10-20), so the old syntax is named by
@@ -479,7 +479,7 @@ function notFormat10(pairs) {
   if (old) {
     throw new SchemaCompileError(
       "this is Dextrin 0.1's schema syntax (fields:, closed:, forbidden:); a schema lists its fields directly, " +
-        '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXN.md §4.4)'
+        '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXNS.md §4)'
     );
   }
 }
@@ -523,7 +523,7 @@ function compileTypeExpr(value, aliases) {
     if (value.name === 'any') return { form: 'any' };
     if (value.name === 'never') return { form: 'never' };
     if (PRIMITIVES.has(value.name)) return { form: 'primitive', name: value.name };
-    // Sugar (DXN.md §4.1, Jan, 2026-10-20): protobuf's and MongoDB's sized
+    // Sugar (DXNS.md §1, Jan, 2026-10-20): protobuf's and MongoDB's sized
     // numbers as their ranges, `:float32` as single precision, `:number` as
     // every kind of number.
     const sized = SIZED.get(value.name);
@@ -532,7 +532,7 @@ function compileTypeExpr(value, aliases) {
     if (value.name === 'number') {
       return { form: 'any-of', variants: ['integer', 'float', 'decimal', 'rational'].map((name) => ({ form: 'primitive', name })) };
     }
-    // DXN 0.2's timestamp type, now a datetime in UTC (DXN.md §4.2, Jan,
+    // DXN 0.2's timestamp type, now a datetime in UTC (DXNS.md §2, Jan,
     // 2026-10-20): a schema naming it keeps its meaning.
     if (value.name === 'timestamp') {
       return { form: 'refine', base: { form: 'primitive', name: 'datetime' }, constraints: { offsets: new DXNList(['Z']) } };
@@ -616,7 +616,7 @@ function compileTypeExpr(value, aliases) {
       return { form: 'refine', base, constraints: refineConstraints(rest[1], aliases) };
     }
     // `{:list-items p ...}`: a list's items in order, each `p` a type for
-    // one item or a `{:repeat ...}` (DXN.md §4.1a).
+    // one item or a `{:repeat ...}` (DXNS.md §1a).
     if (tag === 'list-items') return { form: 'list-items', particles: particles(rest, aliases) };
     if (tag === 'tuple-of-all' && rest.length === 1) return { form: 'tuple-of-all', elem: compileTypeExpr(rest[0], aliases) };
     // `{:const v}`: the one value `v`, `{:enum v}`.
@@ -635,14 +635,14 @@ function compileTypeExpr(value, aliases) {
         alternative: compileTypeExpr(rest.length === 3 ? rest[2] : new DXNKeyword('any'), aliases)
       };
     }
-    // `{:doc type %{...}}`: the type, annotated (DXN.md §4.1b).
+    // `{:doc type %{...}}`: the type, annotated (DXNS.md §1b).
     if (tag === 'doc') {
       if (rest.length !== 2) throw new SchemaCompileError('a doc is {:doc type %{description: ..., ...}}');
       const type = compileTypeExpr(rest[0], aliases);
       return { form: 'doc', elem: type, notes: annotations(rest[1], type) };
     }
     // `{:tagged name type}`: a custom tag of that name, its value a type
-    // (DXN.md §4.1).
+    // (DXNS.md §1).
     if (tag === 'tagged') {
       if (rest.length !== 2) throw new SchemaCompileError('a tagged is {:tagged name type}');
       const name = nameOf(rest[0]);
@@ -704,7 +704,7 @@ const ENCODINGS = ['base64', 'base64url', 'base32', 'base16'];
 const CONTENT_READERS = [null, 'application/dxn', 'application/dxnb'];
 
 /**
- * A refine's constraints by name, every key one DXN.md §4.2 knows and
+ * A refine's constraints by name, every key one DXNS.md §2 knows and
  * every argument one it takes: a misspelt key would otherwise refuse
  * every value, silently, and a bad argument fail at check time. The
  * types are compiled here; `unique-by`, `format`, `resolution` and
@@ -717,7 +717,7 @@ function refineConstraints(written, aliases) {
   const unknown = Object.keys(named)
     .sort(byCodepoint)
     .find((key) => !REFINE_KEYS.has(key));
-  if (unknown !== undefined) throw new SchemaCompileError(`${unknown} is no refine constraint (DXN.md §4.2)`);
+  if (unknown !== undefined) throw new SchemaCompileError(`${unknown} is no refine constraint (DXNS.md §2)`);
   if (!('contains' in named) && ('min-contains' in named || 'max-contains' in named)) {
     throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
   }
@@ -867,7 +867,7 @@ function byCodepoint(a, b) {
   return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
 }
 
-// ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+// ---- annotations, {:doc T %{...}} (DXNS.md §1b) ---------------------------
 
 /** Whether `value` is written `{:doc ...}`. @param {unknown} value */
 function isDoc(value) {

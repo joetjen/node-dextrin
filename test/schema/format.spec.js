@@ -5,7 +5,7 @@ import { decode, Registry, Schema } from '../../src/dextrin.js';
 // (design/schema-superset.md, Jan, 2026-10-20): a string in one of a
 // closed set of formats. Each is checked the same way in every
 // implementation: by the reader DXN has for the tagged value, or by the
-// grammar DXN.md §4.2a gives.
+// grammar DXNS.md §2a gives.
 describe('schema format', () => {
   /** @param {string} type */
   const compiled = (type) => Schema.compile(decode(`%{T: ${type}}`), new Registry());

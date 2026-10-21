@@ -2,7 +2,7 @@
 
 /**
  * @fileoverview A resolver (`Registry#putResolver`) finding a struct's
- * schema in `.dxns` files on disk, by the convention DXN.md §4.6 states
+ * schema in `.dxns` files on disk, by the convention DXNS.md §6 states
  * for every implementation -- so one set of schema files serves them all.
  * Mirrors `Dextrin.Schema.FileResolver`. Swappable like any resolver:
  * anyone with another convention writes their own.
@@ -72,7 +72,7 @@ function inPath(dir, name) {
   for (const [version, files] of holders) {
     if (files.length > 1) {
       throw new SchemaCompileError(
-        `${name} version ${version} is in two files, ${[...files].sort().join(' and ')}; it is found once (DXN.md §4.6)`
+        `${name} version ${version} is in two files, ${[...files].sort().join(' and ')}; it is found once (DXNS.md §6)`
       );
     }
   }
@@ -144,7 +144,7 @@ function numbered(dir, prefix) {
  * another version than its name says, is refused.
  *
  * The file is compiled as a tree compiles it (`tree.cjs`): its entries
- * under their full names (DXN.md §4.6), over the named types the rest of
+ * under their full names (DXNS.md §6), over the named types the rest of
  * its search path `dir` defines -- so a field naming another file's
  * shape or named type resolves.
  * @param {string} file
@@ -177,7 +177,7 @@ function load(file, entry, expected, dir, name) {
   if (!versions || versions.size === 0) return [];
   if (expected !== 'any' && !(versions.size === 1 && versions.has(expected))) {
     throw new SchemaCompileError(
-      `${file} holds ${entry} as version ${[...versions.keys()].join(', ')}, but its name says version ${expected} (DXN.md §4.6)`
+      `${file} holds ${entry} as version ${[...versions.keys()].join(', ')}, but its name says version ${expected} (DXNS.md §6)`
     );
   }
   return [...versions].map(([version, compiled]) => ({ version, compiled, file }));

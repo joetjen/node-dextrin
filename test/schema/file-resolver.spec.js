@@ -6,7 +6,7 @@ import { forPaths } from '../../src/schema/file-resolver.cjs';
 import Registry from '../../src/registry.js';
 import { decode, DXNError } from '../../src/dextrin.js';
 
-// The file convention of DXN.md §4.6, as the reference follows it
+// The file convention of DXNS.md §6, as the reference follows it
 // (dextrin fd34537): versioned files in three layouts and the namespace
 // file, the first search path deciding, a file's version its schema's,
 // one version found once, every version loaded.

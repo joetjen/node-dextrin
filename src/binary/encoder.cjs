@@ -128,7 +128,7 @@ function encodeItem(value, opts) {
   // clock.
   if (value instanceof DXNTime) return tag(Tags.T_TIME, integerItem(timeNanos(value)));
   // A native `Date` is an instant: it always means a datetime in UTC,
-  // with or without a schema (DXN.md §4.7).
+  // with or without a schema (DXNS.md §7).
   if (value instanceof Date) return encodeItem(DXNDateTime.fromDate(value), opts);
   // In UTC, the bare nanoseconds; otherwise with the offset (the
   // smallest representation, DXN.md §2.2).
@@ -228,7 +228,7 @@ function encodeStruct(value, opts) {
  * pairs' own order is all there is.
  *
  * Every position must be filled, and null is not a stand-in for an
- * absent field (DXN.md §4.3): a reader refuses null unless the type is
+ * absent field (DXNS.md §3): a reader refuses null unless the type is
  * nilable. So an absent field is written as its default where it has
  * one, and is otherwise refused (`schema/missing-field`).
  * @param {DXNStruct} value
