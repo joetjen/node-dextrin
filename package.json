@@ -38,7 +38,7 @@
     "src": "./src"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.5",
     "chai": "^6.2.2",
     "esbuild": "^0.24.2",
     "fast-check": "^3.23.0",
