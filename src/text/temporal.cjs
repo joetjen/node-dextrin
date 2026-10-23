@@ -183,22 +183,22 @@ function offsetName(minutes) {
 }
 
 /**
- * `P...`: the fields in `DXN.md` §2.3's order, absent ones left out,
- * `PT0S` when none.
+ * `P...`: the fields in `DXN.md` §2.3's order, absent and zero ones left
+ * out, `PT0S` when none is left (§1.5).
  * @param {DXNDuration} d
  * @returns {string}
  */
 function formatDuration(d) {
   let date = '';
-  if (d.years !== null) date += `${d.years}Y`;
-  if (d.months !== null) date += `${d.months}M`;
-  if (d.weeks !== null) date += `${d.weeks}W`;
-  if (d.days !== null) date += `${d.days}D`;
+  if (d.years !== null && d.years !== 0) date += `${d.years}Y`;
+  if (d.months !== null && d.months !== 0) date += `${d.months}M`;
+  if (d.weeks !== null && d.weeks !== 0) date += `${d.weeks}W`;
+  if (d.days !== null && d.days !== 0) date += `${d.days}D`;
 
   let time = '';
-  if (d.hours !== null) time += `${d.hours}H`;
-  if (d.minutes !== null) time += `${d.minutes}M`;
-  if (d.nanoseconds !== null) time += `${secondsText(d.nanoseconds)}S`;
+  if (d.hours !== null && d.hours !== 0) time += `${d.hours}H`;
+  if (d.minutes !== null && d.minutes !== 0) time += `${d.minutes}M`;
+  if (d.nanoseconds !== null && d.nanoseconds !== 0n) time += `${secondsText(d.nanoseconds)}S`;
 
   if (date === '' && time === '') return 'PT0S';
   return time === '' ? `P${date}` : `P${date}T${time}`;

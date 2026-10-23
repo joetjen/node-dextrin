@@ -98,7 +98,8 @@ function regexByteToFlags(byte) {
 function durationBitmask(d) {
   let mask = 0;
   DURATION_FIELDS.forEach((field, bit) => {
-    if (d[field] !== null) mask |= 1 << bit;
+    // A zero field is left out, as in text (DXN.md §1.5).
+    if (d[field] !== null && d[field] !== 0 && d[field] !== 0n) mask |= 1 << bit;
   });
   return mask;
 }
