@@ -1,6 +1,6 @@
 {
   "name": "@joetjen/dextrin",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": false,
   "author": "Jan Oetjen <joetjen.riveting388@passmail.net> (http://joetjen.net)",
   "description": "Under heavy development: not for production use before 1.0.0. DXN (Data eXchange Notation) for Node.js -- .dxn text, .dxnb binary, and .dxns schema documents.",
