@@ -234,7 +234,11 @@ function symbols(value) {
   if (value instanceof DXNTuple || value instanceof DXNList) return value.items.flatMap(symbols);
   if (Array.isArray(value)) return value.flatMap(symbols);
   if (value instanceof DXNStruct) {
-    return value.fields.type === 'keyed' ? value.fields.pairs.flatMap(([, v]) => symbols(v)) : value.fields.values.flatMap(symbols);
+    // A schema or shape built from others needs its bases too (DXNS.md
+    // §4b), named in its head rather than in its fields.
+    const bases = value.bases.map(([, name]) => name);
+    const fields = value.fields.type === 'keyed' ? value.fields.pairs.flatMap(([, v]) => symbols(v)) : value.fields.values.flatMap(symbols);
+    return [...bases, ...fields];
   }
   if (value instanceof Map) return Array.from(value.values()).flatMap(symbols);
   return [];

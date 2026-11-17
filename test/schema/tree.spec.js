@@ -39,6 +39,22 @@ describe('schema tree', () => {
   /** @param {any} result */
   const messages = (result) => result.problems.map((/** @type {any} */ p) => p.message);
 
+  // A base in another file, its only reference to it (DXNS.md §4b): "z"
+  // sorts after "a", so only the base orders the files.
+  it("loads a schema built from another file's after its base", () => {
+    const result = /** @type {any} */ (
+      SchemaTree.load([
+        tree({
+          'a.dxns': '%{Amateur: %shape extends z/Amateur {x: :integer}}',
+          'z.dxns': '%{Amateur: %shape{id: :string}}',
+          'b.dxns': '%{Admin: %schema includes z/Amateur {- id}}'
+        })
+      ])
+    );
+    expect(result.ok).to.equal(true);
+    expect(result.registry.typeAliases.has('a/Amateur')).to.equal(true);
+  });
+
   it('loads a tree that is in order, every entry under its full name', () => {
     const result = /** @type {any} */ (SchemaTree.load([tree(GOOD)]));
     expect(result.ok).to.equal(true);
