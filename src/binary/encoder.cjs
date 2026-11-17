@@ -209,6 +209,13 @@ function encodePairs(pairs, opts) {
  * @returns {Buffer}
  */
 function encodeStruct(value, opts) {
+  // A `%schema` or `%shape` built from others (DXNS.md §4b) is text only:
+  // `.dxnb` has no place for its head's clauses or its `- field`s.
+  if (value.isBuilt()) {
+    const err = new TypeError(`a %${value.name} built from others (extends, includes, - field) has no .dxnb form`);
+    /** @type {any} */ (err).category = 'encode/unsupported';
+    throw err;
+  }
   const written = opts.registry ? opts.registry.asWritten(value) : value;
   const values = positionalValues(value, opts.registry);
   const items = [textItem(DXNStruct.typeName(written.name, written.version)), ...values.map((v) => encodeItem(v, opts))];

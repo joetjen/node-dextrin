@@ -71,8 +71,13 @@ describe('text/lexer', () => {
     expect(() => tokenize('"abc')).to.throw(LexError);
   });
 
-  it('throws LexError on a malformed number', () => {
-    expect(() => tokenize('-')).to.throw(LexError);
+  // `- password` (DXNS.md §4b): a "-" not before a digit is a token of
+  // its own, which the parser takes only in a schema's or shape's body.
+  it('lexes a "-" not before a digit as MINUS, and one before a digit as the sign', () => {
+    expect(types('-')).to.deep.equal(['MINUS', 'EOF']);
+    expect(types('- x')).to.deep.equal(['MINUS', 'IDENTIFIER', 'EOF']);
+    expect(types('-x')).to.deep.equal(['MINUS', 'IDENTIFIER', 'EOF']);
+    expect(types('-1')).to.deep.equal(['INTEGER', 'EOF']);
   });
 
   it('throws LexError on a genuinely unexpected character', () => {

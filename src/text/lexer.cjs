@@ -251,6 +251,12 @@ function tokenize(src) {
       tokens.push(readNumber());
     } else if (c === '-' && src.startsWith('Infinity', i + 1)) {
       tokens.push(readNumber());
+    } else if (c === '-') {
+      // `- password`: an inherited field a `%schema` or `%shape` leaves
+      // out (DXNS.md §4b); the parser takes it nowhere else. Before a
+      // digit, "-" is a number's sign instead, one token with it.
+      i += 1;
+      tokens.push({ type: 'MINUS', value: '-', start, end: i });
     } else if (ID_START.test(c)) {
       const name = readIdentifierRun();
       if (src[i] === ':') {

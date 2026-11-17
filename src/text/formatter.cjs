@@ -138,9 +138,11 @@ function layout(value, depth, opts) {
     checkPairs(value.entries());
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
-  if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length + value.extra.length > 0) {
+  if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length + value.extra.length + value.drops.length > 0) {
+    // A schema's or shape's `- field`s (DXNS.md §4b) come first, one a line.
+    const drops = value.dropEntries().map((entry) => () => entry);
     const lines = value.fields.pairs.map(([name, field]) => (/** @type {number} */ d) => renderKeywordEntry(name, field, d, opts));
-    return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
+    return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...drops, ...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
   }
   if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length + value.extra.length > 0) {
     // A positional struct's items, then its extra fields as entries, one
