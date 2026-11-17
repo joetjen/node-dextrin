@@ -560,7 +560,9 @@ function substituteParticle(particle, bound) {
  */
 function matchesReference(name, value, registry) {
   if (value instanceof DXNStruct) return value.name === name;
-  if (value instanceof Validated) return value.name === name;
+  // A value of a schema that extends `name`, and is a valid `name` as
+  // well, is accepted where a `name` is (DXNS.md §4b).
+  if (value instanceof Validated) return value.name === name || value.also.includes(name);
   // A struct is matched only by a struct (DXNS.md §7): past a struct or
   // checked value of the right name, only the class registered for
   // `name` is one. A `Map`, or any other value, is not a struct, however

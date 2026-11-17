@@ -27,10 +27,15 @@ class Validated {
   /**
    * @param {string} name
    * @param {unknown} value
+   * @param {string[]} [also] the schemas the value passes as besides its
+   *   own: those its schema extends, and that it is a valid one of
+   *   (`DXNS.md` §4b).
    */
-  constructor(name, value) {
+  constructor(name, value, also = []) {
     this.name = name;
     this.value = value;
+    /** @type {string[]} */
+    this.also = also;
   }
 }
 

@@ -24,6 +24,12 @@ const { dxnEquals, dxnCompare } = require('./equality.cjs');
  * written: a name for a named field, any other map key (§1.6) as
  * itself. In text they are entries after the fields or the items; in
  * `.dxnb`, one trailing tag-215 map.
+ *
+ * `bases` and `drops` are what a `%schema` or `%shape` is built from
+ * (`DXNS.md` §4b): `bases` the head's `extends` and `includes` names, as
+ * `[kind, name, version]` in the order written (`version` `null` when the
+ * head names none), and `drops` the body's `- field` names. Every other
+ * struct has none; the schema compiler reads them.
  */
 class DXNStruct {
   /**
@@ -31,8 +37,10 @@ class DXNStruct {
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
    * @param {number | null} [version]
    * @param {Array<[unknown, unknown]>} [extra]
+   * @param {Base[]} [bases]
+   * @param {string[]} [drops]
    */
-  constructor(name, fields, version = null, extra = []) {
+  constructor(name, fields, version = null, extra = [], bases = [], drops = []) {
     if (typeof name !== 'string') throw new TypeError('DXNStruct name must be a string');
     this.name = name;
     this.fields = fields;
@@ -40,17 +48,67 @@ class DXNStruct {
     this.version = version;
     /** @type {Array<[unknown, unknown]>} */
     this.extra = extra;
+    /** @type {Base[]} */
+    this.bases = bases;
+    /** @type {string[]} */
+    this.drops = drops;
   }
 
   /**
    * This struct holding `fields` instead, and otherwise unchanged — what
    * every walk over a struct's fields goes through, so a walk never
-   * rebuilds a struct from its name and loses its version.
+   * rebuilds a struct from its name and loses its version, or what it is
+   * built from.
    * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
    * @returns {DXNStruct}
    */
   withFields(fields) {
-    return new DXNStruct(this.name, fields, this.version, this.extra);
+    return new DXNStruct(this.name, fields, this.version, this.extra, this.bases, this.drops);
+  }
+
+  /**
+   * Whether this is a `%schema` or `%shape` built from others (`DXNS.md`
+   * §4b): one naming a base, or leaving a field out.
+   * @returns {boolean}
+   */
+  isBuilt() {
+    return this.bases.length > 0 || this.drops.length > 0;
+  }
+
+  /**
+   * How this struct opens when written at `version`: its `head`, then the
+   * `extends` and `includes` clauses a `%schema` or `%shape` is built
+   * from (`DXNS.md` §4b), in the order the bases were written, and one
+   * space before the body. Shared by every text writer, so they agree.
+   *
+   * @example
+   * new DXNStruct('schema', {type: 'keyed', pairs: []}, 2, [], [['extends', 'User', 3], ['includes', 'Audit', null]]).opening(2)
+   * // => '%schema(2) extends User(3) includes Audit '
+   * @param {number | null} [version]
+   * @returns {string}
+   */
+  opening(version = this.version) {
+    const head = DXNStruct.head(this.name, version);
+    if (this.bases.length === 0) return head;
+    /** @type {string[]} */
+    const clauses = [];
+    let kind = null;
+    for (const [baseKind, base, baseVersion] of this.bases) {
+      // A run of bases of one kind stands under one word.
+      if (baseKind !== kind) clauses.push(baseKind);
+      kind = baseKind;
+      clauses.push(DXNStruct.typeName(base, baseVersion));
+    }
+    return `${head} ${clauses.join(' ')} `;
+  }
+
+  /**
+   * The `- field` entries of a `%schema` or `%shape` that leaves
+   * inherited fields out (`DXNS.md` §4b), as they are written.
+   * @returns {string[]}
+   */
+  dropEntries() {
+    return this.drops.map((field) => `- ${field}`);
   }
 
   /**
@@ -146,6 +204,12 @@ class DXNStruct {
     return new DXNStruct(name, { type: 'positional', values }, version, extra);
   }
 }
+
+/**
+ * @typedef {['extends' | 'includes', string, number | null]} Base
+ *   One base a `%schema` or `%shape` is built from: the clause naming it,
+ *   its name, and the version its head names, `null` when none.
+ */
 
 DXNStruct.prototype.dxnType = 'struct';
 

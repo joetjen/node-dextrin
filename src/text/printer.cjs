@@ -275,8 +275,9 @@ function printStruct(struct, opts) {
   const head = writtenHead(struct, opts);
   const extra = struct.extra.map(([key, value]) => printExtraEntry(key, value, opts));
   if (struct.fields.type === 'keyed') {
+    // A schema's or shape's `- field`s (DXNS.md §4b) come first.
     const entries = struct.fields.pairs.map(([name, value]) => printKeywordEntry(name, value, opts));
-    return `${head}{${[...entries, ...extra].join(',')}}`;
+    return `${head}{${[...struct.dropEntries(), ...entries, ...extra].join(',')}}`;
   }
   // A positional struct's items, then its extra fields as entries
   // (DXN.md §1.2).
@@ -300,14 +301,16 @@ function printExtraEntry(key, value, opts) {
 /**
  * How `struct` opens when it is written: `%Name(3)` with the latest
  * loaded version of its schema, or with its own when there is no schema
- * (`DXN.md` §4.8). The formatter writes the same head.
+ * (`DXN.md` §4.8), then the `extends` and `includes` clauses a `%schema`
+ * or `%shape` is built from (`DXNS.md` §4b). The formatter writes the
+ * same head.
  * @param {DXNStruct} struct
  * @param {{registry?: import('../registry.cjs'), [k: string]: unknown}} opts
  * @returns {string}
  */
 function writtenHead(struct, opts) {
   const written = opts.registry ? opts.registry.asWritten(struct) : struct;
-  return DXNStruct.head(written.name, written.version);
+  return struct.opening(written.version);
 }
 
 /** @param {unknown} value */

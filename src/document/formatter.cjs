@@ -184,8 +184,15 @@ function bodyText(doc, body, indent, ctx) {
   if (!inner) return tokensText(doc, body.first, body.last);
   if (['list', 'tuple', 'set', 'map'].includes(inner.kind)) return collection(doc, inner, '', indent, ctx);
   if (inner.kind === 'struct') {
+    // A struct's head -- `%Name(3)`, and the `extends` and `includes`
+    // words a `%schema` or `%shape` may carry (DXNS.md §4b), one space
+    // apart -- then its body.
     const part = /** @type {SyntaxNode} */ (inner.children.find((c) => c.kind === 'keyed' || c.kind === 'positional'));
-    return collection(doc, part, tokensText(doc, inner.first, part.first - 1), indent, ctx);
+    const words = inner.children.filter((c) => c.kind === 'head-word');
+    const headLast = (words.length > 0 ? words[0].first : part.first) - 1;
+    const clauses = words.map((w) => ` ${tokensText(doc, w.first, w.last)}`).join('');
+    const opening = tokensText(doc, inner.first, headLast) + clauses + (words.length > 0 ? ' ' : '');
+    return collection(doc, part, opening, indent, ctx);
   }
   if (inner.kind === 'tag') {
     // A tag and its value. Written together, `@array[1 2]` -- the spec's
@@ -269,6 +276,8 @@ function columns(text) {
 
 /** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {Ctx} ctx @returns {string} */
 function item(doc, node, indent, ctx) {
+  // `- password`: an inherited field left out (DXNS.md §4b).
+  if (node.kind === 'drop') return `- ${tokensText(doc, node.last, node.last)}`;
   if (node.kind !== 'entry') return valueText(doc, node, indent, ctx);
   const values = node.children.filter((c) => c.kind === 'value');
   const value = values[values.length - 1];

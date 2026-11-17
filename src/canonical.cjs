@@ -154,13 +154,14 @@ function struct(value) {
   // A keyed struct's extra fields follow its declared ones in the order
   // they were written; a positional struct's follow its items in
   // canonical order of their keys (DXN.md §1.5).
+  // A schema's or shape's `- field`s (DXNS.md §4b) come before its fields.
   if (fields.type === 'keyed') {
     const written = [...fields.pairs, ...value.extra].map(([key, field]) => entry(key, field));
-    return `${DXNStruct.head(value.name, value.version)}{${written.join(' ')}}`;
+    return `${value.opening()}{${[...value.dropEntries(), ...written].join(' ')}}`;
   }
   const byKey = new Map(value.extra.map(([key, field]) => [text(key), entry(key, field)]));
   const extras = sorted([...byKey.keys()]).map((key) => /** @type {string} */ (byKey.get(key)));
-  return `${DXNStruct.head(value.name, value.version)}[${[...fields.values.map(text), ...extras].join(' ')}]`;
+  return `${value.opening()}[${[...fields.values.map(text), ...extras].join(' ')}]`;
 }
 
 /** @param {string} name @returns {string} */

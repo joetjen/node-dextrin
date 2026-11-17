@@ -2,9 +2,10 @@
 
 /**
  * @fileoverview Compiles a parsed `.dxns` document (an ordinary
- * decoded DXN value — a `.dxns` file is valid `.dxn`, no new grammar;
- * what makes it a *schema* document is purely the shape of the value
- * it parses to: a map from name to type expression) into
+ * decoded DXN value — a `.dxns` file is valid `.dxn`, whose one piece of
+ * grammar for schemas is what a `%schema` or `%shape` is built from,
+ * `DXNS.md` §4b; what makes it a *schema* document is purely the shape
+ * of the value it parses to: a map from name to type expression) into
  * `Compiled` entries, mirroring `Dextrin.Schema.Compiler`.
  *
  * `%schema{}`/`%field{}` are recognized here directly, as
@@ -33,6 +34,7 @@ const DXNStruct = require('../values/struct.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const Compiled = require('./compiled.cjs');
 const Field = require('./field.cjs');
+const Bases = require('./bases.cjs');
 const { canonical } = require('../canonical.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS } = require('./type-expr.cjs');
@@ -107,11 +109,15 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
     else aliasEntries.push([name, value]);
   }
 
-  let registry = compileAliases(aliasEntries, baseRegistry, names);
+  const aliased = compileAliases(aliasEntries, baseRegistry, names, schemaEntries);
+  let registry = aliased.registry;
   for (const [name, entry] of schemaEntries) {
     let compiled;
     try {
-      compiled = compileEntry(entry, scopeOf(registry.typeAliases, names));
+      // A schema built from others (DXNS.md §4b) takes the fields built
+      // for it, each now resolved; any other is compiled from its body.
+      const built = aliased.built.get(name);
+      compiled = built ? builtEntry(entry, built, registry.typeAliases) : compileEntry(entry, scopeOf(registry.typeAliases, names));
     } catch (err) {
       throw new SchemaCompileError(`schema ${JSON.stringify(name)}: ${errorMessage(err)}`);
     }
@@ -122,12 +128,41 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
 }
 
 /**
+ * The schema built for `entry` (`DXNS.md` §4b): the fields `built` holds
+ * for it, each type resolved against `known`, its bases as built, and
+ * the annotations a `{:doc ...}` around it gives.
+ * @param {unknown} entry
+ * @param {Built} built
+ * @param {Map<string, any>} known
+ * @returns {Compiled}
+ */
+function builtEntry(entry, built, known) {
+  const notes = isDoc(entry) && /** @type {DXNTuple} */ (entry).items.length === 3 ? annotations(/** @type {DXNTuple} */ (entry).items[2], 'schema') : {};
+  const fields = built.fields.map((f) => new Field({ ...f, default: f.default, type: resolved(f.type, known, []) }));
+  const version = /** @type {DXNStruct} */ (undoc(entry)).version ?? 1;
+  return new Compiled({ version, fields, annotations: notes, bases: built.bases });
+}
+
+/**
+ * What was built for a schema or shape built from others: its fields,
+ * and its bases as `Compiled` records them.
+ * @typedef {{fields: Field[], bases: import('../values/struct.cjs').Base[]}} Built
+ */
+
+/**
+ * Compiles the document's named types into `registry`, and builds every
+ * schema or shape built from others (`DXNS.md` §4b) -- once the plain
+ * named types are compiled and before any is resolved, since a base may
+ * be any schema or shape of the document, or one already loaded. A built
+ * shape joins the named types; what was built for a schema comes back in
+ * `built`, by name.
  * @param {Array<[string, unknown]>} aliasEntries
  * @param {import('../registry.cjs')} registry
  * @param {Map<string, string>} names
- * @returns {import('../registry.cjs')}
+ * @param {Array<[string, unknown]>} schemaEntries
+ * @returns {{registry: import('../registry.cjs'), built: Map<string, Built>}}
  */
-function compileAliases(aliasEntries, registry, names) {
+function compileAliases(aliasEntries, registry, names, schemaEntries) {
   // Every named type in a document sees every other (design/
   // shapes-and-case.md): each is compiled with its siblings standing as
   // `{form: 'named'}`, and those are put in place once all are read -- so
@@ -135,15 +170,23 @@ function compileAliases(aliasEntries, registry, names) {
   /** @type {Array<[string, unknown]>} */
   const siblings = aliasEntries.map(([n]) => [n, { form: 'named', name: n }]);
   const scope = scopeOf(new Map([...registry.typeAliases, ...siblings]), names);
+  const extending = aliasEntries.filter(([, v]) => isBuilt(v));
   /** @type {Map<string, any>} */
   const compiled = new Map();
   for (const [name, rawValue] of aliasEntries) {
+    if (isBuilt(rawValue)) continue;
     try {
       compiled.set(name, compileNamed(name, rawValue, scope));
     } catch (err) {
       throw new SchemaCompileError(`named type ${JSON.stringify(name)}: ${errorMessage(err)}`);
     }
   }
+  /** @type {Lookup} */
+  const lookup = { document: new Map([...aliasEntries, ...schemaEntries]), compiled, scope, registry };
+  /** @type {Map<string, Built>} */
+  const built = new Map();
+  for (const [name] of [...extending, ...schemaEntries.filter(([, v]) => isBuilt(v))]) build(name, [], lookup, built);
+  withBuiltShapes(compiled, extending, built);
   guarded(compiled);
   const known = new Map([...registry.typeAliases, ...compiled]);
   let result = registry;
@@ -157,7 +200,236 @@ function compileAliases(aliasEntries, registry, names) {
     }
     result = result.putTypeAlias(name, typeExpr);
   }
-  return result;
+  return { registry: result, built };
+}
+
+// ---- built from others (DXNS.md §4b) ---------------------------------------
+
+/**
+ * Where a base is looked for: the document's entries by full name, its
+ * plain named types compiled, the scope they compile in, and the
+ * registry holding what is already loaded.
+ * @typedef {{document: Map<string, unknown>, compiled: Map<string, any>, scope: Map<string, unknown>, registry: import('../registry.cjs')}} Lookup
+ */
+
+/**
+ * Whether `entry` is a `%schema` or `%shape` built from others.
+ * @param {unknown} entry @returns {boolean}
+ */
+function isBuilt(entry) {
+  const inner = undoc(entry);
+  return inner instanceof DXNStruct && (inner.name === 'schema' || inner.name === 'shape') && inner.isBuilt();
+}
+
+/**
+ * Builds the document's entry `name` from its bases into `built`, with
+ * the bases as `Compiled` records them. `path` holds the entries being
+ * built, so one that reaches itself is seen.
+ * @param {string} name @param {string[]} path @param {Lookup} lookup @param {Map<string, Built>} built
+ */
+function build(name, path, lookup, built) {
+  if (built.has(name)) return;
+  if (path.includes(name)) throw new SchemaCompileError(`${JSON.stringify(name)} is built from itself`);
+  const raw = /** @type {DXNStruct} */ (undoc(lookup.document.get(name)));
+  if (raw.bases.length === 0) throw new SchemaCompileError(`${JSON.stringify(name)} drops a field, but names no base to drop it from`);
+  if (raw.name === 'shape' && raw.version !== null) throw new SchemaCompileError('a shape has no version: %shape extends Base {field: type, ...}');
+  if (raw.fields.type !== 'keyed') throw new SchemaCompileError(`a ${raw.name} lists its fields by name: %${raw.name}(N){field: type, ...}`);
+  distinctBases(name, raw.bases);
+  const own = ownFields(name, raw.fields.pairs, lookup.scope);
+  const found = foundBases(name, raw.bases, [name, ...path], lookup, built);
+  // Two fields of one name from two bases compare with their types in
+  // place: a base of this document still names its sibling types, one
+  // already loaded has them resolved.
+  const known = new Map([...lookup.registry.typeAliases, ...lookup.compiled]);
+  /** @param {Field} a @param {Field} b */
+  const same = (a, b) => dxnEquals(inPlace(a, known, []), inPlace(b, known, []));
+  let fields;
+  try {
+    fields = Bases.merge(found, own, raw.drops, same);
+  } catch (err) {
+    throw new SchemaCompileError(`${JSON.stringify(name)}: ${errorMessage(err)}`);
+  }
+  builtCases(name, fields);
+  built.set(name, { fields, bases: found.map((b) => /** @type {import('../values/struct.cjs').Base} */ ([b.kind, b.name, b.version])) });
+}
+
+/**
+ * `type` -- a type, a field, or anything holding them -- with every
+ * `{form: 'named'}` replaced by its definition in `known`: what a field
+ * compares as, however its base was found. A name already being replaced
+ * on the way, or one `known` does not hold, stays as it is.
+ * @param {unknown} type @param {Map<string, any>} known @param {string[]} path @returns {any}
+ */
+function inPlace(type, known, path) {
+  if (Array.isArray(type)) return type.map((t) => inPlace(t, known, path));
+  if (type instanceof Field) return new Field({ ...type, default: type.default, type: inPlace(type.type, known, path) });
+  if (type === null || typeof type !== 'object' || Object.getPrototypeOf(type) !== Object.prototype) return type;
+  const t = /** @type {any} */ (type);
+  if (t.form === 'named') {
+    const target = known.get(t.name);
+    return target === undefined || path.includes(t.name) ? t : inPlace(target, known, [t.name, ...path]);
+  }
+  return Object.fromEntries(Object.entries(t).map(([k, v]) => [k, inPlace(v, known, path)]));
+}
+
+/** @param {string} name @param {import('../values/struct.cjs').Base[]} bases */
+function distinctBases(name, bases) {
+  const written = bases.map(([, base]) => base);
+  const twice = written.find((base, i) => written.indexOf(base) !== i);
+  if (twice !== undefined) throw new SchemaCompileError(`${JSON.stringify(name)} names ${twice} twice in its head`);
+}
+
+/**
+ * The fields the body of `name` declares itself.
+ * @param {string} name @param {Array<[string, unknown]>} pairs @param {Map<string, unknown>} scope @returns {Field[]}
+ */
+function ownFields(name, pairs, scope) {
+  try {
+    const fields = pairs.map(([key, value]) => {
+      try {
+        return compileField(key, value, scope);
+      } catch (err) {
+        throw new SchemaCompileError(`field ${JSON.stringify(key)}: ${errorMessage(err)}`);
+      }
+    });
+    distinctNames(fields);
+    return fields;
+  } catch (err) {
+    throw new SchemaCompileError(`${JSON.stringify(name)}: ${errorMessage(err)}`);
+  }
+}
+
+/**
+ * A `{:case}` in a field names a field of the result (DXNS.md §4b), so
+ * one whose field was dropped is refused.
+ * @param {string} name @param {Field[]} fields
+ */
+function builtCases(name, fields) {
+  const names = new Set(fields.map((f) => f.name));
+  const missing = fields.flatMap((f) => caseNames(f.type)).find((field) => !names.has(field));
+  if (missing !== undefined) throw new SchemaCompileError(`${JSON.stringify(name)}: {:case ${missing} ...} names no field of it`);
+}
+
+/**
+ * The sibling fields every `{:case}` in a compiled type names, short of a
+ * shape, whose cases name its own fields.
+ * @param {unknown} type @returns {string[]}
+ */
+function caseNames(type) {
+  if (Array.isArray(type)) return type.flatMap(caseNames);
+  if (type === null || typeof type !== 'object' || Object.getPrototypeOf(type) !== Object.prototype) return [];
+  const t = /** @type {any} */ (type);
+  if (t.form === 'shape') return [];
+  if (t.form === 'case') return [t.field, ...caseNames(t.branches), ...caseNames(t.otherwise)];
+  return Object.values(t).flatMap(caseNames);
+}
+
+/**
+ * One base, found: the clause naming it, its full name, its fields, and
+ * the version it was taken at (`null` for a shape).
+ * @typedef {import('./bases.cjs').FoundBase & {version: number | null}} Found
+ */
+
+/**
+ * Each base of the head, found. A base of the document that is itself
+ * built is built first.
+ * @param {string} name @param {import('../values/struct.cjs').Base[]} bases @param {string[]} path
+ * @param {Lookup} lookup @param {Map<string, Built>} built
+ * @returns {Found[]}
+ */
+function foundBases(name, bases, path, lookup, built) {
+  return bases.map(([kind, base, version]) => {
+    // A tree's full name for a sibling written bare (DXNS.md §6).
+    const full = /** @type {Map<string, string> | undefined} */ (/** @type {any} */ (lookup.scope).names)?.get(base) ?? base;
+    try {
+      const at = foundBase(full, version, path, lookup, built);
+      return { kind, name: full, fields: at.fields, version: at.version };
+    } catch (err) {
+      if (err instanceof SchemaCompileError) throw err;
+      throw new SchemaCompileError(`${JSON.stringify(name)}: base ${base}: ${errorMessage(err)}`);
+    }
+  });
+}
+
+/**
+ * The fields of `base` at `version`, and the version they are: from the
+ * document when it is there, else from what is loaded. A reason a base
+ * cannot be used is thrown as a plain `Error`.
+ * @param {string} base @param {number | null} version @param {string[]} path
+ * @param {Lookup} lookup @param {Map<string, Built>} built
+ * @returns {{fields: Field[], version: number | null}}
+ */
+function foundBase(base, version, path, lookup, built) {
+  if (!lookup.document.has(base)) return loadedBase(base, version, lookup.registry);
+  const raw = undoc(lookup.document.get(base));
+  if (!(raw instanceof DXNStruct) || (raw.name !== 'schema' && raw.name !== 'shape')) throw new Error('a base is a %schema or a %shape');
+  if (raw.name === 'shape' && version !== null) throw new Error(`a shape has no versions, so ${base}(${version}) names none`);
+  if (isBuilt(raw)) {
+    build(base, path, lookup, built);
+    return atVersion(base, raw, version, /** @type {Built} */ (built.get(base)).fields, lookup);
+  }
+  if (raw.name === 'shape') return { fields: /** @type {Field[]} */ (shapeFields(lookup.compiled.get(base))), version: null };
+  return atVersion(base, raw, version, compileEntry(raw, lookup.scope).fields, lookup);
+}
+
+/**
+ * A schema of the document at the version the head asks for: its own,
+ * or one already loaded. Without a version, the latest of them. A shape
+ * has none.
+ * @param {string} base @param {DXNStruct} raw @param {number | null} version @param {Field[]} fields @param {Lookup} lookup
+ * @returns {{fields: Field[], version: number | null}}
+ */
+function atVersion(base, raw, version, fields, lookup) {
+  if (raw.name === 'shape') return { fields, version: null };
+  const own = raw.version ?? 1;
+  // What is loaded, the resolver asked as for any other base.
+  const loaded = lookup.registry.fetchStructSchema(base);
+  const wanted = version ?? Math.max(own, loaded ? loaded.compiled.version : own);
+  return wanted === own ? { fields, version: own } : loadedBase(base, wanted, lookup.registry);
+}
+
+/**
+ * A base already loaded: a schema at `version`, or its latest without
+ * one; or a shape, which has no versions.
+ * @param {string} base @param {number | null} version @param {import('../registry.cjs')} registry
+ * @returns {{fields: Field[], version: number | null}}
+ */
+function loadedBase(base, version, registry) {
+  const found = version === null ? registry.fetchStructSchema(base) : registry.fetchStructSchema(base, version);
+  if (found) return { fields: found.compiled.fields, version: found.compiled.version };
+  const type = registry.typeAliases.get(base);
+  if (version !== null) throw new Error(`${base}(${version}) is not loaded`);
+  if (type === undefined) throw new Error(`no schema or shape is named ${base}`);
+  const fields = shapeFields(type);
+  if (fields === null) throw new Error('a base is a %schema or a %shape');
+  return { fields, version: null };
+}
+
+/** A shape's fields, through its annotations; `null` for any other type. @param {any} type @returns {Field[] | null} */
+function shapeFields(type) {
+  if (type && type.form === 'shape') return type.fields;
+  if (type && type.form === 'doc') return shapeFields(type.elem);
+  return null;
+}
+
+/**
+ * Every built shape joins the named types under its name, as a plain one
+ * does, with its annotations.
+ * @param {Map<string, any>} compiled @param {Array<[string, unknown]>} extending @param {Map<string, Built>} built
+ */
+function withBuiltShapes(compiled, extending, built) {
+  for (const [name, entry] of extending) {
+    const shape = { form: 'shape', name, fields: /** @type {Built} */ (built.get(name)).fields };
+    if (isDoc(entry) && /** @type {DXNTuple} */ (entry).items.length === 3) {
+      try {
+        compiled.set(name, { form: 'doc', elem: shape, notes: annotations(/** @type {DXNTuple} */ (entry).items[2], shape) });
+      } catch (err) {
+        throw new SchemaCompileError(`named type ${JSON.stringify(name)}: ${errorMessage(err)}`);
+      }
+    } else {
+      compiled.set(name, shape);
+    }
+  }
 }
 
 /** The scope names compile in: the named types, and the document's `names`. @param {Map<string, unknown>} aliases @param {Map<string, string>} names */
@@ -551,6 +823,11 @@ function compileTypeExpr(value, aliases) {
   // `%shape{field: type, ...}` (design/shapes-and-case.md): a plain map's
   // fields, as a schema's are written; no version, never positional.
   if (value instanceof DXNStruct && value.name === 'shape') {
+    // A shape built from others is a named entry of its document (DXNS.md
+    // §4b), so that its bases are found before it is used.
+    if (value.isBuilt()) {
+      throw new SchemaCompileError('a shape built from others is an entry of its own, Name: %shape extends Base {...}, used by its name');
+    }
     if (value.fields.type !== 'keyed') throw new SchemaCompileError('a shape lists its fields by name: %shape{field: type, ...}');
     if (value.version !== null && value.version !== undefined) throw new SchemaCompileError('a shape has no version: %shape{field: type, ...}');
     const pairs = value.fields.pairs;

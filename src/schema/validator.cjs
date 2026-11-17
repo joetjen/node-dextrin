@@ -74,6 +74,56 @@ function resolve(compiled, fields, registry) {
 }
 
 /**
+ * The schemas a struct of `compiled` with `fields` passes as besides its
+ * own (`DXNS.md` §4b): each one `compiled` extends, at the version it was
+ * built with, that the fields are a valid one of -- and in turn what that
+ * one extends. `includes` bases, and shapes, are none.
+ * @param {import('./compiled.cjs')} compiled
+ * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
+ * @param {import('../registry.cjs')} registry
+ * @returns {string[]}
+ */
+function alsoValidAs(compiled, fields, registry) {
+  if (compiled.bases.length === 0) return [];
+  let given;
+  try {
+    given = toNameMap(compiled, fields);
+  } catch {
+    return [];
+  }
+  /** @type {{type: 'keyed', pairs: Array<[string, unknown]>}} */
+  const keyed = { type: 'keyed', pairs: Object.entries(given) };
+  return passesAs(compiled, (schema) => {
+    resolve(schema, keyed, registry);
+  }, registry);
+}
+
+/**
+ * Each schema `compiled` extends, at the version it was built with, that
+ * `check` does not refuse, followed by what that one passes as in turn.
+ * @param {import('./compiled.cjs')} compiled
+ * @param {(schema: import('./compiled.cjs')) => void} check throws when the value is not a valid `schema`.
+ * @param {import('../registry.cjs')} registry
+ * @returns {string[]}
+ */
+function passesAs(compiled, check, registry) {
+  /** @type {string[]} */
+  const names = [];
+  for (const [kind, base, version] of compiled.bases) {
+    if (kind !== 'extends' || version === null) continue;
+    const found = registry.fetchStructSchema(base, version);
+    if (!found) continue;
+    try {
+      check(found.compiled);
+    } catch {
+      continue;
+    }
+    names.push(base, ...passesAs(found.compiled, check, registry));
+  }
+  return [...new Set(names)];
+}
+
+/**
  * @param {import('./compiled.cjs')} compiled
  * @param {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} fields
  * @returns {{[name: string]: unknown}}
@@ -208,7 +258,40 @@ function checkCompiled(compiled, value, registry, opts) {
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
   const resolved = resolveFields(compiled, wrappedGiven, registry, opts);
-  return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved));
+  return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved), encodesAs(compiled, value, registry, opts));
+}
+
+/**
+ * `alsoValidAs` for a value on its way out: each schema `compiled`
+ * extends that `value` passes as well (`DXNS.md` §4b).
+ * @param {import('./compiled.cjs')} compiled
+ * @param {unknown} value
+ * @param {import('../registry.cjs')} registry
+ * @param {{[k: string]: unknown}} opts
+ * @returns {string[]}
+ */
+function encodesAs(compiled, value, registry, opts) {
+  if (compiled.bases.length === 0) return [];
+  const named = namedItems(compiled, value);
+  return passesAs(compiled, (schema) => {
+    checkCompiled(schema, named, registry, opts);
+  }, registry);
+}
+
+/**
+ * A positional struct's items named by its own schema, so a base, whose
+ * fields are fewer, finds them by name as decoding does. Any other value,
+ * or items that do not count up to the schema's fields, as it is.
+ * @param {import('./compiled.cjs')} compiled
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function namedItems(compiled, value) {
+  if (!(value instanceof DXNStruct) || value.fields.type !== 'positional') return value;
+  const names = compiled.fieldNames();
+  const items = value.fields.values;
+  if (names.length !== items.length) return value;
+  return value.withFields({ type: 'keyed', pairs: names.map((name, i) => [name, items[i]]) });
 }
 
 /**
@@ -409,4 +492,4 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { resolve, validateForEncode, validateTreeForEncode, SchemaValidationError };
+module.exports = { resolve, alsoValidAs, validateForEncode, validateTreeForEncode, SchemaValidationError };
