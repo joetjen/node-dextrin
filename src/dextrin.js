@@ -27,6 +27,7 @@ export const {
   SchemaDocs,
   SchemaTree,
   SchemaLayout,
+  JsonSchema,
 } = dextrin;
 export * from './values/index.js';
 export default dextrin;

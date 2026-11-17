@@ -311,7 +311,7 @@ function usedNames(raw) {
     /** @type {Array<[string, number | null]>} */
     const bases = raw.bases.map(([, base, version]) => [base, version]);
     const fields = raw.fields.type === 'keyed' ? raw.fields.pairs.flatMap(([, v]) => usedNames(v)) : raw.fields.values.flatMap(usedNames);
-    const rest = raw.rest ? [...usedNames(raw.rest.key), ...usedNames(raw.rest.value)] : [];
+    const rest = raw.rest.flatMap((entry) => [...usedNames(entry.key), ...usedNames(entry.value)]);
     return [...bases, ...fields, ...rest];
   }
   if (raw instanceof DXNSymbol) return [[raw.name, null]];

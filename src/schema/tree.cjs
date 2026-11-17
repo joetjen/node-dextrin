@@ -239,7 +239,7 @@ function symbols(value) {
     // So does its `* K => V` (DXNS.md §4c), whose types are a field's.
     const bases = value.bases.map(([, name]) => name);
     const fields = value.fields.type === 'keyed' ? value.fields.pairs.flatMap(([, v]) => symbols(v)) : value.fields.values.flatMap(symbols);
-    const rest = value.rest ? [...symbols(value.rest.key), ...symbols(value.rest.value)] : [];
+    const rest = value.rest.flatMap((entry) => [...symbols(entry.key), ...symbols(entry.value)]);
     return [...bases, ...fields, ...rest];
   }
   if (value instanceof Map) return Array.from(value.values()).flatMap(symbols);
@@ -304,7 +304,7 @@ function referencesOf(registry, name) {
   // A schema's `* K => V` names types as its fields do (DXNS.md §4c).
   return Array.from(versions.values()).flatMap((c) => {
     const compiled = /** @type {any} */ (c);
-    const extras = compiled.extras && typeof compiled.extras === 'object' ? [compiled.extras.key, compiled.extras.value] : [];
+    const extras = (compiled.extras?.entries ?? []).flat();
     return [...compiled.fields.flatMap((/** @type {any} */ f) => typeReferences(f.type)), ...extras.flatMap(typeReferences)];
   });
 }
@@ -317,7 +317,7 @@ function typeReferences(type) {
       return [type.name];
     case 'shape': {
       // A `* K => V`'s types are referred to as a field's are (DXNS.md §4c).
-      const extras = type.extras && typeof type.extras === 'object' ? [type.extras.key, type.extras.value] : [];
+      const extras = (type.extras?.entries ?? []).flat();
       return [...type.fields.flatMap((/** @type {any} */ f) => typeReferences(f.type)), ...extras.flatMap(typeReferences)];
     }
     case 'case':

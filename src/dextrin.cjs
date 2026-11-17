@@ -214,6 +214,7 @@ const Format = require('./format.cjs');
 const SchemaDocs = require('./schema/docs.cjs');
 const SchemaTree = require('./schema/tree.cjs');
 const SchemaLayout = require('./schema/layout.cjs');
+const JsonSchema = require('./convert/json-schema.cjs');
 
 // One name at a time, not one object: `tsc` declares a class exported
 // this way as a type as well as a value -- `err: DXNError`, `r: Registry`
@@ -236,6 +237,7 @@ module.exports.Format = Format;
 module.exports.SchemaDocs = SchemaDocs;
 module.exports.SchemaTree = SchemaTree;
 module.exports.SchemaLayout = SchemaLayout;
+module.exports.JsonSchema = JsonSchema;
 module.exports.DXNChar = DXNChar;
 module.exports.DXNSymbol = DXNSymbol;
 module.exports.DXNKeyword = DXNKeyword;

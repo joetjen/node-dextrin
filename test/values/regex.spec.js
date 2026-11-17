@@ -32,4 +32,17 @@ describe('DXNRegex', () => {
     expect(new DXNRegex('a+', { i: true }).equals(new DXNRegex('a+', { i: true }))).to.equal(true);
     expect(new DXNRegex('a+', { i: true }).equals(new DXNRegex('a+', { i: false }))).to.equal(false);
   });
+
+  // PCRE's own words for what JavaScript says otherwise (T674: the JSON
+  // Schema converter writes `$` as `\z`, `\uXXXX` as `\x{XXXX}`).
+  it('toRegExp() reads PCRE\'s \\A, \\z, \\Z and \\x{H} as PCRE means them', () => {
+    expect(new DXNRegex('\\Aab\\z').toRegExp().test('ab')).to.equal(true);
+    expect(new DXNRegex('^ab\\z').toRegExp().test('ab\n')).to.equal(false);
+    expect(new DXNRegex('^ab\\Z').toRegExp().test('ab\n')).to.equal(true);
+    expect(new DXNRegex('x\\Ay').toRegExp().test('xy')).to.equal(false);
+    expect(new DXNRegex('^\\x{41}[\\x{42}]$').toRegExp().test('AB')).to.equal(true);
+    expect(new DXNRegex('^\\x{1F600}$').toRegExp().test('\u{1F600}')).to.equal(true);
+    expect(new DXNRegex('^\\p{L}+$').toRegExp().test('é')).to.equal(true);
+    expect(new DXNRegex('[z\\z]').toRegExp().test('z')).to.equal(true);
+  });
 });

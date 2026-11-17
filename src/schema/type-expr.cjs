@@ -216,7 +216,7 @@ function conform(type, value, ctx) {
     case 'primitive':
       return primitiveMatches(type.name, value) ? value : NO;
     case 'shape':
-      return value instanceof Map ? shape(type.fields, type.extras ?? 'open', value, ctx) : NO;
+      return value instanceof Map ? shape(type.fields, type.extras ?? openExtras(), value, ctx) : NO;
     case 'list-of': {
       if (!(value instanceof DXNList)) return NO;
       const items = all(value.items, (v) => conform(type.elem, v, ctx));
@@ -506,44 +506,68 @@ function undeclared(fields, map) {
 }
 
 /**
- * A shape's extras (`DXNS.md` §4c): open ones kept, and refused by a
- * strict decode; closed ones (`- *`) refused; typed ones (`* K => V`)
- * each conformed, key and value.
+ * A shape's extras (`DXNS.md` §4c), each conformed as `extraConformed`
+ * says.
  * @param {import('./compiled.cjs').Extras} extras @param {Array<[unknown, unknown]>} pairs
  * @param {Map<unknown, unknown>} filled @param {Context} ctx @returns {unknown}
  */
 function shapeExtras(extras, pairs, filled, ctx) {
-  if (extras === 'open') return pairs.length > 0 && ctx.registry && ctx.registry.strict ? NO : filled;
-  if (extras === 'closed') return pairs.length > 0 ? NO : filled;
   for (const [key, value] of pairs) {
-    if (conform(extras.key, key, ctx) === NO) return NO;
-    const c = conform(extras.value, value, ctx);
-    if (c === NO) return NO;
-    filled.set(key, c);
+    const c = extraConformed(extras, key, value, ctx);
+    if (c.kind !== 'ok') return NO;
+    filled.set(key, c.value);
   }
   return filled;
+}
+
+/** Extras that say nothing: any extra is kept, and a strict decode refuses it. @returns {import('./compiled.cjs').Extras} */
+function openExtras() {
+  return { entries: [], closed: false };
+}
+
+/**
+ * One extra, `key => value`, against `extras`: its value must match the V
+ * of every entry whose K takes the key, in order, each taking what the
+ * one before answered. A key no entry takes is kept, unless the body is
+ * closed or the decode strict.
+ * @param {import('./compiled.cjs').Extras} extras @param {unknown} key @param {unknown} value @param {Context} ctx
+ * @returns {{kind: 'ok', value: unknown} | {kind: 'closed'} | {kind: 'strict'} | {kind: 'mismatch', type: TypeExpr}}
+ */
+function extraConformed(extras, key, value, ctx) {
+  const matched = extras.entries.filter(([k]) => conform(k, key, ctx) !== NO);
+  if (matched.length === 0) {
+    if (extras.closed) return { kind: 'closed' };
+    if (ctx.registry && ctx.registry.strict) return { kind: 'strict' };
+    return { kind: 'ok', value };
+  }
+  let current = value;
+  for (const [, v] of matched) {
+    const c = conform(v, current, ctx);
+    if (c === NO) return { kind: 'mismatch', type: v };
+    current = c;
+  }
+  return { kind: 'ok', value: current };
 }
 
 /**
  * Why `extras` refuse `pairs`, the `[key, value]`s a struct or map carries
  * that no field declares: `null` when they pass, otherwise `{message,
- * category}`. Open extras take any (a strict decode refuses them
- * elsewhere); closed ones none; typed ones each key matching K and its
- * value V.
+ * category}`. A key some `* K => V` takes must match its V; one none
+ * takes is refused when the body is closed or the decode strict.
  * @param {import('./compiled.cjs').Extras} extras @param {Array<[unknown, unknown]>} pairs @param {Context} ctx
  * @returns {{message: string, category: string} | null}
  */
 function extrasRefusal(extras, pairs, ctx) {
-  if (extras === 'open' || pairs.length === 0) return null;
-  if (extras === 'closed') {
-    return { message: `${shown(pairs[0][0])} is no declared field, and the body is closed (- *)`, category: 'schema/undeclared-field' };
-  }
   for (const [key, value] of pairs) {
-    if (conform(extras.key, key, ctx) === NO) {
-      return { message: `extra key ${shown(key)} does not match the key type of * K => V`, category: 'schema/type-mismatch' };
+    const c = extraConformed(extras, key, value, ctx);
+    if (c.kind === 'closed') {
+      return { message: `${shown(key)} is no declared field, and the body is closed (- *)`, category: 'schema/undeclared-field' };
     }
-    if (conform(extras.value, value, ctx) === NO) {
-      const why = explain(extras.value, value, ctx) ?? 'does not match the value type of * K => V';
+    if (c.kind === 'strict') {
+      return { message: `${shown(key)} is no declared field, and the decode is strict`, category: 'schema/undeclared-field' };
+    }
+    if (c.kind === 'mismatch') {
+      const why = explain(c.type, value, ctx) ?? 'does not match the value type of * K => V';
       return { message: `extra ${shown(key)}: ${why}`, category: 'schema/type-mismatch' };
     }
   }
@@ -596,11 +620,11 @@ function substitute(type, bound) {
     case 'apply':
       return { ...type, args: type.args.map((/** @type {any} */ a) => substitute(a, bound)) };
     case 'shape': {
-      const extras = type.extras;
+      const extras = type.extras ?? openExtras();
       return {
         ...type,
         fields: type.fields.map((/** @type {any} */ f) => Object.assign(Object.create(Object.getPrototypeOf(f)), f, { type: substitute(f.type, bound) })),
-        extras: extras && typeof extras === 'object' ? { key: substitute(extras.key, bound), value: substitute(extras.value, bound) } : extras
+        extras: { ...extras, entries: extras.entries.map((/** @type {[any, any]} */ [k, v]) => [substitute(k, bound), substitute(v, bound)]) }
       };
     }
     case 'case':
@@ -1205,6 +1229,14 @@ function nanosOf(value) {
 
 /** A collection's item count, `null` for a value that is none. @param {unknown} value @returns {number | null} */
 function countOf(value) {
+  // A map's, a shape's or a struct's count is its entries present, extras
+  // included (T674: JSON Schema's minProperties and maxProperties).
+  if (value instanceof Validated) return countOf(value.asRead ?? value.value);
+  if (value instanceof DXNOrderedMap) return value.pairs.length;
+  if (value instanceof DXNStruct) {
+    return (value.fields.type === 'keyed' ? value.fields.pairs.length : value.fields.values.length) + value.extra.length;
+  }
+  if (value instanceof Map) return value.size;
   const items = itemsOf(value);
   return items === null ? null : items.length;
 }
@@ -1412,7 +1444,7 @@ function explain(type, value, ctx) {
       // A struct's value comes wrapped once it is checked; the map is inside.
       const map = value instanceof Validated ? value.value : value;
       if (!(map instanceof Map)) return null;
-      return shapeRefused(type.fields, map, ctx) ?? extrasRefusal(type.extras ?? 'open', undeclared(type.fields, map), ctx)?.message ?? null;
+      return shapeRefused(type.fields, map, ctx) ?? extrasRefusal(type.extras ?? openExtras(), undeclared(type.fields, map), ctx)?.message ?? null;
     }
     default:
       return null;

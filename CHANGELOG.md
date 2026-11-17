@@ -30,10 +30,22 @@ reference:
   default computed in UTC when the field is filled, for date and time
   types.
 - **Sized sugar `:int8`, `:int16`, `:uint8`, `:uint16`** (DXNS.md §1).
-- **Typed and closed extras** (DXNS.md §4c): `* :string => :integer` in
-  a `%schema` or `%shape` body types every extra key and value; `- *`
-  refuses every extra, strict decode or not. Both are inherited from
-  bases.
+- **Typed and closed extras** (DXNS.md §4c): `* K => V` in a `%schema`
+  or `%shape` body types the extras whose key K takes, several entries
+  allowed; `- *` refuses anything beyond the fields and the entries,
+  strict decode or not. Both are inherited from bases.
+- **`min-count` and `max-count` on maps, shapes and structs** (DXNS.md
+  §2): the entries present.
+- **`dextrin from-json-schema`** and `JsonSchema.toDxns`: JSON Schema to
+  DXNS, drafts 04, 06, 07, 2019-09 and 2020-12, and MongoDB's
+  `$jsonSchema` with `bsonType`, as in the reference. It passes the
+  official JSON-Schema-Test-Suite (23.1.0, read from the reference's
+  copy) but for the same 113 of 4,650 required tests the reference
+  lists, each with its reason; what it can't say exactly is reported,
+  and `--strict` refuses it. `JsonSchema.decodeJson` reads JSON with its
+  keys in the order written.
+- **A regex reads PCRE's `\A`, `\z`, `\Z` and `\x{H}`**, and a property
+  (`\p{...}`) in JavaScript's Unicode mode, as PCRE means them.
 - **Deprecation warnings** (DXNS.md §1b): `deprecated:` on a schema, one
   version of it, a named type, a field's type, a variant or an enum
   value now warns -- when a schema that uses it compiles

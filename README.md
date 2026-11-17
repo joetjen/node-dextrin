@@ -226,7 +226,7 @@ validator opts in, and each implements the formats its own way.
 
 JSON Schema's `additionalProperties: false`, Ion Schema's `closed` and
 CDDL's maps refuse a field the schema does not list. DXNS can too --
-`- *` in a body closes it, and `* K => V` types every extra instead
+`- *` in a body closes it, and `* K => V` types the extras K takes
 (DXNS.md §4c) -- but a type is open unless it says so, for two reasons:
 
 - **Closing is mostly the reader's choice, not the type's.** A config
@@ -472,7 +472,20 @@ npx dextrin encode data.dxn --out data.dxnb                         # -> .dxnb b
 npx dextrin format data.dxn --mode pretty|condense [--in-place]
 npx dextrin validate data.dxn [--schema schema.dxns --as Name]
 npx dextrin compat old-schemas/ schemas/                            # changed schemas need new versions
+npx dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
+npx dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] \
+  [--mongo] [--structs] [--assert-formats] [--strict]               # JSON Schema to DXNS
 ```
+
+`from-json-schema` converts JSON Schema -- drafts 04, 06, 07, 2019-09
+and 2020-12, and MongoDB's `$jsonSchema` with `bsonType` -- to one
+`.dxns` document, as `JsonSchema.toDxns(sources, opts)` does in code. The
+first file is the root; a `$ref` to another document resolves among the
+files given and those under `--schemas`, and nothing is fetched. Each
+place it can't say exactly is printed to standard error as
+`inexact: PATH: why`; `--strict` fails on any. The JSON is read with its
+keys in the order written (`JSON.parse` would move integer-like keys
+first), so properties become fields in that order.
 
 ## Guides
 

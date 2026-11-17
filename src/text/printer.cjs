@@ -283,7 +283,7 @@ function printStruct(struct, opts) {
     // A schema's or shape's `- field`s (DXNS.md §4b) come first, then its
     // `* K => V` (§4c), always with the arrow.
     const entries = struct.fields.pairs.map(([name, value]) => printKeywordEntry(name, value, opts));
-    const rest = struct.rest ? [`* ${print(struct.rest.key, opts)} => ${print(struct.rest.value, opts)}`] : [];
+    const rest = struct.rest.map((entry) => `* ${print(entry.key, opts)} => ${print(entry.value, opts)}`);
     return `${head}{${[...struct.dropEntries(), ...rest, ...entries, ...extra].join(',')}}`;
   }
   // A positional struct's items, then its extra fields as entries

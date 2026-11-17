@@ -144,13 +144,12 @@ function layout(value, depth, opts) {
   if (
     value instanceof DXNStruct &&
     value.fields.type === 'keyed' &&
-    (value.fields.pairs.length + value.extra.length + value.drops.length > 0 || value.rest !== null)
+    value.fields.pairs.length + value.extra.length + value.drops.length + value.rest.length > 0
   ) {
     // A schema's or shape's `- field`s (DXNS.md §4b) come first, one a
     // line, then its `* K => V` (§4c), always with the arrow.
     const drops = value.dropEntries().map((entry) => () => entry);
-    const rest = value.rest;
-    const rests = rest ? [(/** @type {number} */ d) => renderRest(rest, d, opts)] : [];
+    const rests = value.rest.map((entry) => (/** @type {number} */ d) => renderRest(entry, d, opts));
     const lines = value.fields.pairs.map(([name, field]) => (/** @type {number} */ d) => renderKeywordEntry(name, field, d, opts));
     return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...drops, ...rests, ...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
   }

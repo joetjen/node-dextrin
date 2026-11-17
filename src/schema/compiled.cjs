@@ -19,7 +19,7 @@ class Compiled {
   /**
    * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}, bases?: import('../values/struct.cjs').Base[], extras?: Extras}} spec
    */
-  constructor({ name = null, version = 1, fields = [], annotations = {}, bases = [], extras = 'open' } = {}) {
+  constructor({ name = null, version = 1, fields = [], annotations = {}, bases = [], extras = { entries: [], closed: false } } = {}) {
     this.name = name;
     this.version = version;
     this.fields = fields;
@@ -38,9 +38,8 @@ class Compiled {
      */
     this.bases = bases;
     /**
-     * What it takes beyond its fields (DXNS.md §4c): any extra
-     * (`'open'`), none (`'closed'`, `- *`), or those whose key and value
-     * match a type each (`{key, value}`, `* K => V`).
+     * What it takes beyond its fields (DXNS.md §4c): its `* K => V`
+     * entries, `[K, V]` each in order, and whether `- *` closes it.
      * @type {Extras}
      */
     this.extras = extras;
@@ -78,7 +77,7 @@ class Compiled {
 }
 
 /**
- * @typedef {'open' | 'closed' | {key: import('./type-expr.cjs').TypeExpr, value: import('./type-expr.cjs').TypeExpr}} Extras
+ * @typedef {{entries: Array<[import('./type-expr.cjs').TypeExpr, import('./type-expr.cjs').TypeExpr]>, closed: boolean}} Extras
  *   What a schema or shape takes beyond its fields (DXNS.md §4c).
  */
 

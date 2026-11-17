@@ -66,8 +66,15 @@ describe('G1: typed and closed extras', () => {
       const r = registry(rest);
       expect(takes(r, 'Tags', '%{name: "a", "x" => 1, "y" => 2}')).to.equal(true);
       expect(takes(r, 'Tags', '%{name: "a", "x" => "one"}')).to.equal(false);
-      expect(takes(r, 'Tags', '%{name: "a", :x => 1}')).to.equal(false);
       expect(takes(r, 'Tags', '%{name: "a"}')).to.equal(true);
+    });
+
+    // A key K does not take is no business of the entry (T674); `- *`
+    // beside it refuses such a key, as a lone `* K => V` did until then.
+    it('a key K does not take is kept, unless - * stands beside it', () => {
+      expect(takes(registry(rest), 'Tags', '%{name: "a", :x => 1}')).to.equal(true);
+      const r = registry('%{T: %shape{name: :string * :string => :integer - *}}');
+      expect(takes(r, 'T', '%{name: "a", :x => 1}')).to.equal(false);
     });
 
     it('a declared field is no extra, whatever the rest says', () => {
@@ -112,8 +119,46 @@ describe('G1: typed and closed extras', () => {
       expect(category(() => decode('%Pin{at: %{x: 1, y: 2}, note: 1}', { registry: r }))).to.equal('schema/undeclared-field');
     });
 
-    it('- * does not go with * K => V', () => {
-      expect(compileError('%{P: %shape{x: :integer - * * :string => :any}}')).to.include('* K => V');
+    // Until T674 (2026-11-17) a body had one `* K => V` at most, and not
+    // beside `- *`. JSON Schema's patternProperties needs several, and
+    // additionalProperties: false beside them.
+    it('beside entries, - * refuses only what no entry takes', () => {
+      const r = registry('%{P: %shape{x: :integer * {:refine :string %{pattern: @regex "^x-"}} => :integer - *}}');
+      expect(takes(r, 'P', '%{x: 1, "x-a" => 2}')).to.equal(true);
+      expect(takes(r, 'P', '%{x: 1, "x-a" => "two"}')).to.equal(false);
+      expect(takes(r, 'P', '%{x: 1, "y" => 2}')).to.equal(false);
+    });
+  });
+
+  describe('several * K => V', () => {
+    const several = `
+      %{
+        P: %shape{
+          * {:refine :string %{pattern: @regex "^a"}} => :integer
+          * {:refine :string %{pattern: @regex "b$"}} => {:refine :integer %{min: 10}}
+        }
+      }`;
+
+    it('a key matches the V of every entry whose K takes it', () => {
+      const r = registry(several);
+      expect(takes(r, 'P', '%{"a" => 1, "b" => 10, "ab" => 12}')).to.equal(true);
+      expect(takes(r, 'P', '%{"ab" => 3}')).to.equal(false);
+      expect(takes(r, 'P', '%{"b" => 3}')).to.equal(false);
+    });
+
+    it('a key no entry takes is kept, unless the body is closed or the decode strict', () => {
+      const r = registry(several);
+      expect(takes(r, 'P', '%{"zzz" => "anything"}')).to.equal(true);
+      const strict = r.putStrict(true);
+      expect(takes(strict, 'P', '%{"zzz" => 1}')).to.equal(false);
+      expect(takes(strict, 'P', '%{"a" => 1}')).to.equal(true);
+    });
+
+    it("a struct's extras follow the same rule", () => {
+      const r = registry('%{C: %schema{n: :integer * {:refine :string %{pattern: @regex "^x"}} => :integer - *}}');
+      expect(() => decode('%C{n: 1, "xa" => 2}', { registry: r })).not.to.throw();
+      expect(category(() => decode('%C{n: 1, "xa" => "s"}', { registry: r }))).to.equal('schema/type-mismatch');
+      expect(category(() => decode('%C{n: 1, "ya" => 2}', { registry: r }))).to.equal('schema/undeclared-field');
     });
   });
 
@@ -146,8 +191,11 @@ describe('G1: typed and closed extras', () => {
       expect(message(() => decode('%{P: %shape{x: :integer - * - *}}'))).to.include('once');
     });
 
-    it('a body takes one * K => V at most', () => {
-      expect(message(() => decode('%shape{* :string => :any * :keyword => :any}'))).to.include('once');
+    it('several entries are written back in their order', () => {
+      const doc = decode('%{P: %shape{* :string => :any * :keyword => :integer - *}}');
+      const printed = encode(doc);
+      expect(printed).to.match(/\* :string => :any.*\* :keyword => :integer/);
+      expect(dxnEquals(decode(printed), doc)).to.equal(true);
     });
   });
 

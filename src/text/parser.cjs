@@ -411,7 +411,6 @@ class Parser {
       /** @type {import('../values/struct.cjs').Rest[]} */
       const rests = [];
       const entries = this.parseEntries(true, drops, rests);
-      if (rests.length > 1) throw new ParseError('a body types its extras (* K => V) once at most', nameTok.start);
       if (drops.filter((field) => field === '*').length > 1) throw new ParseError('a body is closed (- *) once at most', nameTok.start);
       if (drops.length > 0 && !BUILDABLE.has(name)) {
         throw new ParseError(`only a %schema or a %shape drops a field (- name); %${name} does not`, nameTok.start);
@@ -419,7 +418,7 @@ class Parser {
       if (rests.length > 0 && !BUILDABLE.has(name)) {
         throw new ParseError(`only a %schema or a %shape types its extras (* K => V); %${name} does not`, nameTok.start);
       }
-      const rest = rests.length > 0 ? rests[0] : null;
+      const rest = rests;
       checkPairs(entries);
       /** @type {Array<[string, unknown]>} */
       const pairs = [];
@@ -429,7 +428,7 @@ class Parser {
         if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
         else extra.push([key, value]);
       }
-      if (bases.length > 0 || drops.length > 0 || rest !== null) return new DXNStruct(name, { type: 'keyed', pairs }, version, extra, bases, drops, rest);
+      if (bases.length > 0 || drops.length > 0 || rest.length > 0) return new DXNStruct(name, { type: 'keyed', pairs }, version, extra, bases, drops, rest);
       return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra, start);
     }
     const { values, extra } = this.parsePositionalBody();

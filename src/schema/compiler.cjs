@@ -211,33 +211,40 @@ function builtEntry(entry, built, known) {
  */
 
 /**
- * What a schema or shape takes beyond its fields (`DXNS.md` §4c): any
- * extra (`'open'`), none (`'closed'`, `- *`), or those whose key and
- * value match a type each (`{key, value}`, `* K => V`).
+ * What a schema or shape takes beyond its fields (`DXNS.md` §4c): its
+ * `* K => V` entries, `[K, V]` each in order, and whether `- *` closes
+ * it. A key no field declares matches the V of every entry whose K takes
+ * it; a key no entry takes is kept, unless the body is closed.
  * @typedef {import('./compiled.cjs').Extras} Extras
  */
 
+/** Extras that say nothing: any extra is kept, and a strict decode refuses it. @returns {Extras} */
+function openExtras() {
+  return { entries: [], closed: false };
+}
+
 /**
- * `extras` with the types of a `* K => V` resolved, as a field's are.
+ * `extras` with the types of its `* K => V` entries resolved, as a
+ * field's are.
  * @param {Extras} extras @param {Map<string, any>} known @param {string[]} path @returns {Extras}
  */
 function resolvedExtras(extras, known, path) {
-  if (typeof extras === 'string') return extras;
-  return { key: resolved(extras.key, known, path), value: resolved(extras.value, known, path) };
+  return { ...extras, entries: extras.entries.map(([k, v]) => /** @type {[any, any]} */ ([resolved(k, known, path), resolved(v, known, path)])) };
 }
 
 /**
  * What a `%schema`'s or `%shape`'s own body says of its extras (`DXNS.md`
- * §4c): `'closed'` for `- *`, `{key, value}` for `* K => V` compiled in
- * `scope`, `null` when it says nothing. Saying both is refused.
+ * §4c): its `* K => V` entries compiled in `scope`, and whether `- *`
+ * closes it; `null` when it says nothing.
  * @param {DXNStruct} raw @param {Map<string, unknown>} scope @returns {Extras | null}
  */
 function ownExtras(raw, scope) {
   const closed = raw.drops.includes('*');
-  if (closed && raw.rest) throw new SchemaCompileError('a body is closed (- *) or types its extras (* K => V), not both');
-  if (closed) return 'closed';
-  if (!raw.rest) return null;
-  return { key: compileTypeExpr(raw.rest.key, scope), value: compileTypeExpr(raw.rest.value, scope) };
+  if (raw.rest.length === 0 && !closed) return null;
+  return {
+    entries: raw.rest.map((entry) => /** @type {[any, any]} */ ([compileTypeExpr(entry.key, scope), compileTypeExpr(entry.value, scope)])),
+    closed
+  };
 }
 
 /**
@@ -480,12 +487,12 @@ function mergedExtras(name, found, own, ownExtras, known) {
   /** @type {Extras[]} */
   const said = [];
   for (const base of found) {
-    if (base.extras === 'open') continue;
+    if (dxnEquals(base.extras, openExtras())) continue;
     const inPlaceExtras = inPlace(base.extras, known, []);
     if (!said.some((other) => dxnEquals(inPlace(other, known, []), inPlaceExtras))) said.push(base.extras);
   }
-  const closedBase = found.find((b) => b.kind === 'extends' && b.extras === 'closed');
-  if (closedBase && (addedFields(own, closedBase).length > 0 || (ownExtras !== null && ownExtras !== 'closed'))) {
+  const closedBase = found.find((b) => b.kind === 'extends' && b.extras.closed);
+  if (closedBase && (addedFields(own, closedBase).length > 0 || (ownExtras !== null && !dxnEquals(ownExtras, closedBase.extras)))) {
     throw new SchemaCompileError(
       `${JSON.stringify(name)} extends ${closedBase.name}, which is closed (- *): ` +
         `it adds no field and no extras, or includes ${closedBase.name} instead`
@@ -495,7 +502,7 @@ function mergedExtras(name, found, own, ownExtras, known) {
   if (said.length > 1) {
     throw new SchemaCompileError(`${JSON.stringify(name)}: its bases differ in their extras (- * or * K => V); say which in its body`);
   }
-  return said.length === 1 ? said[0] : 'open';
+  return said.length === 1 ? said[0] : openExtras();
 }
 
 /**
@@ -732,7 +739,7 @@ function loadedBase(base, version, registry) {
  * @param {any} type @returns {ShapeBody | null}
  */
 function shapeBody(type) {
-  if (type && type.form === 'shape') return { fields: type.fields, extras: type.extras ?? 'open' };
+  if (type && type.form === 'shape') return { fields: type.fields, extras: type.extras ?? openExtras() };
   if (type && type.form === 'doc') return shapeBody(type.elem);
   return null;
 }
@@ -1069,7 +1076,7 @@ function resolved(type, known, path) {
       return {
         ...type,
         fields: type.fields.map((/** @type {Field} */ f) => new Field({ ...f, default: f.default, type: resolved(f.type, known, path) })),
-        extras: resolvedExtras(type.extras ?? 'open', known, path)
+        extras: resolvedExtras(type.extras ?? openExtras(), known, path)
       };
     case 'case':
       return {
@@ -1239,7 +1246,7 @@ function compileEntry(entry, aliases) {
   });
   distinctNames(fields);
   casesNameFields(entry.fields.pairs, fields);
-  return new Compiled({ version: entry.version ?? 1, fields, extras: ownExtras(entry, aliases) ?? 'open' });
+  return new Compiled({ version: entry.version ?? 1, fields, extras: ownExtras(entry, aliases) ?? openExtras() });
 }
 
 /** @param {Field[]} fields */
@@ -1439,7 +1446,7 @@ function compileTypeExpr(value, aliases) {
     });
     distinctNames(fields);
     casesNameFields(pairs, fields);
-    return { form: 'shape', name: null, fields, extras: ownExtras(value, aliases) ?? 'open' };
+    return { form: 'shape', name: null, fields, extras: ownExtras(value, aliases) ?? openExtras() };
   }
 
   if (value instanceof DXNTuple) {
@@ -1970,7 +1977,7 @@ function normalizeKeywords(value) {
         ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, normalizeKeywords(v)]) })
         : value.withFields({ type: 'positional', values: value.fields.values.map(normalizeKeywords) });
     // A `* K => V`'s types are written as a field's are (DXNS.md §4c).
-    if (value.rest) normalized.rest = { key: normalizeKeywords(value.rest.key), value: normalizeKeywords(value.rest.value) };
+    normalized.rest = value.rest.map((entry) => ({ key: normalizeKeywords(entry.key), value: normalizeKeywords(entry.value) }));
     return normalized;
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, normalizeKeywords(value.value));

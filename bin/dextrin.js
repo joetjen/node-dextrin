@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * @fileoverview `dextrin` CLI — one executable, seven subcommands
- * (`decode`, `encode`, `format`, `validate`, `compat`, `docs`, `conformance`), the JS analog of
+ * @fileoverview `dextrin` CLI — one executable, nine subcommands
+ * (`decode`, `encode`, `format`, `validate`, `compat`, `check`, `docs`,
+ * `from-json-schema`, `conformance`), the JS analog of
  * `dextrin`'s `mix dextrin.*` tasks. One bin with subcommands rather
  * than a separate script per task, matching how Node CLIs are
  * conventionally shaped (`git <subcommand>`), not a mechanical
@@ -27,7 +28,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document, SchemaDocs, SchemaTree } from '../src/dextrin.js';
+import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document, SchemaDocs, SchemaTree, JsonSchema } from '../src/dextrin.js';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -42,6 +43,9 @@ Commands:
   check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]
                                                 Check a tree of .dxns schemas: syntax, compiling, layout and names
   docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
+  from-json-schema SCHEMA... [--out FILE] [--name N] [--schemas DIR] [--draft D]
+                   [--mongo] [--structs] [--assert-formats] [--strict]
+                                                Convert JSON Schema (and MongoDB's $jsonSchema) to DXNS
   conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
@@ -64,6 +68,8 @@ function main(argv) {
       return run(() => cmdDocs(rest));
     case 'check':
       return run(() => cmdCheck(rest));
+    case 'from-json-schema':
+      return run(() => cmdFromJsonSchema(rest));
     case 'conformance':
       return run(() => cmdConformance(rest));
     default:
@@ -230,6 +236,57 @@ function cmdCheck(argv) {
   }
   for (const p of result.problems) console.error(`${p.file}:${p.line}: ${p.message}`);
   throw new Error(`${result.problems.length} problem(s)`);
+}
+
+/**
+ * `dextrin from-json-schema SCHEMA... [options]`: JSON Schema to DXNS, as
+ * `mix dextrin.from_json_schema` converts it (dextrin's
+ * design/json-schema.md). The first file is the root. A `$ref` to another
+ * document is resolved among the files given and those under `--schemas
+ * DIR`, by `$id` or by relative path; nothing is fetched. Whatever is not
+ * exact is printed to standard error as `inexact: PATH: why`, and kept in
+ * the type's `meta` where it applies; `--strict` fails on it.
+ * @param {string[]} argv
+ */
+function cmdFromJsonSchema(argv) {
+  const { positional, flags, options } = parseArgs(argv, {
+    flags: ['mongo', 'structs', 'assert-formats', 'strict'],
+    options: ['out', 'name', 'draft', 'schemas']
+  });
+  if (positional.length === 0) throw new Error('usage: dextrin from-json-schema SCHEMA... [--out FILE] [options]');
+  const files = [...positional, ...jsonUnder(options.schemas, positional)];
+  /** @type {Array<[string, string]>} */
+  const sources = files.map((file) => [file, readFileSync(file, 'utf8')]);
+  /** @type {{name?: string, draft?: string, mongo?: boolean, structs?: boolean, assertFormats?: boolean}} */
+  const convertOpts = {};
+  if (options.name !== undefined) convertOpts.name = options.name;
+  if (options.draft !== undefined) convertOpts.draft = options.draft;
+  if (flags.mongo) convertOpts.mongo = true;
+  if (flags.structs) convertOpts.structs = true;
+  if (flags['assert-formats']) convertOpts.assertFormats = true;
+  const { document, inexact } = JsonSchema.toDxns(sources, convertOpts);
+  for (const { path, why } of inexact) console.error(`inexact: ${path}: ${why}`);
+  if (flags.strict && inexact.length > 0) throw new Error(`${inexact.length} place(s) not exact, and --strict`);
+  const text = encode(document, { pretty: true }) + '\n';
+  if (options.out) {
+    writeFileSync(options.out, text);
+    console.log(`wrote ${options.out}`);
+  } else {
+    process.stdout.write(text);
+  }
+}
+
+/**
+ * Every `.json` file under `dir`, sorted, but those given already.
+ * @param {string | undefined} dir @param {string[]} given @returns {string[]}
+ */
+function jsonUnder(dir, given) {
+  if (dir === undefined) return [];
+  return /** @type {string[]} */ (readdirSync(dir, { recursive: true }))
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => join(dir, file))
+    .sort()
+    .filter((file) => !given.includes(file));
 }
 
 /** @param {string[]} argv */

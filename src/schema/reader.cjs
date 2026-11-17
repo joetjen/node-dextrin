@@ -135,7 +135,7 @@ function unupgraded(registry, older, version, fields, given) {
  * @param {Array<[unknown, unknown]>} extra
  */
 function strictly(registry, reading, extra) {
-  if (registry.strict && reading.extras === 'open' && extra.length > 0) {
+  if (registry.strict && reading.extras.entries.length === 0 && !reading.extras.closed && extra.length > 0) {
     throw new DXNError(
       `struct ${JSON.stringify(reading.name)} carries ${JSON.stringify(String(extra[0][0]))}, which its schema does not declare`,
       { stage: 'schema', category: 'schema/undeclared-field' }

@@ -163,7 +163,7 @@ function struct(value) {
   // then its `* K => V` (§4c), always with the arrow.
   if (fields.type === 'keyed') {
     const written = [...fields.pairs, ...value.extra].map(([key, field]) => entry(key, field));
-    const rest = value.rest ? [`* ${text(value.rest.key)} => ${text(value.rest.value)}`] : [];
+    const rest = value.rest.map((entry) => `* ${text(entry.key)} => ${text(entry.value)}`);
     return `${value.opening()}{${[...value.dropEntries(), ...rest, ...written].join(' ')}}`;
   }
   const byKey = new Map(value.extra.map(([key, field]) => [text(key), entry(key, field)]));

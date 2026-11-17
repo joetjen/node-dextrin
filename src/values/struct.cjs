@@ -29,9 +29,10 @@ const { dxnEquals, dxnCompare } = require('./equality.cjs');
  * (`DXNS.md` §4b): `bases` the head's `extends` and `includes` names, as
  * `[kind, name, version]` in the order written (`version` `null` when the
  * head names none), and `drops` the body's `- field` names, `"*"` for
- * `- *` (closed, `DXNS.md` §4c). `rest` is the body's `* K => V`, as
- * `{key, value}`, the type of its extras; `null` when it has none. Every
- * other struct has none of these; the schema compiler reads them.
+ * `- *` (closed, `DXNS.md` §4c). `rest` is the body's `* K => V`
+ * entries, `{key, value}` each in the order written: what its extras must
+ * be. Every other struct has none of these; the schema compiler reads
+ * them.
  */
 class DXNStruct {
   /**
@@ -41,9 +42,9 @@ class DXNStruct {
    * @param {Array<[unknown, unknown]>} [extra]
    * @param {Base[]} [bases]
    * @param {string[]} [drops]
-   * @param {Rest | null} [rest]
+   * @param {Rest[]} [rest]
    */
-  constructor(name, fields, version = null, extra = [], bases = [], drops = [], rest = null) {
+  constructor(name, fields, version = null, extra = [], bases = [], drops = [], rest = []) {
     if (typeof name !== 'string') throw new TypeError('DXNStruct name must be a string');
     this.name = name;
     this.fields = fields;
@@ -55,7 +56,7 @@ class DXNStruct {
     this.bases = bases;
     /** @type {string[]} */
     this.drops = drops;
-    /** @type {Rest | null} */
+    /** @type {Rest[]} */
     this.rest = rest;
   }
 
@@ -89,7 +90,7 @@ class DXNStruct {
    * @returns {boolean}
    */
   isSchemaSyntax() {
-    return this.bases.length > 0 || this.drops.length > 0 || this.rest !== null;
+    return this.bases.length > 0 || this.drops.length > 0 || this.rest.length > 0;
   }
 
   /**
