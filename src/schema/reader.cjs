@@ -36,6 +36,7 @@ const { canonical } = require('../canonical.cjs');
 const DXNStruct = require('../values/struct.cjs');
 const Validated = require('./validated.cjs');
 const Validator = require('./validator.cjs');
+const Deprecations = require('./deprecations.cjs');
 
 /**
  * @typedef {{type: 'keyed', pairs: Array<[string, unknown]>} | {type: 'positional', values: unknown[]}} Fields
@@ -55,6 +56,23 @@ const Validator = require('./validator.cjs');
  * @returns {{value: unknown, registry: import('../registry.cjs')} | null}
  */
 function read(registry, name, version, fields, extra = []) {
+  const result = byVersion(registry, name, version, fields, extra);
+  // Data written with a deprecated version, or of a deprecated schema,
+  // warns once it is read (DXNS.md §1b).
+  if (result) Deprecations.structUsed(result.registry, name, version);
+  return result;
+}
+
+/**
+ * `read`, before what it reads is reported deprecated.
+ * @param {import('../registry.cjs')} registry
+ * @param {string} name
+ * @param {number | null} version
+ * @param {Fields} fields
+ * @param {Array<[unknown, unknown]>} extra
+ * @returns {{value: unknown, registry: import('../registry.cjs')} | null}
+ */
+function byVersion(registry, name, version, fields, extra) {
   const found = registry.fetchStructSchema(name);
   if (!found) return null;
   const latest = found.compiled;
@@ -70,14 +88,59 @@ function read(registry, name, version, fields, extra = []) {
       category: 'schema/unknown-version'
     });
   }
-  if (!current.fetchMaterializer(name)) {
+  if (!current.fetchMaterializer(name)) return unupgraded(current, older.compiled, version, fields, extra);
+  return materialized(current, older.compiled, latest, fields, extra);
+}
+
+/**
+ * A struct of an older `version`, with no materializer to upgrade it:
+ * refused, unless a field pinned to that version takes it as read
+ * (`DXNS.md` §5c). The refusal travels with it, in a `Validated` holding
+ * no value, and stands otherwise. A struct that cannot even be read as
+ * written meets the refusal at once: it is the one it would have met
+ * first.
+ * @param {import('../registry.cjs')} registry
+ * @param {import('./compiled.cjs')} older
+ * @param {number} version
+ * @param {Fields} fields
+ * @param {Array<[unknown, unknown]>} given
+ * @returns {{value: unknown, registry: import('../registry.cjs')}}
+ */
+function unupgraded(registry, older, version, fields, given) {
+  const name = /** @type {string} */ (older.name);
+  const refused = new DXNError(
+    `struct ${JSON.stringify(name)} was written with the older version ${version}, ` +
+      'and no materializer is registered to upgrade it',
+    { stage: 'schema', category: 'schema/no-materializer' }
+  );
+  let asRead;
+  try {
+    const separated = separate(older, fields, given);
+    strictly(registry, older, separated.extra);
+    Validator.extras(older, separated.extra, registry);
+    const pairs = Validator.resolve(older, separated.fields, registry);
+    asRead = DXNStruct.keyed(name, pairs, version, separated.extra);
+  } catch {
+    throw refused;
+  }
+  return { value: new Validated(name, null, [], { version, asRead, refused }), registry };
+}
+
+/**
+ * Refuses the extra fields of a strict decode, when `reading`'s extras
+ * are open; closed or typed ones say themselves which they take
+ * (`DXNS.md` §4c).
+ * @param {import('../registry.cjs')} registry
+ * @param {import('./compiled.cjs')} reading
+ * @param {Array<[unknown, unknown]>} extra
+ */
+function strictly(registry, reading, extra) {
+  if (registry.strict && reading.extras === 'open' && extra.length > 0) {
     throw new DXNError(
-      `struct ${JSON.stringify(name)} was written with the older version ${version}, ` +
-        'and no materializer is registered to upgrade it',
-      { stage: 'schema', category: 'schema/no-materializer' }
+      `struct ${JSON.stringify(reading.name)} carries ${JSON.stringify(String(extra[0][0]))}, which its schema does not declare`,
+      { stage: 'schema', category: 'schema/undeclared-field' }
     );
   }
-  return materialized(current, older.compiled, latest, fields, extra);
 }
 
 /**
@@ -114,18 +177,20 @@ function forward(latest, fields) {
 function materialized(registry, reading, latest, fields, given) {
   const name = /** @type {string} */ (reading.name);
   const separated = separate(reading, fields, given);
-  if (registry.strict && separated.extra.length > 0) {
-    throw new DXNError(
-      `struct ${JSON.stringify(name)} carries ${JSON.stringify(String(separated.extra[0][0]))}, which its schema does not declare`,
-      { stage: 'schema', category: 'schema/undeclared-field' }
-    );
-  }
+  strictly(registry, reading, separated.extra);
+  Validator.extras(reading, separated.extra, registry);
   const pairs = Validator.resolve(reading, separated.fields, registry);
   const materializer = registry.fetchMaterializer(name);
   const value = materializer
     ? built(registry, materializer, reading, latest, pairs, separated.extra)
     : DXNStruct.keyed(name, pairs, latest.version, separated.extra);
-  return { value: new Validated(name, value, Validator.alsoValidAs(reading, separated.fields, registry)), registry };
+  // The struct as `reading` reads it, for a field pinned to that version
+  // (DXNS.md §5c).
+  const asRead = DXNStruct.keyed(name, pairs, reading.version, separated.extra);
+  return {
+    value: new Validated(name, value, Validator.alsoValidAs(reading, separated.fields, registry), { version: reading.version, asRead }),
+    registry
+  };
 }
 
 /**

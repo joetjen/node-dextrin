@@ -210,9 +210,12 @@ function encodePairs(pairs, opts) {
  */
 function encodeStruct(value, opts) {
   // A `%schema` or `%shape` built from others (DXNS.md §4b) is text only:
-  // `.dxnb` has no place for its head's clauses or its `- field`s.
-  if (value.isBuilt()) {
-    const err = new TypeError(`a %${value.name} built from others (extends, includes, - field) has no .dxnb form`);
+  // `.dxnb` has no place for its head's clauses or its `- field`s. So is
+  // one that is closed (`- *`) or types its extras (`* K => V`, §4c).
+  if (value.isSchemaSyntax()) {
+    const err = new TypeError(
+      `a %${value.name} built from others (extends, includes, - field), closed (- *) or with typed extras (* K => V) has no .dxnb form`
+    );
     /** @type {any} */ (err).category = 'encode/unsupported';
     throw err;
   }
@@ -244,7 +247,10 @@ function encodeStruct(value, opts) {
  */
 function positionalValues(value, registry) {
   if (value.fields.type === 'positional') return value.fields.values;
-  const found = registry?.fetchStructSchema(value.name);
+  // In the field order of the version it is written at (`Registry#asWritten`):
+  // its own when loaded, as a field pinned to it needs (DXNS.md §5c).
+  const written = registry ? registry.asWritten(value) : value;
+  const found = written.version === null ? registry?.fetchStructSchema(value.name) : registry?.fetchStructSchema(value.name, written.version);
   if (!found) return value.fields.pairs.map(([, v]) => v);
   const named = new Map(value.fields.pairs);
   return found.compiled.fields.map((field) => {

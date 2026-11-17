@@ -76,7 +76,12 @@ function text(value) {
   if (value instanceof DXNBytes) return '@bytes ' + quoted(Buffer.from(value.data).toString('base64'));
   if (value instanceof DXNBits) return '@bits {' + quoted(Buffer.from(value.data).toString('base64')) + ' ' + value.bitLength + '}';
   if (value instanceof DXNList) return '[' + value.items.map(text).join(' ') + ']';
-  if (value instanceof DXNTuple) return '{' + value.items.map(text).join(' ') + '}';
+  if (value instanceof DXNTuple) {
+    // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+    const pinned = DXNTuple.pinned(value);
+    if (pinned) return DXNTuple.pinnedText(pinned.name, pinned.version);
+    return '{' + value.items.map(text).join(' ') + '}';
+  }
   if (Array.isArray(value)) return '@array[' + value.map(text).join(' ') + ']';
   if (value instanceof Set) return '@{' + sorted(Array.from(value).map(text)).join(' ') + '}';
   if (value instanceof DXNSortedSet) return '@sorted-set @{' + sorted(value.items.map(text)).join(' ') + '}';
@@ -154,10 +159,12 @@ function struct(value) {
   // A keyed struct's extra fields follow its declared ones in the order
   // they were written; a positional struct's follow its items in
   // canonical order of their keys (DXN.md §1.5).
-  // A schema's or shape's `- field`s (DXNS.md §4b) come before its fields.
+  // A schema's or shape's `- field`s (DXNS.md §4b) come before its fields,
+  // then its `* K => V` (§4c), always with the arrow.
   if (fields.type === 'keyed') {
     const written = [...fields.pairs, ...value.extra].map(([key, field]) => entry(key, field));
-    return `${value.opening()}{${[...value.dropEntries(), ...written].join(' ')}}`;
+    const rest = value.rest ? [`* ${text(value.rest.key)} => ${text(value.rest.value)}`] : [];
+    return `${value.opening()}{${[...value.dropEntries(), ...rest, ...written].join(' ')}}`;
   }
   const byKey = new Map(value.extra.map(([key, field]) => [text(key), entry(key, field)]));
   const extras = sorted([...byKey.keys()]).map((key) => /** @type {string} */ (byKey.get(key)));

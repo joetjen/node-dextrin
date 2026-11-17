@@ -276,8 +276,16 @@ function columns(text) {
 
 /** @param {Doc} doc @param {SyntaxNode} node @param {string} indent @param {Ctx} ctx @returns {string} */
 function item(doc, node, indent, ctx) {
-  // `- password`: an inherited field left out (DXNS.md §4b).
+  // `- password`: an inherited field left out (DXNS.md §4b); `- *`, a
+  // closed body (§4c).
   if (node.kind === 'drop') return `- ${tokensText(doc, node.last, node.last)}`;
+  // `* K => V`: the type of a body's extras (DXNS.md §4c).
+  if (node.kind === 'rest') {
+    const [key, value] = node.children.filter((c) => c.kind === 'value');
+    const gap = doc.source.slice(end(doc, key), start(doc, value));
+    const render = (/** @type {string} */ deeper, /** @type {Ctx} */ at) => valueText(doc, value, deeper, at);
+    return between(`* ${valueText(doc, key, indent, ctx)} =>`, commentsIn(gap), render, indent, ctx);
+  }
   if (node.kind !== 'entry') return valueText(doc, node, indent, ctx);
   const values = node.children.filter((c) => c.kind === 'value');
   const value = values[values.length - 1];

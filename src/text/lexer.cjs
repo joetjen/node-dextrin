@@ -257,6 +257,11 @@ function tokenize(src) {
       // digit, "-" is a number's sign instead, one token with it.
       i += 1;
       tokens.push({ type: 'MINUS', value: '-', start, end: i });
+    } else if (c === '*') {
+      // `- *` closes a `%schema`'s or `%shape`'s body, and `* K => V`
+      // types its extras (DXNS.md §4c); `*` begins nothing else in DXN.
+      i += 1;
+      tokens.push({ type: 'STAR', value: '*', start, end: i });
     } else if (ID_START.test(c)) {
       const name = readIdentifierRun();
       if (src[i] === ':') {

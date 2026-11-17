@@ -119,6 +119,9 @@ function layout(value, depth, opts) {
     return bracketed('[', value.items, ']', depth, opts);
   }
   if (value instanceof DXNTuple && value.items.length > 0) {
+    // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+    const pinned = DXNTuple.pinned(value);
+    if (pinned) return DXNTuple.pinnedText(pinned.name, pinned.version);
     return bracketed('{', value.items, '}', depth, opts);
   }
   if (value instanceof Set) {
@@ -138,11 +141,18 @@ function layout(value, depth, opts) {
     checkPairs(value.entries());
     return bracketedEntries('%{', Array.from(value.entries()), '}', depth, opts);
   }
-  if (value instanceof DXNStruct && value.fields.type === 'keyed' && value.fields.pairs.length + value.extra.length + value.drops.length > 0) {
-    // A schema's or shape's `- field`s (DXNS.md §4b) come first, one a line.
+  if (
+    value instanceof DXNStruct &&
+    value.fields.type === 'keyed' &&
+    (value.fields.pairs.length + value.extra.length + value.drops.length > 0 || value.rest !== null)
+  ) {
+    // A schema's or shape's `- field`s (DXNS.md §4b) come first, one a
+    // line, then its `* K => V` (§4c), always with the arrow.
     const drops = value.dropEntries().map((entry) => () => entry);
+    const rest = value.rest;
+    const rests = rest ? [(/** @type {number} */ d) => renderRest(rest, d, opts)] : [];
     const lines = value.fields.pairs.map(([name, field]) => (/** @type {number} */ d) => renderKeywordEntry(name, field, d, opts));
-    return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...drops, ...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
+    return `${Printer.writtenHead(value, opts)}${bracketedLines('{', [...drops, ...rests, ...lines, ...extraLines(value, opts)], '}', depth, opts)}`;
   }
   if (value instanceof DXNStruct && value.fields.type === 'positional' && value.fields.values.length + value.extra.length > 0) {
     // A positional struct's items, then its extra fields as entries, one
@@ -268,6 +278,18 @@ function bracketedKeywordEntries(open, pairs, close, depth, opts) {
 function renderKeywordEntry(name, value, depth, opts) {
   const prefix = Printer.isBareIdentifier(name) ? `${name}: ` : `:${Printer.quoteString(name)} => `;
   return prefix + render(value, depth, keyedRoom(opts, depth, prefix));
+}
+
+/**
+ * `* K => V`: the type of a body's extras (`DXNS.md` §4c), always with
+ * the arrow.
+ * @param {import('../values/struct.cjs').Rest} rest
+ * @param {number} depth
+ * @param {Opts} opts
+ */
+function renderRest(rest, depth, opts) {
+  const prefix = `* ${Printer.print(rest.key, opts)} => `;
+  return prefix + render(rest.value, depth, keyedRoom(opts, depth, prefix));
 }
 
 /**

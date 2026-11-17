@@ -236,9 +236,11 @@ function symbols(value) {
   if (value instanceof DXNStruct) {
     // A schema or shape built from others needs its bases too (DXNS.md
     // §4b), named in its head rather than in its fields.
+    // So does its `* K => V` (DXNS.md §4c), whose types are a field's.
     const bases = value.bases.map(([, name]) => name);
     const fields = value.fields.type === 'keyed' ? value.fields.pairs.flatMap(([, v]) => symbols(v)) : value.fields.values.flatMap(symbols);
-    return [...bases, ...fields];
+    const rest = value.rest ? [...symbols(value.rest.key), ...symbols(value.rest.value)] : [];
+    return [...bases, ...fields, ...rest];
   }
   if (value instanceof Map) return Array.from(value.values()).flatMap(symbols);
   return [];
@@ -299,7 +301,12 @@ function referencesOf(registry, name) {
   if (alias) return typeReferences(alias);
   const versions = registry.structs.get(name);
   if (!versions) return [];
-  return Array.from(versions.values()).flatMap((c) => /** @type {any} */ (c).fields.flatMap((/** @type {any} */ f) => typeReferences(f.type)));
+  // A schema's `* K => V` names types as its fields do (DXNS.md §4c).
+  return Array.from(versions.values()).flatMap((c) => {
+    const compiled = /** @type {any} */ (c);
+    const extras = compiled.extras && typeof compiled.extras === 'object' ? [compiled.extras.key, compiled.extras.value] : [];
+    return [...compiled.fields.flatMap((/** @type {any} */ f) => typeReferences(f.type)), ...extras.flatMap(typeReferences)];
+  });
 }
 
 /** @param {any} type @returns {string[]} */
@@ -308,8 +315,11 @@ function typeReferences(type) {
   switch (type.form) {
     case 'reference':
       return [type.name];
-    case 'shape':
-      return type.fields.flatMap((/** @type {any} */ f) => typeReferences(f.type));
+    case 'shape': {
+      // A `* K => V`'s types are referred to as a field's are (DXNS.md §4c).
+      const extras = type.extras && typeof type.extras === 'object' ? [type.extras.key, type.extras.value] : [];
+      return [...type.fields.flatMap((/** @type {any} */ f) => typeReferences(f.type)), ...extras.flatMap(typeReferences)];
+    }
     case 'case':
       return [type.otherwise, ...type.branches.map((/** @type {[unknown, any]} */ [, t]) => t)].flatMap(typeReferences);
     case 'generic':

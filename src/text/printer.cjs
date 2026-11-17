@@ -73,7 +73,12 @@ function print(value, opts = {}) {
   if (value instanceof DXNBits) return tagForm('bits', bitsBody(value), opts);
 
   if (value instanceof DXNList) return '[' + value.items.map((v) => print(v, opts)).join(' ') + ']';
-  if (value instanceof DXNTuple) return '{' + value.items.map((v) => print(v, opts)).join(' ') + '}';
+  if (value instanceof DXNTuple) {
+    // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+    const pinned = DXNTuple.pinned(value);
+    if (pinned) return DXNTuple.pinnedText(pinned.name, pinned.version);
+    return '{' + value.items.map((v) => print(v, opts)).join(' ') + '}';
+  }
   // `@array[`, the bracket against the tag, is the preferred spelling
   // (Jan, 2026-10-20); `@array [` still reads.
   if (Array.isArray(value)) return '@array[' + value.map((v) => print(v, opts)).join(' ') + ']';
@@ -275,9 +280,11 @@ function printStruct(struct, opts) {
   const head = writtenHead(struct, opts);
   const extra = struct.extra.map(([key, value]) => printExtraEntry(key, value, opts));
   if (struct.fields.type === 'keyed') {
-    // A schema's or shape's `- field`s (DXNS.md §4b) come first.
+    // A schema's or shape's `- field`s (DXNS.md §4b) come first, then its
+    // `* K => V` (§4c), always with the arrow.
     const entries = struct.fields.pairs.map(([name, value]) => printKeywordEntry(name, value, opts));
-    return `${head}{${[...struct.dropEntries(), ...entries, ...extra].join(',')}}`;
+    const rest = struct.rest ? [`* ${print(struct.rest.key, opts)} => ${print(struct.rest.value, opts)}`] : [];
+    return `${head}{${[...struct.dropEntries(), ...rest, ...entries, ...extra].join(',')}}`;
   }
   // A positional struct's items, then its extra fields as entries
   // (DXN.md §1.2).

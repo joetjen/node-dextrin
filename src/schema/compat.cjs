@@ -16,17 +16,26 @@
  *     changed since -- a checklist for the materializer's branches.
  *
  * There are no compatibility modes and no append-only rule. A field's
- * description is documentation, not content.
+ * description is documentation, not content, and so are annotations
+ * (`{:doc}`): documenting or deprecating a version that shipped is no
+ * change. What a schema takes beyond its fields (`DXNS.md` §4c) is
+ * content.
+ *
+ * Named types with versions (`%type(N)`, `DXNS.md` §5c) follow the same
+ * two rules, their annotations aside; a named type has no materializer,
+ * so no upgrade checklist.
  */
 
 const { isDeepStrictEqual } = require('node:util');
+const Field = require('./field.cjs');
 
 /**
  * @typedef {{schema: string, version: number, problem: 'changed-without-new-version'}
- *   | {schema: string, problem: 'version-went-down', from: number, to: number}} Problem
+ *   | {schema: string, problem: 'version-went-down', from: number, to: number}
+ *   | {type: string, version: number, problem: 'changed-without-new-version'}
+ *   | {type: string, problem: 'version-went-down', from: number, to: number}} Problem
  * @typedef {{schema: string, from: number, to: number, added: string[], removed: string[], changed: string[]}} Upgrade
  * @typedef {import('./compiled.cjs')} Compiled
- * @typedef {import('./field.cjs')} Field
  */
 
 /**
@@ -38,7 +47,33 @@ const { isDeepStrictEqual } = require('node:util');
  * @returns {{problems: Problem[], upgrades: Upgrade[]}}
  */
 function check(oldRegistry, newRegistry) {
-  return { problems: problems(oldRegistry.structs, newRegistry.structs), upgrades: upgrades(newRegistry.structs) };
+  return {
+    problems: [...problems(oldRegistry.structs, newRegistry.structs), ...typeProblems(oldRegistry.typeVersions, newRegistry.typeVersions)],
+    upgrades: upgrades(newRegistry.structs)
+  };
+}
+
+/**
+ * The same two rules for named types with versions (`DXNS.md` §5c), each
+ * problem naming the type under `type`.
+ * @param {Map<string, Map<number, unknown>>} before @param {Map<string, Map<number, unknown>>} now @returns {Problem[]}
+ */
+function typeProblems(before, now) {
+  /** @type {Problem[]} */
+  const found = [];
+  for (const [name, versions] of sorted(now)) {
+    const old = before.get(name);
+    if (!old) continue;
+    for (const [version, type] of sorted(versions)) {
+      if (old.has(version) && !isDeepStrictEqual(meaning(old.get(version)), meaning(type))) {
+        found.push({ type: name, version, problem: 'changed-without-new-version' });
+      }
+    }
+    const from = latest(old);
+    const to = latest(versions);
+    if (to < from) found.push({ type: name, problem: 'version-went-down', from, to });
+  }
+  return found;
 }
 
 /** @param {Map<string, Map<number, Compiled>>} before @param {Map<string, Map<number, Compiled>>} now @returns {Problem[]} */
@@ -100,22 +135,38 @@ function sorted(map) {
   return Array.from(map.entries()).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-/** @param {Map<number, Compiled>} versions @returns {number} */
+/** @param {Map<number, unknown>} versions @returns {number} */
 function latest(versions) {
   return Math.max(...versions.keys());
 }
 
 /**
- * What a schema's content is, for this check: its fields in order.
+ * What a schema's content is, for this check: its fields in order, and
+ * what it takes beyond them (`DXNS.md` §4c).
  * @param {Compiled} compiled
  */
 function shape(compiled) {
-  return compiled.fields.map((f) => [f.name, fieldShape(f)]);
+  return [compiled.fields.map((f) => [f.name, fieldShape(f)]), meaning(compiled.extras)];
 }
 
 /** @param {Field} field */
 function fieldShape(field) {
-  return [field.required, field.type, field.default];
+  return [field.required, meaning(field.type), field.default];
+}
+
+/**
+ * What a type takes, without its annotations: they check nothing, so
+ * documenting or deprecating a version that shipped (`DXNS.md` §1b) is no
+ * change. A field's description goes too.
+ * @param {unknown} type @returns {unknown}
+ */
+function meaning(type) {
+  if (Array.isArray(type)) return type.map(meaning);
+  if (type instanceof Field) return [type.name, type.required, meaning(type.type), type.default];
+  if (type === null || typeof type !== 'object' || Object.getPrototypeOf(type) !== Object.prototype) return type;
+  const t = /** @type {any} */ (type);
+  if (t.form === 'doc') return meaning(t.elem);
+  return Object.fromEntries(Object.entries(t).map(([k, v]) => [k, meaning(v)]));
 }
 
 module.exports = { check };

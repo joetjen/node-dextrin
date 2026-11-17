@@ -30,11 +30,47 @@ reference:
   default computed in UTC when the field is filled, for date and time
   types.
 - **Sized sugar `:int8`, `:int16`, `:uint8`, `:uint16`** (DXNS.md §1).
+- **Typed and closed extras** (DXNS.md §4c): `* :string => :integer` in
+  a `%schema` or `%shape` body types every extra key and value; `- *`
+  refuses every extra, strict decode or not. Both are inherited from
+  bases.
+- **Deprecation warnings** (DXNS.md §1b): `deprecated:` on a schema, one
+  version of it, a named type, a field's type, a variant or an enum
+  value now warns -- when a schema that uses it compiles
+  (`registry.warnings`; `dextrin check` prints them and fails on them
+  with `--warnings-as-errors`) and when data goes through it. Decode
+  and encode take `deprecations: 'once' | 'every' | 'off' | 'error'`
+  and `onDeprecated:`; without one, the warning goes to
+  `process.emitWarning` as a `DeprecationWarning` (code
+  `DXN_DEPRECATED`). `Schema.annotations(registry, name, version)`
+  reads one version's annotations, and `Schema.deprecationText` writes
+  a warning in words.
+- **Pinned references and versions of named types** (DXNS.md §5c):
+  `Pet(1)` -- DXN text for `{:at Pet 1}` -- pins a field to one version
+  of a schema, taken as read without a materializer, and written at that
+  version; `Color: %type(2)[T]` is version 2 of a named type, `Color`
+  its latest and `Color(1)` an older one (`registry.fetchTypeVersion`).
+  `DXNTuple.pinned` reads a pinned name. `dextrin compat` checks named
+  types' versions too.
+
+### Changed
+
+- **A struct carrying a loaded older version is written at it**
+  (DXNS.md §8), in text and in `.dxnb`; it used to be written as the
+  latest whatever it said. Values a reader builds carry the latest, so
+  only one that says an older version itself is affected.
+- **`Name(N)` is a value** (DXN.md §1.2): it used to be a syntax error.
+- **Annotations are no change to version discipline**: documenting or
+  deprecating a field of a version that shipped no longer needs a new
+  version.
 - A refusal now says why, where it can: `field "a" does not match its
   declared type: ...`.
 
 ### Fixed
 
+- **A hot swap keeps what it replaces with**: `replaceStructSchema` kept
+  only the new version's fields, dropping its annotations and bases, as
+  the reference does not.
 - **A schema tree loads a file after the base it is built from**: `dextrin check` and `SchemaTree.load`
   ordered the files by the names their fields use, not by the bases a
   `%schema` or `%shape` head names (DXNS.md §4b), so a file whose only

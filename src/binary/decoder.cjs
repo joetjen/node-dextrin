@@ -132,21 +132,21 @@ function envelopeError() {
 function document(buf, pos, opts) {
   const decoder = new Decoder(buf, pos + 3, opts);
   const value = decoder.decodeItem();
-  return { value: Validated.strip(value), end: decoder.pos };
+  return { value: Validated.unwrap(value), end: decoder.pos };
 }
 
 class Decoder {
   /**
    * @param {Buffer} buf
    * @param {number} pos
-   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} opts
+   * @param {import('../text/parser.cjs').Options} opts
    */
   constructor(buf, pos, opts) {
     this.buf = buf;
     this.pos = pos;
     // The option, else the registry's own (`putTrusted`), else untrusted.
     this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
-    this.registry = opts.registry && opts.strict !== undefined ? opts.registry.putStrict(opts.strict) : (opts.registry ?? null);
+    this.registry = opts.registry ? opts.registry.withOptions(opts) : null;
     /** @type {unknown[]} indexed by tag-28 registration order. */
     this.sharedItems = [];
     /** @type {Array<Map<number, string>>} innermost scope last. */

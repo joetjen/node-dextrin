@@ -39,6 +39,7 @@ const { canonical } = require('../canonical.cjs');
 const DXNRegex = require('../values/regex.cjs');
 const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS, instantiate, paramName, matches } = require('./type-expr.cjs');
 const Format = require('./format.cjs');
+const Deprecations = require('./deprecations.cjs');
 const { dxnEquals, dxnCompare } = require('../values/equality.cjs');
 
 const PRIMITIVES = new Set([
@@ -112,14 +113,29 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
   /** @type {Array<[string, unknown]>} */
   const schemaEntries = [];
   /** @type {Array<[string, unknown]>} */
-  const aliasEntries = [];
+  const written = [];
   for (const [name, value] of namedEntries) {
     const inner = undoc(value);
     if (inner instanceof DXNStruct && inner.name === 'schema') schemaEntries.push([name, /** @type {any} */ (value)]);
-    else aliasEntries.push([name, value]);
+    else written.push([name, value]);
   }
 
-  const aliased = compileAliases(aliasEntries, baseRegistry, names, schemaEntries);
+  // `Color: %type(2)[T]` (Way B, DXNS.md §5c): the definition `T`, at
+  // version 2; a plain definition is version 1.
+  /** @type {Map<string, number>} */
+  const versions = new Map();
+  const aliasEntries = written.map(([name, raw]) => {
+    let found;
+    try {
+      found = typeVersion(raw);
+    } catch (err) {
+      throw new SchemaCompileError(`named type ${JSON.stringify(name)}: ${errorMessage(err)}`);
+    }
+    versions.set(name, found.version);
+    return /** @type {[string, unknown]} */ ([name, found.type]);
+  });
+
+  const aliased = compileAliases(aliasEntries, baseRegistry, names, schemaEntries, versions);
   const document = new Map([...aliasEntries, ...schemaEntries]);
   let registry = aliased.registry;
   for (const [name, entry] of schemaEntries) {
@@ -130,7 +146,7 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
       // A generic's use in either asks which schema extends which, so the
       // registry and the document go along.
       const built = aliased.built.get(name);
-      const lookup = { registry, document };
+      const lookup = { registry, document, versions };
       compiled = built
         ? builtEntry(entry, built, withLookup(new Map(registry.typeAliases), lookup))
         : compileEntry(entry, scopeOf(registry.typeAliases, names, lookup));
@@ -139,20 +155,43 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
     }
     // A discriminator in a field's type, its variants resolved.
     discriminators(
-      new Map([[name, { form: 'shape', name, fields: compiled.fields }]]),
-      { document, compiled: registry.typeAliases, scope: scopeOf(registry.typeAliases, names, { registry, document }), registry },
+      new Map([[name, { form: 'shape', name, fields: compiled.fields, extras: compiled.extras }]]),
+      { document, compiled: registry.typeAliases, scope: scopeOf(registry.typeAliases, names, { registry, document, versions }), registry },
       aliased.built
     );
     compiled.name = name;
     registry = registry.addStructSchema(name, compiled);
   }
-  return registry;
+  // What the document's entries use that is deprecated (DXNS.md §1b), kept
+  // in the registry.
+  return registry.withWarnings(Deprecations.compileWarnings(namedEntries, names, registry));
+}
+
+/**
+ * A named type's entry as written, without its version (`DXNS.md` §5c):
+ * `%type(N)[T]` is `T` at version `N`, a `{:doc}` around it staying around
+ * `T`; any other definition is version 1. A malformed `%type` throws.
+ * @param {unknown} raw @returns {{type: unknown, version: number}}
+ */
+function typeVersion(raw) {
+  if (isDoc(raw) && /** @type {DXNTuple} */ (raw).items.length === 3) {
+    const [doc, inner, notes] = /** @type {DXNTuple} */ (raw).items;
+    const found = typeVersion(inner);
+    return { type: new DXNTuple([doc, found.type, notes]), version: found.version };
+  }
+  if (raw instanceof DXNStruct && raw.name === 'type') {
+    const fits =
+      typeof raw.version === 'number' && raw.fields.type === 'positional' && raw.fields.values.length === 1 && raw.extra.length === 0 && raw.bases.length === 0;
+    if (!fits) throw new SchemaCompileError('a version of a named type is %type(N)[type]: one type, at version N');
+    return { type: /** @type {any} */ (raw.fields).values[0], version: /** @type {number} */ (raw.version) };
+  }
+  return { type: raw, version: 1 };
 }
 
 /**
  * The schema built for `entry` (`DXNS.md` §4b): the fields `built` holds
- * for it, each type resolved against `known`, its bases as built, and
- * the annotations a `{:doc ...}` around it gives.
+ * for it, each type resolved against `known`, its bases and extras as
+ * built, and the annotations a `{:doc ...}` around it gives.
  * @param {unknown} entry
  * @param {Built} built
  * @param {Map<string, any>} known
@@ -162,14 +201,52 @@ function builtEntry(entry, built, known) {
   const notes = isDoc(entry) && /** @type {DXNTuple} */ (entry).items.length === 3 ? annotations(/** @type {DXNTuple} */ (entry).items[2], 'schema') : {};
   const fields = built.fields.map((f) => new Field({ ...f, default: f.default, type: resolved(f.type, known, []) }));
   const version = /** @type {DXNStruct} */ (undoc(entry)).version ?? 1;
-  return new Compiled({ version, fields, annotations: notes, bases: built.bases });
+  return new Compiled({ version, fields, annotations: notes, bases: built.bases, extras: resolvedExtras(built.extras, known, []) });
 }
 
 /**
  * What was built for a schema or shape built from others: its fields,
- * and its bases as `Compiled` records them.
- * @typedef {{fields: Field[], bases: import('../values/struct.cjs').Base[]}} Built
+ * its bases as `Compiled` records them, and its extras (`DXNS.md` §4c).
+ * @typedef {{fields: Field[], bases: import('../values/struct.cjs').Base[], extras: Extras}} Built
  */
+
+/**
+ * What a schema or shape takes beyond its fields (`DXNS.md` §4c): any
+ * extra (`'open'`), none (`'closed'`, `- *`), or those whose key and
+ * value match a type each (`{key, value}`, `* K => V`).
+ * @typedef {import('./compiled.cjs').Extras} Extras
+ */
+
+/**
+ * `extras` with the types of a `* K => V` resolved, as a field's are.
+ * @param {Extras} extras @param {Map<string, any>} known @param {string[]} path @returns {Extras}
+ */
+function resolvedExtras(extras, known, path) {
+  if (typeof extras === 'string') return extras;
+  return { key: resolved(extras.key, known, path), value: resolved(extras.value, known, path) };
+}
+
+/**
+ * What a `%schema`'s or `%shape`'s own body says of its extras (`DXNS.md`
+ * §4c): `'closed'` for `- *`, `{key, value}` for `* K => V` compiled in
+ * `scope`, `null` when it says nothing. Saying both is refused.
+ * @param {DXNStruct} raw @param {Map<string, unknown>} scope @returns {Extras | null}
+ */
+function ownExtras(raw, scope) {
+  const closed = raw.drops.includes('*');
+  if (closed && raw.rest) throw new SchemaCompileError('a body is closed (- *) or types its extras (* K => V), not both');
+  if (closed) return 'closed';
+  if (!raw.rest) return null;
+  return { key: compileTypeExpr(raw.rest.key, scope), value: compileTypeExpr(raw.rest.value, scope) };
+}
+
+/**
+ * The `- field`s of a body: its drops but `- *`, which closes it instead.
+ * @param {string[]} drops @returns {string[]}
+ */
+function fieldDrops(drops) {
+  return drops.filter((field) => field !== '*');
+}
 
 /**
  * Compiles the document's named types into `registry`, and builds every
@@ -182,9 +259,10 @@ function builtEntry(entry, built, known) {
  * @param {import('../registry.cjs')} registry
  * @param {Map<string, string>} names
  * @param {Array<[string, unknown]>} schemaEntries
+ * @param {Map<string, number>} versions each named type's version (`DXNS.md` §5c).
  * @returns {{registry: import('../registry.cjs'), built: Map<string, Built>}}
  */
-function compileAliases(aliasEntries, registry, names, schemaEntries) {
+function compileAliases(aliasEntries, registry, names, schemaEntries, versions) {
   // Every named type in a document sees every other (design/
   // shapes-and-case.md): each is compiled with its siblings standing as
   // `{form: 'named'}`, and those are put in place once all are read -- so
@@ -192,7 +270,7 @@ function compileAliases(aliasEntries, registry, names, schemaEntries) {
   /** @type {Array<[string, unknown]>} */
   const siblings = aliasEntries.map(([n]) => [n, { form: 'named', name: n }]);
   const document = new Map([...aliasEntries, ...schemaEntries]);
-  const scope = scopeOf(new Map([...registry.typeAliases, ...siblings]), names, { registry, document });
+  const scope = scopeOf(new Map([...registry.typeAliases, ...siblings]), names, { registry, document, versions });
   const extending = aliasEntries.filter(([, v]) => isBuilt(v));
   /** @type {Map<string, any>} */
   const compiled = new Map();
@@ -212,7 +290,7 @@ function compileAliases(aliasEntries, registry, names, schemaEntries) {
   withBuiltShapes(compiled, extending, built);
   guarded(compiled);
   discriminators(compiled, lookup, built);
-  const known = withLookup(new Map([...registry.typeAliases, ...compiled]), { registry, document });
+  const known = withLookup(new Map([...registry.typeAliases, ...compiled]), { registry, document, versions });
   let result = registry;
   for (const [name] of aliasEntries) {
     let typeExpr;
@@ -225,7 +303,7 @@ function compileAliases(aliasEntries, registry, names, schemaEntries) {
     } catch (err) {
       throw new SchemaCompileError(`named type ${JSON.stringify(name)}: ${errorMessage(err)}`);
     }
-    result = result.putTypeAlias(name, typeExpr);
+    result = result.putTypeVersion(name, versions.get(name) ?? 1, typeExpr);
   }
   return { registry: result, built };
 }
@@ -297,6 +375,12 @@ function variantFields(variant, lookup, built, seen) {
       return type === undefined || seen.includes(variant.name) ? null : variantFields(type, lookup, built, [variant.name, ...seen]);
     }
     case 'reference': {
+      // A variant pinned to a version (DXNS.md §5c): that version's fields
+      // when it is loaded, otherwise judged by its name as an unpinned one.
+      if (variant.version !== undefined) {
+        const pinned = lookup.registry.fetchStructSchema(variant.name, variant.version);
+        if (pinned) return pinned.compiled.fields.map((f) => f.name);
+      }
       const own = built.get(variant.name);
       if (own) return own.fields.map((f) => f.name);
       const raw = undoc(lookup.document.get(variant.name));
@@ -355,6 +439,12 @@ function build(name, path, lookup, built) {
   if (raw.fields.type !== 'keyed') throw new SchemaCompileError(`a ${raw.name} lists its fields by name: %${raw.name}(N){field: type, ...}`);
   distinctBases(name, raw.bases);
   const own = ownFields(name, raw.fields.pairs, lookup.scope);
+  let bodyExtras;
+  try {
+    bodyExtras = ownExtras(raw, lookup.scope);
+  } catch (err) {
+    throw new SchemaCompileError(`${JSON.stringify(name)}: ${errorMessage(err)}`);
+  }
   const found = foundBases(name, raw.bases, [name, ...path], lookup, built);
   // Two fields of one name from two bases compare with their types in
   // place: a base of this document still names its sibling types, one
@@ -364,12 +454,57 @@ function build(name, path, lookup, built) {
   const same = (a, b) => dxnEquals(inPlace(a, known, []), inPlace(b, known, []));
   let fields;
   try {
-    fields = Bases.merge(found, own, raw.drops, same);
+    fields = Bases.merge(found, own, fieldDrops(raw.drops), same);
   } catch (err) {
     throw new SchemaCompileError(`${JSON.stringify(name)}: ${errorMessage(err)}`);
   }
+  const extras = mergedExtras(name, found, own, bodyExtras, known);
   builtCases(name, fields);
-  built.set(name, { fields, bases: found.map((b) => /** @type {import('../values/struct.cjs').Base} */ ([b.kind, b.name, b.version])) });
+  built.set(name, {
+    fields,
+    bases: found.map((b) => /** @type {import('../values/struct.cjs').Base} */ ([b.kind, b.name, b.version])),
+    extras
+  });
+}
+
+/**
+ * A built body's extras (`DXNS.md` §4c): its own when it says; otherwise
+ * what its bases say, which must agree -- a base that says nothing is
+ * open and agrees with any. What `extends` a closed base can pass as it
+ * only when it stays closed and adds no field.
+ * @param {string} name @param {Found[]} found @param {Field[]} own @param {Extras | null} ownExtras
+ * @param {Map<string, any>} known
+ * @returns {Extras}
+ */
+function mergedExtras(name, found, own, ownExtras, known) {
+  /** @type {Extras[]} */
+  const said = [];
+  for (const base of found) {
+    if (base.extras === 'open') continue;
+    const inPlaceExtras = inPlace(base.extras, known, []);
+    if (!said.some((other) => dxnEquals(inPlace(other, known, []), inPlaceExtras))) said.push(base.extras);
+  }
+  const closedBase = found.find((b) => b.kind === 'extends' && b.extras === 'closed');
+  if (closedBase && (addedFields(own, closedBase).length > 0 || (ownExtras !== null && ownExtras !== 'closed'))) {
+    throw new SchemaCompileError(
+      `${JSON.stringify(name)} extends ${closedBase.name}, which is closed (- *): ` +
+        `it adds no field and no extras, or includes ${closedBase.name} instead`
+    );
+  }
+  if (ownExtras !== null) return ownExtras;
+  if (said.length > 1) {
+    throw new SchemaCompileError(`${JSON.stringify(name)}: its bases differ in their extras (- * or * K => V); say which in its body`);
+  }
+  return said.length === 1 ? said[0] : 'open';
+}
+
+/**
+ * The fields of `own` that `base` does not have.
+ * @param {Field[]} own @param {Found} base @returns {Field[]}
+ */
+function addedFields(own, base) {
+  const names = new Set(base.fields.map((f) => f.name));
+  return own.filter((f) => !names.has(f.name));
 }
 
 /**
@@ -444,9 +579,10 @@ function caseNames(type) {
 }
 
 /**
- * One base, found: the clause naming it, its full name, its fields, and
- * the version it was taken at (`null` for a shape).
- * @typedef {import('./bases.cjs').FoundBase & {version: number | null}} Found
+ * One base, found: the clause naming it, its full name, its fields, its
+ * extras (`DXNS.md` §4c), and the version it was taken at (`null` for a
+ * shape).
+ * @typedef {import('./bases.cjs').FoundBase & {version: number | null, extras: Extras}} Found
  */
 
 /**
@@ -463,7 +599,7 @@ function foundBases(name, bases, path, lookup, built) {
     const full = baseTarget(written, lookup, []);
     try {
       const at = foundBase(full, version, path, lookup, built);
-      return { kind, name: full, fields: at.fields, version: at.version };
+      return { kind, name: full, fields: at.fields, extras: at.extras, version: at.version };
     } catch (err) {
       if (err instanceof SchemaCompileError) throw err;
       throw new SchemaCompileError(`${JSON.stringify(name)}: base ${base}: ${errorMessage(err)}`);
@@ -472,18 +608,18 @@ function foundBases(name, bases, path, lookup, built) {
 }
 
 /**
- * The fields of `base` at `version`, and the version they are: from the
- * document when it is there, else from what is loaded. A reason a base
- * cannot be used is thrown as a plain `Error`.
+ * The fields and extras of `base` at `version`, and the version they are:
+ * from the document when it is there, else from what is loaded. A reason
+ * a base cannot be used is thrown as a plain `Error`.
  * @param {string} base @param {number | null} version @param {string[]} path
  * @param {Lookup} lookup @param {Map<string, Built>} built
- * @returns {{fields: Field[], version: number | null}}
+ * @returns {AtVersion}
  */
 function foundBase(base, version, path, lookup, built) {
   const used = genericUse(base, lookup);
   if (used !== null) {
     if (version !== null) throw new Error(`a shape has no versions, so ${base}(${version}) names none`);
-    return { fields: used, version: null };
+    return { ...used, version: null };
   }
   if (!lookup.document.has(base)) return loadedBase(base, version, lookup.registry);
   const raw = undoc(lookup.document.get(base));
@@ -491,11 +627,24 @@ function foundBase(base, version, path, lookup, built) {
   if (raw.name === 'shape' && version !== null) throw new Error(`a shape has no versions, so ${base}(${version}) names none`);
   if (isBuilt(raw)) {
     build(base, path, lookup, built);
-    return atVersion(base, raw, version, /** @type {Built} */ (built.get(base)).fields, lookup);
+    const own = /** @type {Built} */ (built.get(base));
+    return atVersion(base, raw, version, { fields: own.fields, extras: own.extras }, lookup);
   }
-  if (raw.name === 'shape') return { fields: /** @type {Field[]} */ (shapeFields(lookup.compiled.get(base))), version: null };
-  return atVersion(base, raw, version, compileEntry(raw, lookup.scope).fields, lookup);
+  if (raw.name === 'shape') return { .../** @type {ShapeBody} */ (shapeBody(lookup.compiled.get(base))), version: null };
+  const compiled = compileEntry(raw, lookup.scope);
+  return atVersion(base, raw, version, { fields: compiled.fields, extras: compiled.extras }, lookup);
 }
+
+/**
+ * A shape's fields and extras, as a base gives them.
+ * @typedef {{fields: Field[], extras: Extras}} ShapeBody
+ */
+
+/**
+ * A base's fields and extras at the version they were taken at (`null`
+ * for a shape).
+ * @typedef {ShapeBody & {version: number | null}} AtVersion
+ */
 
 /**
  * A base named by a named type that stands for a schema or a shape
@@ -515,9 +664,9 @@ function baseTarget(name, lookup, seen) {
 
 /**
  * A named type that is one use of a generic standing for a shape
- * (`PageOfInt: {:of Page :integer}`): that shape's fields; `null` for any
- * other name.
- * @param {string} name @param {Lookup} lookup @returns {Field[] | null}
+ * (`PageOfInt: {:of Page :integer}`): that shape's fields and extras;
+ * `null` for any other name.
+ * @param {string} name @param {Lookup} lookup @returns {ShapeBody | null}
  */
 function genericUse(name, lookup) {
   const known = new Map([...lookup.registry.typeAliases, ...lookup.compiled]);
@@ -536,7 +685,7 @@ function genericUse(name, lookup) {
   } catch {
     return null;
   }
-  return shapeFields(instantiate(generic.params, generic.body, args));
+  return shapeBody(instantiate(generic.params, generic.body, args));
 }
 
 /** A compiled type without the annotations around it. @param {any} type @returns {any} */
@@ -548,39 +697,43 @@ function undocType(type) {
  * A schema of the document at the version the head asks for: its own,
  * or one already loaded. Without a version, the latest of them. A shape
  * has none.
- * @param {string} base @param {DXNStruct} raw @param {number | null} version @param {Field[]} fields @param {Lookup} lookup
- * @returns {{fields: Field[], version: number | null}}
+ * @param {string} base @param {DXNStruct} raw @param {number | null} version @param {ShapeBody} body @param {Lookup} lookup
+ * @returns {AtVersion}
  */
-function atVersion(base, raw, version, fields, lookup) {
-  if (raw.name === 'shape') return { fields, version: null };
+function atVersion(base, raw, version, body, lookup) {
+  if (raw.name === 'shape') return { ...body, version: null };
   const own = raw.version ?? 1;
   // What is loaded, the resolver asked as for any other base.
   const loaded = lookup.registry.fetchStructSchema(base);
   const wanted = version ?? Math.max(own, loaded ? loaded.compiled.version : own);
-  return wanted === own ? { fields, version: own } : loadedBase(base, wanted, lookup.registry);
+  return wanted === own ? { ...body, version: own } : loadedBase(base, wanted, lookup.registry);
 }
 
 /**
  * A base already loaded: a schema at `version`, or its latest without
  * one; or a shape, which has no versions.
  * @param {string} base @param {number | null} version @param {import('../registry.cjs')} registry
- * @returns {{fields: Field[], version: number | null}}
+ * @returns {AtVersion}
  */
 function loadedBase(base, version, registry) {
   const found = version === null ? registry.fetchStructSchema(base) : registry.fetchStructSchema(base, version);
-  if (found) return { fields: found.compiled.fields, version: found.compiled.version };
+  if (found) return { fields: found.compiled.fields, extras: found.compiled.extras, version: found.compiled.version };
   const type = registry.typeAliases.get(base);
   if (version !== null) throw new Error(`${base}(${version}) is not loaded`);
   if (type === undefined) throw new Error(`no schema or shape is named ${base}`);
-  const fields = shapeFields(type);
-  if (fields === null) throw new Error('a base is a %schema or a %shape');
-  return { fields, version: null };
+  const body = shapeBody(type);
+  if (body === null) throw new Error('a base is a %schema or a %shape');
+  return { ...body, version: null };
 }
 
-/** A shape's fields, through its annotations; `null` for any other type. @param {any} type @returns {Field[] | null} */
-function shapeFields(type) {
-  if (type && type.form === 'shape') return type.fields;
-  if (type && type.form === 'doc') return shapeFields(type.elem);
+/**
+ * A shape's fields and extras, through its annotations; `null` for any
+ * other type.
+ * @param {any} type @returns {ShapeBody | null}
+ */
+function shapeBody(type) {
+  if (type && type.form === 'shape') return { fields: type.fields, extras: type.extras ?? 'open' };
+  if (type && type.form === 'doc') return shapeBody(type.elem);
   return null;
 }
 
@@ -591,7 +744,8 @@ function shapeFields(type) {
  */
 function withBuiltShapes(compiled, extending, built) {
   for (const [name, entry] of extending) {
-    const shape = { form: 'shape', name, fields: /** @type {Built} */ (built.get(name)).fields };
+    const own = /** @type {Built} */ (built.get(name));
+    const shape = { form: 'shape', name, fields: own.fields, extras: own.extras };
     if (isDoc(entry) && /** @type {DXNTuple} */ (entry).items.length === 3) {
       try {
         compiled.set(name, { form: 'doc', elem: shape, notes: annotations(/** @type {DXNTuple} */ (entry).items[2], shape) });
@@ -617,8 +771,9 @@ function scopeOf(aliases, names, lookup = null) {
 
 /**
  * The registry and the document a generic's bound looks in, for a schema
- * that extends another.
- * @typedef {{registry: import('../registry.cjs'), document: Map<string, unknown>}} Lookup0
+ * that extends another; and the version each named type of the document
+ * has (`DXNS.md` §5c), so a pin to a sibling (`Color(2)`) is seen.
+ * @typedef {{registry: import('../registry.cjs'), document: Map<string, unknown>, versions?: Map<string, number>}} Lookup0
  */
 
 /**
@@ -829,7 +984,9 @@ function within(arg, bound, known) {
     if (type === undefined || (type.form === 'named' && type.name === arg.name)) return false;
     return withinBound(type, bound, known);
   }
-  if (arg.form === 'reference' && bound.form === 'reference') return extendsBase(arg.name, bound.name, known, []);
+  // A pinned reference is within what its schema is within (DXNS.md §5c).
+  if (arg.form === 'reference' && arg.version !== undefined) return withinBound({ form: 'reference', name: arg.name }, bound, known);
+  if (arg.form === 'reference' && bound.form === 'reference' && bound.version === undefined) return extendsBase(arg.name, bound.name, known, []);
   if (bound.form === 'named') {
     const type = known.get(bound.name);
     if (type === undefined || (type.form === 'named' && type.name === bound.name)) return false;
@@ -909,7 +1066,11 @@ function resolved(type, known, path) {
     case 'generic':
       throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
     case 'shape':
-      return { ...type, fields: type.fields.map((/** @type {Field} */ f) => new Field({ ...f, default: f.default, type: resolved(f.type, known, path) })) };
+      return {
+        ...type,
+        fields: type.fields.map((/** @type {Field} */ f) => new Field({ ...f, default: f.default, type: resolved(f.type, known, path) })),
+        extras: resolvedExtras(type.extras ?? 'open', known, path)
+      };
     case 'case':
       return {
         ...type,
@@ -1078,7 +1239,7 @@ function compileEntry(entry, aliases) {
   });
   distinctNames(fields);
   casesNameFields(entry.fields.pairs, fields);
-  return new Compiled({ version: entry.version ?? 1, fields });
+  return new Compiled({ version: entry.version ?? 1, fields, extras: ownExtras(entry, aliases) ?? 'open' });
 }
 
 /** @param {Field[]} fields */
@@ -1278,7 +1439,7 @@ function compileTypeExpr(value, aliases) {
     });
     distinctNames(fields);
     casesNameFields(pairs, fields);
-    return { form: 'shape', name: null, fields };
+    return { form: 'shape', name: null, fields, extras: ownExtras(value, aliases) ?? 'open' };
   }
 
   if (value instanceof DXNTuple) {
@@ -1318,6 +1479,9 @@ function compileTypeExpr(value, aliases) {
       }
       return { form: 'case', field: rest[0].name, branches, otherwise };
     }
+    // `Pet(1)`, which DXN reads as `{:at Pet 1}` (DXNS.md §5c): a name
+    // pinned to one version.
+    if (tag === 'at') return pinnedType(value, aliases);
     // `{:of Name type ...}`: one use of the generic `Name`.
     if (tag === 'of') {
       if (!(rest[0] instanceof DXNSymbol) || rest.length < 2) throw new SchemaCompileError('a use of a generic is {:of Name type ...}');
@@ -1370,6 +1534,31 @@ function compileTypeExpr(value, aliases) {
   }
 
   throw new SchemaCompileError(`unrecognized type expression: ${shown(value)}`);
+}
+
+/**
+ * `Pet(1)`, `{:at Pet 1}` (`DXNS.md` §5c): a name pinned to one version.
+ * A named type's version is put in place -- a sibling at that version
+ * stays by name -- and a version of a named type that is not loaded is a
+ * compile error; any other name is a schema's, checked when a value
+ * meets it.
+ * @param {DXNTuple} value @param {Map<string, unknown>} aliases @returns {import('./type-expr.cjs').TypeExpr}
+ */
+function pinnedType(value, aliases) {
+  const pinned = DXNTuple.pinned(value);
+  if (!pinned) throw new SchemaCompileError('a pinned name is Name(N), {:at Name N}, N a positive integer');
+  const name = fullName(pinned.name, aliases);
+  /** @type {Lookup0 | null} */
+  const lookup = /** @type {any} */ (aliases).lookup ?? null;
+  const registry = lookup ? lookup.registry : null;
+  const sibling = /** @type {any} */ (aliases.get(name));
+  const isSibling = sibling !== undefined && sibling.form === 'named' && sibling.name === name;
+  if (isSibling && lookup?.versions?.get(name) === pinned.version) return { form: 'named', name };
+  const loaded = registry ? registry.fetchTypeVersion(name, pinned.version) : undefined;
+  if (loaded !== undefined) return /** @type {any} */ (loaded);
+  const namedType = isSibling || (registry !== null && registry.typeVersions.has(name)) || (aliases.has(name) && !name.startsWith('\0'));
+  if (namedType) throw new SchemaCompileError(`${DXNTuple.pinnedText(name, pinned.version)} is not loaded`);
+  return { form: 'reference', name, version: pinned.version };
 }
 
 /**
@@ -1776,9 +1965,13 @@ function normalizeKeywords(value) {
   if (value instanceof Map) return new Map(Array.from(value.entries(), ([k, v]) => [normalizeKeywords(k), normalizeKeywords(v)]));
   if (value instanceof Set) return new Set(Array.from(value, normalizeKeywords));
   if (value instanceof DXNStruct) {
-    return value.fields.type === 'keyed'
-      ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, normalizeKeywords(v)]) })
-      : value.withFields({ type: 'positional', values: value.fields.values.map(normalizeKeywords) });
+    const normalized =
+      value.fields.type === 'keyed'
+        ? value.withFields({ type: 'keyed', pairs: value.fields.pairs.map(([k, v]) => [k, normalizeKeywords(v)]) })
+        : value.withFields({ type: 'positional', values: value.fields.values.map(normalizeKeywords) });
+    // A `* K => V`'s types are written as a field's are (DXNS.md §4c).
+    if (value.rest) normalized.rest = { key: normalizeKeywords(value.rest.key), value: normalizeKeywords(value.rest.value) };
+    return normalized;
   }
   if (value instanceof DXNCustomTag) return new DXNCustomTag(value.name, normalizeKeywords(value.value));
   return value;

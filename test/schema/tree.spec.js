@@ -117,4 +117,10 @@ describe('schema tree', () => {
     expect(messages(cycle)).to.have.length(1);
     expect(messages(cycle)[0]).to.include('a.dxns').and.include('b.dxns');
   });
+
+  it("reports a name that resolves to nothing in a schema's * K => V too", () => {
+    const result = SchemaTree.load([tree({ 'a.dxns': '%{A: %schema{n: :integer, * :string => Nowhere}}' })]);
+    expect(result.ok).to.equal(false);
+    expect(messages(result).some((/** @type {string} */ m) => m.includes('Nowhere'))).to.equal(true);
+  });
 });

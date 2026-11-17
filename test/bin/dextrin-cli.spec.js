@@ -169,12 +169,60 @@ describe('bin/dextrin.js CLI', () => {
       expect(result.stderr).to.include('User version 1 changed without a new version');
     });
 
+    it('names a named type whose version went down', () => {
+      writeFileSync(join(dir, 'old.dxns'), '%{Color: %type(2)[{:enum :red}]}');
+      writeFileSync(join(dir, 'new.dxns'), '%{Color: {:enum :red}}');
+      const result = run(['compat', join(dir, 'old.dxns'), join(dir, 'new.dxns')]);
+      expect(result.status).to.equal(1);
+      expect(result.stderr).to.include('named type Color went down from version 2 to 1');
+    });
+
     it('takes a single file as well as a directory', () => {
       writeFileSync(join(dir, 'old.dxns'), '%{User: %schema(2){name: :string}}');
       writeFileSync(join(dir, 'new.dxns'), '%{User: %schema{name: :string}}');
       const result = run(['compat', join(dir, 'old.dxns'), join(dir, 'new.dxns')]);
       expect(result.status).to.equal(1);
       expect(result.stderr).to.include('User went down from version 2 to 1');
+    });
+  });
+
+  // A tree of `.dxns` checked; what compiling finds deprecated is printed
+  // as a warning (G10 of dextrin's design/typespec.md), and fails the
+  // check under `--warnings-as-errors` -- as dextrin's
+  // test/mix/tasks/dextrin/check_test.exs.
+  describe('check', () => {
+    const deprecatedUse = `
+      %{
+        Old: {:doc %schema{x: :integer} %{deprecated: "use New"}}
+        Holder: %schema{old: Old}
+      }`;
+
+    /** @param {string} source @returns {string} */
+    const tree = (source) => {
+      const root = join(dir, 'schemas');
+      mkdirSync(root);
+      writeFileSync(join(root, 'acme.dxns'), source);
+      return root;
+    };
+
+    it('a tree with nothing deprecated in use passes quietly', () => {
+      const result = run(['check', tree('%{A: %schema{x: :integer}}')]);
+      expect(result.status).to.equal(0);
+      expect(result.stdout).to.include('OK: 1 files');
+      expect(result.stdout).not.to.include('warning');
+    });
+
+    it('a use of something deprecated is a warning, and the check passes', () => {
+      const result = run(['check', tree(deprecatedUse)]);
+      expect(result.status).to.equal(0);
+      expect(result.stdout).to.include('warning: acme/Holder uses acme/Old(1), which is deprecated: use New');
+      expect(result.stdout).to.include('OK: 1 files');
+    });
+
+    it('--warnings-as-errors fails the check on one', () => {
+      const result = run(['check', tree(deprecatedUse), '--warnings-as-errors']);
+      expect(result.status).to.equal(1);
+      expect(result.stderr).to.include('1 warning(s), and --warnings-as-errors');
     });
   });
 });

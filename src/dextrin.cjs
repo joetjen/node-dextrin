@@ -75,8 +75,15 @@ const binaryDecoder = require('./binary/decoder.cjs');
  * falls back to an opaque `DXNStruct`/`DXNCustomTag`, never a hard
  * failure.
  *
+ * Something deprecated that the data goes through warns (`DXNS.md`
+ * §1b): `deprecations:` says how often -- `'once'` per registry and
+ * deprecated thing (the default), `'every'` time, `'off'`, or `'error'`,
+ * which refuses the data (`schema/deprecated`) -- and `onDeprecated:`
+ * receives each warning, `{name, version, message, category, at}`, in
+ * place of `process.emitWarning`.
+ *
  * @param {string} text
- * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {DecodeOptions} [opts]
  * @returns {unknown}
  */
 function decode(text, opts = {}) {
@@ -112,8 +119,11 @@ function decode(text, opts = {}) {
  * turned into a `DXNRational`. Use the `DXN*` classes to say which type
  * a value is.
  *
+ * Something deprecated that the value goes through warns, as in
+ * `decode`, under the same `deprecations:` and `onDeprecated:`.
+ *
  * @param {unknown} value
- * @param {{pretty?: boolean, indent?: number, width?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} [opts]
+ * @param {{pretty?: boolean, indent?: number, width?: number, registry?: import('./registry.cjs'), validate?: boolean, schema?: string} & DeprecationOptions} [opts]
  * @returns {string}
  */
 function encode(value, opts = {}) {
@@ -132,7 +142,7 @@ function encode(value, opts = {}) {
  * byte) or a schema violation.
  *
  * @param {Uint8Array} bytes
- * @param {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')}} [opts]
+ * @param {DecodeOptions} [opts]
  * @returns {unknown}
  */
 function decodeBinary(bytes, opts = {}) {
@@ -150,7 +160,7 @@ function decodeBinary(bytes, opts = {}) {
  * schema validation.
  *
  * @param {unknown} value
- * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string, [k: string]: unknown}} [opts]
+ * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string, [k: string]: unknown} & DeprecationOptions} [opts]
  * @returns {Buffer}
  */
 function encodeBinary(value, opts = {}) {
@@ -169,11 +179,11 @@ function encodeBinary(value, opts = {}) {
  * `schema:` was given, a check of the result against that one named
  * schema.
  * @param {unknown} value
- * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string}} opts
+ * @param {{registry?: import('./registry.cjs'), validate?: boolean, schema?: string} & DeprecationOptions} opts
  * @returns {unknown}
  */
 function maybeValidateEncode(value, opts) {
-  const registry = opts.registry ?? new Registry();
+  const registry = (opts.registry ?? new Registry()).withOptions(opts);
 
   let result = value;
   if (opts.validate ?? true) {
@@ -184,6 +194,18 @@ function maybeValidateEncode(value, opts) {
   }
   return result;
 }
+
+/**
+ * What a decode takes: `trusted`, `strict`, the `registry`, and how
+ * something deprecated warns (`DeprecationOptions`).
+ * @typedef {{trusted?: boolean, strict?: boolean, registry?: import('./registry.cjs')} & DeprecationOptions} DecodeOptions
+ */
+
+/**
+ * How data going through something deprecated warns (`DXNS.md` §1b):
+ * how often, and who hears it.
+ * @typedef {{deprecations?: 'once' | 'every' | 'off' | 'error', onDeprecated?: ((warning: import('./schema/deprecations.cjs').Warning) => void) | null}} DeprecationOptions
+ */
 
 const { canonical } = require('./canonical.cjs');
 const { answer } = require('./conformance.cjs');

@@ -28,6 +28,7 @@ const Reader = require('./schema/reader.cjs');
 const Validated = require('./schema/validated.cjs');
 const Provider = require('./schema/provider.cjs');
 const Compat = require('./schema/compat.cjs');
+const Deprecations = require('./schema/deprecations.cjs');
 
 /**
  * Compiles a decoded `.dxns` document into `baseRegistry` — a struct
@@ -86,6 +87,9 @@ function validate(value, registry, schemaName) {
   // included (schema/reader.cjs).
   const read = Reader.read(registry, schemaName, value.version, value.fields);
   if (!read) throw new Validator.SchemaValidationError(`no compiled schema registered for ${JSON.stringify(schemaName)}`);
+  // An older version no materializer upgrades is read, but refused: only
+  // a field pinned to its version takes it (DXNS.md §5c).
+  Validated.unwrap(read.value);
   return true;
 }
 
@@ -139,14 +143,27 @@ function conform(value, registry, name) {
  *
  * An enum's `values` is a `Map` from each value to its own annotations.
  *
+ * With `version`, what the `{:doc ...}` around that one version of the
+ * schema `name` says about it: `deprecated:` on version 1 deprecates
+ * version 1 only (`DXNS.md` §1b); `undefined` when that version is not
+ * loaded. As the reference's `Dextrin.Schema.annotations/3`.
+ *
  * @example
  * const registry = Schema.compile(decode('%{Port: {:doc :integer %{description: "A TCP port"}}}'), new Registry());
  * Schema.annotations(registry, 'Port'); // => {description: 'A TCP port'}
+ * @example
+ * const pets = Schema.compile(decode('%{Pet: {:doc %schema(1){name: :string} %{deprecated: "use Pet(2)"}}}'), new Registry());
+ * Schema.annotations(pets, 'Pet', 1); // => {deprecated: 'use Pet(2)'}
  * @param {import('./registry.cjs')} registry
  * @param {string} name
+ * @param {number} [version]
  * @returns {{[k: string]: unknown} | undefined}
  */
-function annotations(registry, name) {
+function annotations(registry, name, version) {
+  if (version !== undefined) {
+    const found = registry.fetchStructSchema(name, version);
+    return found ? found.compiled.annotations : undefined;
+  }
   const type = /** @type {any} */ (registry.typeAliases.get(name));
   if (type !== undefined) {
     if (type.form === 'doc') return type.notes;
@@ -204,6 +221,19 @@ function registerProvider(registry, provider) {
   return Provider.registerProvider(registry, provider, compile);
 }
 
+/**
+ * A deprecation warning (`DXNS.md` §1b) in words, as the reference's
+ * `Dextrin.Schema.Deprecations.text/1` writes it.
+ * @example
+ * Schema.deprecationText({name: 'Pet', version: 1, message: 'use Pet(2)', category: 'schema/deprecated', at: 'Show'});
+ * // => 'Show uses Pet(1), which is deprecated: use Pet(2)'
+ * @param {import('./schema/deprecations.cjs').Warning} warning
+ * @returns {string}
+ */
+function deprecationText(warning) {
+  return Deprecations.text(warning);
+}
+
 /** @param {unknown} value */
 function describe(value) {
   try {
@@ -226,11 +256,12 @@ function compat(oldRegistry, newRegistry) {
   return Compat.check(oldRegistry, newRegistry);
 }
 
-// The names `compat`'s declaration uses, in scope here: `tsc` writes its
-// result type by them (`npm run types`).
+// The names `compat`'s and `deprecationText`'s declarations use, in scope
+// here: `tsc` writes their types by them (`npm run types`).
 /**
+ * @typedef {import('./schema/deprecations.cjs').Warning} Warning
  * @typedef {import('./schema/compat.cjs').Problem} Problem
  * @typedef {import('./schema/compat.cjs').Upgrade} Upgrade
  */
 
-module.exports = { compile, compileAll, validate, check, conform, annotations, validateEncode, validateEncodeTree, registerProvider, compat };
+module.exports = { compile, compileAll, validate, check, conform, annotations, deprecationText, validateEncode, validateEncodeTree, registerProvider, compat };

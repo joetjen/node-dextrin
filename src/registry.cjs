@@ -24,6 +24,21 @@
 const DXNError = require('./error.cjs');
 const Compiled = require('./schema/compiled.cjs');
 const DXNStruct = require('./values/struct.cjs');
+const Deprecations = require('./schema/deprecations.cjs');
+const { dxnEquals } = require('./values/equality.cjs');
+
+/** @typedef {import('./schema/deprecations.cjs').Warning} Warning */
+
+/**
+ * `compiled` under `name`, otherwise the same.
+ * @param {import('./schema/compiled.cjs')} compiled
+ * @param {string} name
+ * @returns {import('./schema/compiled.cjs')}
+ */
+function renamed(compiled, name) {
+  const { version, fields, annotations, bases, extras } = compiled;
+  return new Compiled({ name, version, fields, annotations, bases, extras });
+}
 
 class Registry {
   constructor() {
@@ -37,14 +52,38 @@ class Registry {
     this.materializers = new Map();
     /** @type {((name: string) => import('./schema/compiled.cjs') | import('./schema/compiled.cjs')[] | undefined) | null} */
     this.resolver = null;
-    /** @type {Map<string, unknown>} named type -> compiled TypeExpr. */
+    /** @type {Map<string, unknown>} named type -> compiled TypeExpr, its latest version's. */
     this.typeAliases = new Map();
+    /**
+     * Every version of a named type (`DXNS.md` §5c, Way B of dextrin's
+     * design/typespec.md); `typeAliases` holds the latest of each.
+     * @type {Map<string, Map<number, unknown>>}
+     */
+    this.typeVersions = new Map();
     /** @type {Map<string, Function>} struct name -> JS class. */
     this.structModules = new Map();
     /** @type {boolean} */
     this.trusted = false;
     /** @type {boolean} refuse extra fields on schema-backed structs (`putStrict`). */
     this.strict = false;
+    // G10 of dextrin's design/typespec.md (`schema/deprecations.cjs`):
+    // how often data going through something deprecated warns, who hears
+    // it, which deprecated things have a slot, which of those have
+    // warned, and what compiling found.
+    /** @type {'once' | 'every' | 'off' | 'error'} */
+    this.deprecations = 'once';
+    /** @type {((warning: Warning) => void) | null} */
+    this.onDeprecated = null;
+    /** @type {Set<string>} the deprecated things that warn once, a slot each. */
+    this.deprecationSlots = new Set();
+    /**
+     * The slots that have warned: one set, shared by every copy of this
+     * registry, so "once" outlives a single decode.
+     * @type {Set<string>}
+     */
+    this.deprecationSeen = new Set();
+    /** @type {Warning[]} what compiling into this registry found deprecated, in the order compiled. */
+    this.warnings = [];
   }
 
   /** @returns {Registry} a shallow copy, ready for one field to be overwritten. */
@@ -56,9 +95,92 @@ class Registry {
     copy.materializers = new Map(this.materializers);
     copy.resolver = this.resolver;
     copy.typeAliases = new Map(this.typeAliases);
+    copy.typeVersions = new Map(this.typeVersions);
     copy.structModules = new Map(this.structModules);
     copy.trusted = this.trusted;
     copy.strict = this.strict;
+    copy.deprecations = this.deprecations;
+    copy.onDeprecated = this.onDeprecated;
+    copy.deprecationSlots = this.deprecationSlots;
+    copy.deprecationSeen = this.deprecationSeen;
+    copy.warnings = this.warnings;
+    return copy;
+  }
+
+  /**
+   * This registry with what a decode's or an encode's options say of it:
+   * `strict`, `deprecations` and `onDeprecated`, each when given. The
+   * reference's `Dextrin.Registry.from_options/1`.
+   * @param {{strict?: boolean, deprecations?: 'once' | 'every' | 'off' | 'error', onDeprecated?: ((warning: Warning) => void) | null}} opts
+   * @returns {Registry}
+   */
+  withOptions(opts) {
+    /** @type {Registry} */
+    let registry = this;
+    if (opts.strict !== undefined) registry = registry.putStrict(opts.strict);
+    if (opts.deprecations !== undefined) registry = registry.putDeprecations(opts.deprecations);
+    if (opts.onDeprecated !== undefined) registry = registry.putOnDeprecated(opts.onDeprecated);
+    return registry;
+  }
+
+  /**
+   * How often data going through something deprecated warns (G10,
+   * `schema/deprecations.cjs`): `'once'` per registry and deprecated
+   * thing, the default; `'every'` time; `'off'`; or `'error'`, which
+   * refuses the data (`schema/deprecated`). `decode`/`encode` take it as
+   * `deprecations:`.
+   * @param {'once' | 'every' | 'off' | 'error'} how
+   * @returns {Registry}
+   */
+  putDeprecations(how) {
+    if (!['once', 'every', 'off', 'error'].includes(how)) {
+      throw new TypeError(`deprecations is 'once', 'every', 'off' or 'error', not ${String(how)}`);
+    }
+    const copy = this.clone();
+    copy.deprecations = how;
+    return copy;
+  }
+
+  /**
+   * Who hears a deprecation warning, in place of `process.emitWarning`: a
+   * function of one warning, or `null` for the platform's warnings.
+   * `decode`/`encode` take it as `onDeprecated:`.
+   * @param {((warning: Warning) => void) | null} fn
+   * @returns {Registry}
+   */
+  putOnDeprecated(fn) {
+    if (fn !== null && typeof fn !== 'function') throw new TypeError('onDeprecated is a function of one warning, or null');
+    const copy = this.clone();
+    copy.onDeprecated = fn;
+    return copy;
+  }
+
+  /**
+   * This registry with `warnings` -- what compiling found deprecated --
+   * after those it holds.
+   * @param {Warning[]} warnings
+   * @returns {Registry}
+   */
+  withWarnings(warnings) {
+    if (warnings.length === 0) return this;
+    const copy = this.clone();
+    copy.warnings = [...this.warnings, ...warnings];
+    return copy;
+  }
+
+  /**
+   * `copy` -- a fresh clone of this registry -- with a slot for each
+   * deprecated thing `item` holds, a schema version or a named type's
+   * definition; the slots it had keep theirs, and what they have seen.
+   * Called as each is put in the registry, so one loaded later by a
+   * resolver has its slots too.
+   * @param {Registry} copy
+   * @param {unknown} item
+   * @returns {Registry}
+   */
+  static slotted(copy, item) {
+    const fresh = Deprecations.keys(item).filter((key) => !copy.deprecationSlots.has(key));
+    if (fresh.length > 0) copy.deprecationSlots = new Set([...copy.deprecationSlots, ...fresh]);
     return copy;
   }
 
@@ -148,7 +270,7 @@ class Registry {
     const versions = new Map(this.structs.get(name) ?? []);
     versions.set(compiled.version, compiled);
     copy.structs.set(name, versions);
-    return copy;
+    return Registry.slotted(copy, compiled.name === name ? compiled : renamed(compiled, name));
   }
 
   /**
@@ -188,8 +310,7 @@ class Registry {
         { stage: 'schema', category: 'schema/not-loaded' }
       );
     }
-    const renamed = new Compiled({ name, version: compiled.version, fields: compiled.fields });
-    return this.putStructSchema(name, renamed);
+    return this.putStructSchema(name, renamed(compiled, name));
   }
 
   /** @param {string} name @param {number} version @returns {boolean} */
@@ -276,12 +397,14 @@ class Registry {
   }
 
   /**
-   * `struct` as it is written here: carrying the latest loaded version of
-   * its schema (`DXN.md` §4.8), whatever version it says itself. A
-   * struct whose name has no schema keeps its own version, or none.
-   * Every writer goes through this — text, the formatter and binary — so
-   * encoding never writes a version other than the latest, and never
-   * writes one no schema stands behind.
+   * `struct` as it is written here: carrying the version it says itself
+   * when that version is loaded -- what a field pinned to it needs
+   * (`DXNS.md` §5c) -- and otherwise the latest loaded version of its
+   * schema (`DXNS.md` §8). A struct whose name has no schema keeps its
+   * own version, or none. Every writer goes through this — text, the
+   * formatter and binary — so encoding writes the latest unless the
+   * struct carries a loaded version of its own, and never writes one no
+   * schema stands behind.
    * @param {DXNStruct} struct
    * @returns {DXNStruct}
    */
@@ -290,6 +413,7 @@ class Registry {
     // resolver's refusal surfaces where the struct is read or checked.
     let found;
     try {
+      if (struct.version !== null && this.fetchStructSchema(struct.name, struct.version)) return struct;
       found = this.fetchStructSchema(struct.name);
     } catch {
       found = undefined;
@@ -310,12 +434,51 @@ class Registry {
   putTypeAlias(name, typeExpr) {
     const copy = this.clone();
     copy.typeAliases.set(name, typeExpr);
-    return copy;
+    return Registry.slotted(copy, typeExpr);
   }
 
   /** @param {string} name @returns {unknown} */
   fetchTypeAlias(name) {
     return this.typeAliases.get(name);
+  }
+
+  /**
+   * Loads `typeExpr` as version `version` of the named type `name`
+   * (`DXNS.md` §5c, Way B of dextrin's design/typespec.md): `name` then
+   * means the latest version loaded, and `fetchTypeVersion` finds each.
+   * Loading a version already loaded with another definition is refused
+   * as `schema/duplicate-version`; the same definition again changes
+   * nothing.
+   * @param {string} name
+   * @param {number} version
+   * @param {unknown} typeExpr
+   * @returns {Registry}
+   * @throws {DXNError}
+   */
+  putTypeVersion(name, version, typeExpr) {
+    const versions = this.typeVersions.get(name) ?? new Map();
+    if (versions.has(version)) {
+      if (dxnEquals(versions.get(version), typeExpr)) return this;
+      throw new DXNError(`named type ${JSON.stringify(name)} version ${version} is already loaded, defined otherwise`, {
+        stage: 'schema',
+        category: 'schema/duplicate-version'
+      });
+    }
+    const grown = new Map(versions).set(version, typeExpr);
+    const latest = Math.max(...grown.keys());
+    const copy = this.clone();
+    copy.typeVersions.set(name, grown);
+    return Registry.slotted(copy, typeExpr).putTypeAlias(name, grown.get(latest));
+  }
+
+  /**
+   * Version `version` of the named type `name`, when it is loaded.
+   * @param {string} name
+   * @param {number} version
+   * @returns {unknown}
+   */
+  fetchTypeVersion(name, version) {
+    return this.typeVersions.get(name)?.get(version);
   }
 
   /**

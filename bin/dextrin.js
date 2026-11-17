@@ -39,7 +39,8 @@ Commands:
   validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                 Validate a .dxn/.dxnb file, optionally against a schema
   compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
-  check SCHEMAS... [--extern NAMESPACE]...     Check a tree of .dxns schemas: syntax, compiling, layout and names
+  check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]
+                                                Check a tree of .dxns schemas: syntax, compiling, layout and names
   docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
   conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
@@ -199,9 +200,12 @@ function cmdDocs(argv) {
 }
 
 /**
- * `dextrin check SCHEMAS... [--extern NAMESPACE]...`: a tree of `.dxns`
- * schemas checked as `mix dextrin.check` checks it -- every problem
- * printed as `file:line: message`, and a non-zero exit.
+ * `dextrin check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]`:
+ * a tree of `.dxns` schemas checked as `mix dextrin.check` checks it --
+ * every problem printed as `file:line: message`, and a non-zero exit. A
+ * schema that uses something deprecated (DXNS.md §1b) is a warning,
+ * printed as `warning: ...`; the check still passes, unless
+ * `--warnings-as-errors` is given.
  * @param {string[]} argv
  */
 function cmdCheck(argv) {
@@ -209,13 +213,18 @@ function cmdCheck(argv) {
   const roots = [];
   /** @type {string[]} */
   const extern = [];
+  let warningsAsErrors = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--extern') extern.push(/** @type {string} */ (argv[++i]));
+    else if (argv[i] === '--warnings-as-errors') warningsAsErrors = true;
     else roots.push(/** @type {string} */ (argv[i]));
   }
-  if (roots.length === 0) throw new Error('usage: dextrin check SCHEMAS... [--extern NAMESPACE]...');
+  if (roots.length === 0) throw new Error('usage: dextrin check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]');
   const result = SchemaTree.load(roots, { extern });
   if (result.ok) {
+    const warnings = result.registry.warnings;
+    for (const warning of warnings) console.log(`warning: ${Schema.deprecationText(warning)}`);
+    if (warningsAsErrors && warnings.length > 0) throw new Error(`${warnings.length} warning(s), and --warnings-as-errors`);
     console.log(`OK: ${result.summary.files} files, ${result.summary.definitions} definitions`);
     return;
   }
@@ -300,11 +309,22 @@ function cmdCompat(args) {
   if (problems.length > 0) {
     throw new Error(
       problems
-        .map((p) => (p.problem === 'version-went-down' ? `${p.schema} went down from version ${p.from} to ${p.to}` : `${p.schema} version ${p.version} changed without a new version`))
+        .map((/** @type {any} */ p) => problemLine(p))
         .join('\n'),
     );
   }
   console.log('OK: no version discipline problems');
+}
+
+/**
+ * One version discipline problem in words: a schema's, or a named type's
+ * (`DXNS.md` §5c).
+ * @param {any} p
+ * @returns {string}
+ */
+function problemLine(p) {
+  const what = p.type !== undefined ? `named type ${p.type}` : p.schema;
+  return p.problem === 'version-went-down' ? `${what} went down from version ${p.from} to ${p.to}` : `${what} version ${p.version} changed without a new version`;
 }
 
 /**

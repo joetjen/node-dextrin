@@ -184,7 +184,7 @@ say which version it was written with: `%Name(2){...}`.
 ## Versions and extra fields
 
 ```text
-%Point(2){x: 1, y: 2}            written with version 2; encoding always writes the latest
+%Point(2){x: 1, y: 2}            written with version 2; encoding writes the latest, or a pinned field's version
 %Point{x: 1, y: 2}               no version: read as the latest
 %Point[1 2 label: "a"]           extra fields after a positional struct's items
 %Point{x: 1, y: 2, label: "a"}   an undeclared name is an extra field

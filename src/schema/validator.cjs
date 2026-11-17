@@ -33,6 +33,7 @@ const DXNStruct = require('../values/struct.cjs');
 const DXNCustomTag = require('../values/custom-tag.cjs');
 const DXNKeyword = require('../values/keyword.cjs');
 const DXNSymbol = require('../values/symbol.cjs');
+const Deprecations = require('./deprecations.cjs');
 
 class SchemaValidationError extends Error {
   /**
@@ -71,6 +72,20 @@ function resolve(compiled, fields, registry) {
     if (value !== ABSENT) pairs.push([field.name, value]);
   }
   return pairs;
+}
+
+/**
+ * `extra`, the fields a struct of `compiled` carries beyond its declared
+ * ones, checked against its extras (`DXNS.md` §4c): any when open, none
+ * when closed (`- *`), each key and value matching `* K => V`. Throws the
+ * refusal.
+ * @param {import('./compiled.cjs')} compiled
+ * @param {Array<[unknown, unknown]>} extra
+ * @param {import('../registry.cjs')} registry
+ */
+function extras(compiled, extra, registry) {
+  const refused = TypeExpr.extrasRefusal(compiled.extras, extra, TypeExpr.context(registry));
+  if (refused) throw new SchemaValidationError(refused.message, refused.category);
 }
 
 /**
@@ -186,12 +201,17 @@ function checkType(name, value, type, ctx, opts) {
   // struct's other fields (`ctx`).
   const conformed = TypeExpr.conform(type, value, ctx);
   if (conformed !== TypeExpr.NO) {
-    // Stripped here, not deferred to the top: `value` is about to be
+    // Unwrapped here, not deferred to the top: `value` is about to be
     // handed to *this* struct's own materializer (decode) or stored
     // as a checked field value (encode) — neither should ever see an
-    // internal `Validated` wrapper once it's done its one job.
-    return Validated.strip(conformed);
+    // internal `Validated` wrapper once it's done its one job. A struct
+    // inside it that could not be upgraded, and that no pinned field
+    // took as read, is refused here (DXNS.md §5c).
+    return Validated.unwrap(conformed);
   }
+  // A struct that could not be upgraded is refused for that reason, not
+  // as a mismatch.
+  if (value instanceof Validated && value.refused) throw value.refused;
 
   // Why, where the type can say more than that it does not match.
   const why = TypeExpr.explain(type, value, ctx);
@@ -258,10 +278,13 @@ function checkCompiled(compiled, value, registry, opts) {
     const shadowing = value.extra.find(([key]) => typeof key === 'string' && declared.has(key));
     if (shadowing) throw new SchemaValidationError(`extra field ${JSON.stringify(shadowing[0])} shadows a declared field`, 'schema/shadowed-field');
   }
+  extras(compiled, value instanceof DXNStruct ? value.extra : [], registry);
   const given = toNameMapForEncode(compiled, value);
   const wrappedGiven = wrapGiven(given, registry, opts);
   const resolved = resolveFields(compiled, wrappedGiven, registry, opts);
-  return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved), encodesAs(compiled, value, registry, opts));
+  return new Validated(/** @type {string} */ (compiled.name), rebuildChecked(value, compiled, resolved), encodesAs(compiled, value, registry, opts), {
+    version: compiled.version
+  });
 }
 
 /**
@@ -395,7 +418,11 @@ function wrapAndCheck(value, registry, opts) {
   const found = schemaNameFor(value, registry);
   if (found) {
     try {
-      return checkCompiled(found.compiled, value, registry, opts);
+      const checked = checkCompiled(found.compiled, value, registry, opts);
+      // Deprecation is the struct's own version's, as a decode reports it
+      // (DXNS.md §1b): the bases it passes as are checked, not used.
+      Deprecations.structUsed(registry, found.name, found.compiled.version);
+      return checked;
     } catch (err) {
       throw new SchemaValidationError(
         `struct ${JSON.stringify(found.name)} violates its schema: ${errorMessage(err)}`,
@@ -413,7 +440,10 @@ function wrapAndCheck(value, registry, opts) {
  */
 function schemaNameFor(value, registry) {
   if (value instanceof DXNStruct) {
-    const found = registry.fetchStructSchema(value.name);
+    // The version a struct is written at (`Registry#asWritten`): its own
+    // when loaded, otherwise the latest (DXNS.md §8).
+    const written = registry.asWritten(value);
+    const found = written.version === null ? registry.fetchStructSchema(value.name) : registry.fetchStructSchema(value.name, written.version);
     return found ? { name: value.name, compiled: found.compiled } : null;
   }
   if (value !== null && typeof value === 'object' && value.constructor) {
@@ -495,4 +525,4 @@ function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
 }
 
-module.exports = { resolve, alsoValidAs, validateForEncode, validateTreeForEncode, SchemaValidationError };
+module.exports = { resolve, extras, alsoValidAs, validateForEncode, validateTreeForEncode, SchemaValidationError };

@@ -21,7 +21,7 @@
  * @typedef {{form: 'any'}
  *   | {form: 'never'}
  *   | {form: 'primitive', name: string}
- *   | {form: 'reference', name: string}
+ *   | {form: 'reference', name: string, version?: number}
  *   | {form: 'list-of', elem: TypeExpr}
  *   | {form: 'list-items', particles: Particle[]}
  *   | {form: 'set-of', elem: TypeExpr}
@@ -41,7 +41,7 @@
  *   | {form: 'not', elem: TypeExpr}
  *   | {form: 'nilable', elem: TypeExpr}
  *   | {form: 'refine', base: TypeExpr, constraints: {[k: string]: unknown}}
- *   | {form: 'shape', name: string | null, fields: import('./field.cjs')[]}
+ *   | {form: 'shape', name: string | null, fields: import('./field.cjs')[], extras: import('./compiled.cjs').Extras}
  *   | {form: 'case', field: string, branches: Array<[unknown, TypeExpr]>, otherwise: TypeExpr | null}
  *   | {form: 'named', name: string}
  *   | {form: 'generic', params: Param[], body: TypeExpr}
@@ -95,6 +95,7 @@ const Validated = require('./validated.cjs');
 const Field = require('./field.cjs');
 const { canonical } = require('../canonical.cjs');
 const Format = require('./format.cjs');
+const Deprecations = require('./deprecations.cjs');
 
 /** A refine's keys whose argument is a type (DXNS.md §2). */
 const TYPE_KEYS = ['contains', 'content', 'encodes', 'encodes-seq'];
@@ -159,11 +160,13 @@ function matches(type, value, registry = null) {
  * @returns {unknown}
  */
 function conform(type, value, ctx) {
+  if (type.form === 'any') return value;
+  if (type.form === 'never') return NO;
+  if (type.form === 'reference' && type.version !== undefined) return pinned(type.name, type.version, value);
+  // A struct that could not be upgraded is no value of any other type
+  // (DXNS.md §5c).
+  if (value instanceof Validated && value.refused) return NO;
   switch (type.form) {
-    case 'any':
-      return value;
-    case 'never':
-      return NO;
     case 'reference':
       return matchesReference(type.name, value, ctx.registry) ? value : NO;
     case 'case': {
@@ -188,9 +191,14 @@ function conform(type, value, ctx) {
     case 'param':
     case 'generic':
       return NO;
-    // Annotations change nothing a type takes.
-    case 'doc':
-      return conform(type.elem, value, ctx);
+    // Annotations change nothing a type takes. Passing through something
+    // deprecated is reported (DXNS.md §1b), once the value is accepted: a
+    // variant tried and refused never warns.
+    case 'doc': {
+      const conformed = conform(type.elem, value, ctx);
+      if (conformed === NO) return NO;
+      return Deprecations.nodeUsed(ctx.registry, type, value, type.notes) ? conformed : NO;
+    }
     // A value that is a `test` is checked as a `consequent`, any other as
     // an `alternative` -- what the test would fill in is not kept.
     case 'if':
@@ -208,7 +216,7 @@ function conform(type, value, ctx) {
     case 'primitive':
       return primitiveMatches(type.name, value) ? value : NO;
     case 'shape':
-      return value instanceof Map ? shape(type.fields, value, ctx) : NO;
+      return value instanceof Map ? shape(type.fields, type.extras ?? 'open', value, ctx) : NO;
     case 'list-of': {
       if (!(value instanceof DXNList)) return NO;
       const items = all(value.items, (v) => conform(type.elem, v, ctx));
@@ -298,6 +306,21 @@ function conform(type, value, ctx) {
     default:
       return NO;
   }
+}
+
+/**
+ * A reference pinned to one version (`DXNS.md` §5c): a struct read or
+ * checked with that version, and nothing else. What it takes is the
+ * struct as that version reads it -- no materializer upgrades it.
+ * @param {string} name @param {number} version @param {unknown} value @returns {unknown}
+ */
+function pinned(name, version, value) {
+  if (value instanceof Validated) {
+    if (value.name !== name || value.version !== version) return NO;
+    return value.asRead ? value.with(value.asRead, { refused: null }) : value;
+  }
+  if (value instanceof DXNStruct && value.name === name && value.version === version) return value;
+  return NO;
 }
 
 /**
@@ -437,12 +460,14 @@ function chosenType(kase, siblings) {
  * `:"name" =>`) and refused given twice; a missing field takes its
  * default, the key a keyword (a global symbol when the decode is
  * trusted); an extra key is kept, and refused by a strict decode -- as a
- * struct's fields are (design/shapes-and-case.md).
+ * struct's fields are (design/shapes-and-case.md) -- unless the shape
+ * says which extras it takes (`DXNS.md` §4c).
  * @param {import('./field.cjs')[]} fields
+ * @param {import('./compiled.cjs').Extras} extras
  * @param {Map<unknown, unknown>} map
  * @param {Context} ctx
  */
-function shape(fields, map, ctx) {
+function shape(fields, extras, map, ctx) {
   /** @type {Map<string, [unknown, unknown]>} */
   const named = new Map();
   for (const [key, value] of map.entries()) {
@@ -465,14 +490,64 @@ function shape(fields, map, ctx) {
       return NO;
     }
   }
-  if (ctx.registry && ctx.registry.strict) {
-    const declared = new Set(fields.map((f) => f.name));
-    for (const key of map.keys()) {
-      const name = keyName(key);
-      if (name === null || !declared.has(name)) return NO;
+  return shapeExtras(extras, undeclared(fields, map), out, ctx);
+}
+
+/**
+ * The map's entries no field of `fields` declares.
+ * @param {import('./field.cjs')[]} fields @param {Map<unknown, unknown>} map @returns {Array<[unknown, unknown]>}
+ */
+function undeclared(fields, map) {
+  const declared = new Set(fields.map((f) => f.name));
+  return Array.from(map.entries()).filter(([key]) => {
+    const name = keyName(key);
+    return name === null || !declared.has(name);
+  });
+}
+
+/**
+ * A shape's extras (`DXNS.md` §4c): open ones kept, and refused by a
+ * strict decode; closed ones (`- *`) refused; typed ones (`* K => V`)
+ * each conformed, key and value.
+ * @param {import('./compiled.cjs').Extras} extras @param {Array<[unknown, unknown]>} pairs
+ * @param {Map<unknown, unknown>} filled @param {Context} ctx @returns {unknown}
+ */
+function shapeExtras(extras, pairs, filled, ctx) {
+  if (extras === 'open') return pairs.length > 0 && ctx.registry && ctx.registry.strict ? NO : filled;
+  if (extras === 'closed') return pairs.length > 0 ? NO : filled;
+  for (const [key, value] of pairs) {
+    if (conform(extras.key, key, ctx) === NO) return NO;
+    const c = conform(extras.value, value, ctx);
+    if (c === NO) return NO;
+    filled.set(key, c);
+  }
+  return filled;
+}
+
+/**
+ * Why `extras` refuse `pairs`, the `[key, value]`s a struct or map carries
+ * that no field declares: `null` when they pass, otherwise `{message,
+ * category}`. Open extras take any (a strict decode refuses them
+ * elsewhere); closed ones none; typed ones each key matching K and its
+ * value V.
+ * @param {import('./compiled.cjs').Extras} extras @param {Array<[unknown, unknown]>} pairs @param {Context} ctx
+ * @returns {{message: string, category: string} | null}
+ */
+function extrasRefusal(extras, pairs, ctx) {
+  if (extras === 'open' || pairs.length === 0) return null;
+  if (extras === 'closed') {
+    return { message: `${shown(pairs[0][0])} is no declared field, and the body is closed (- *)`, category: 'schema/undeclared-field' };
+  }
+  for (const [key, value] of pairs) {
+    if (conform(extras.key, key, ctx) === NO) {
+      return { message: `extra key ${shown(key)} does not match the key type of * K => V`, category: 'schema/type-mismatch' };
+    }
+    if (conform(extras.value, value, ctx) === NO) {
+      const why = explain(extras.value, value, ctx) ?? 'does not match the value type of * K => V';
+      return { message: `extra ${shown(key)}: ${why}`, category: 'schema/type-mismatch' };
     }
   }
-  return out;
+  return null;
 }
 
 /** The name a map key gives a field, or `null`. @param {unknown} key */
@@ -520,8 +595,14 @@ function substitute(type, bound) {
       return bound.get(type.name) ?? type;
     case 'apply':
       return { ...type, args: type.args.map((/** @type {any} */ a) => substitute(a, bound)) };
-    case 'shape':
-      return { ...type, fields: type.fields.map((/** @type {any} */ f) => Object.assign(Object.create(Object.getPrototypeOf(f)), f, { type: substitute(f.type, bound) })) };
+    case 'shape': {
+      const extras = type.extras;
+      return {
+        ...type,
+        fields: type.fields.map((/** @type {any} */ f) => Object.assign(Object.create(Object.getPrototypeOf(f)), f, { type: substitute(f.type, bound) })),
+        extras: extras && typeof extras === 'object' ? { key: substitute(extras.key, bound), value: substitute(extras.value, bound) } : extras
+      };
+    }
     case 'case':
       return {
         ...type,
@@ -1319,10 +1400,19 @@ function explain(type, value, ctx) {
       const generic = /** @type {any} */ (ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined);
       return generic && generic.form === 'generic' ? explain(instantiate(generic.params, generic.body, type.args), value, ctx) : null;
     }
+    case 'reference': {
+      if (type.version === undefined) return null;
+      // A pinned reference says which version it expected (DXNS.md §5c).
+      let got = 'no struct';
+      if (value instanceof Validated) got = value.version === null ? value.name : DXNTuple.pinnedText(value.name, value.version);
+      else if (value instanceof DXNStruct) got = value.version === null ? value.name : DXNTuple.pinnedText(value.name, value.version);
+      return `expected ${DXNTuple.pinnedText(type.name, type.version)}, got ${got}`;
+    }
     case 'shape': {
       // A struct's value comes wrapped once it is checked; the map is inside.
       const map = value instanceof Validated ? value.value : value;
-      return map instanceof Map ? shapeRefused(type.fields, map, ctx) : null;
+      if (!(map instanceof Map)) return null;
+      return shapeRefused(type.fields, map, ctx) ?? extrasRefusal(type.extras ?? 'open', undeclared(type.fields, map), ctx)?.message ?? null;
     }
     default:
       return null;
@@ -1422,9 +1512,31 @@ function variantField(type, name, ctx) {
       const field = type.fields.find((f) => f.name === name);
       return field ? field.type : null;
     }
+    // A schema variant: its latest version's field, or the pinned
+    // version's (DXNS.md §5c).
+    case 'reference':
+      return schemaField(type, name, ctx);
     default:
       return null;
   }
+}
+
+/**
+ * The type the schema `ref` names gives its field `name`: the latest
+ * version's, or the version a pinned reference names; `null` when the
+ * schema is not loaded or has no such field.
+ * @param {{name: string, version?: number}} ref @param {string} name @param {Context} ctx @returns {TypeExpr | null}
+ */
+function schemaField(ref, name, ctx) {
+  if (!ctx.registry) return null;
+  let found;
+  try {
+    found = ref.version === undefined ? ctx.registry.fetchStructSchema(ref.name) : ctx.registry.fetchStructSchema(ref.name, ref.version);
+  } catch {
+    return null;
+  }
+  const field = found ? found.compiled.fields.find((f) => f.name === name) : undefined;
+  return field ? field.type : null;
 }
 
 /** @param {TypeExpr} type @returns {string} */
@@ -1472,4 +1584,4 @@ function shown(value) {
   }
 }
 
-module.exports = { matches, conform, context, explain, instantiate, paramName, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };
+module.exports = { matches, conform, context, explain, extrasRefusal, instantiate, paramName, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };

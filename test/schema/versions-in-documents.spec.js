@@ -1,11 +1,11 @@
 import { expect } from 'chai';
-import { decode, decodeBinary, encode, encodeBinary, DXNError, Registry, Schema } from '../../src/dextrin.js';
+import { decode, decodeBinary, encode, encodeBinary, DXNError, DXNTuple, Registry, Schema } from '../../src/dextrin.js';
 import DXNStruct from '../../src/values/struct.js';
 
 // Every struct written against a schema carries the version it was
 // written with -- `%Point(2){...}` in text and the type name "Point(2)"
-// in binary -- and that version is always the latest one loaded
-// (DXNS.md §8).
+// in binary -- and that version is the latest one loaded, unless the
+// struct says a loaded version of its own (DXNS.md §8).
 class Point {
   constructor(x, y) {
     this.x = x;
@@ -41,10 +41,14 @@ describe('versions in documents', () => {
       expect(back.version).to.equal(2);
     });
 
-    it('is written with the latest version even when it says an older one', () => {
-      expect(encode(DXNStruct.keyed('Point', [['x', 1n]], 1), { registry: loaded(V1, V2) })).to.equal(
-        '%Point(2){x:1}'
-      );
+    // Until G11 (2026-11-17) every struct was written as the latest,
+    // whatever version it said: there was no way to write an older one. A
+    // field pinned to a version (`Pet(1)`) needs that way, so a struct
+    // saying a loaded version keeps it; one saying none, or one not
+    // loaded, is written as the latest as before.
+    it('is written with the version it says when that one is loaded, else the latest', () => {
+      expect(encode(DXNStruct.keyed('Point', [['x', 1n]], 1), { registry: loaded(V1, V2) })).to.equal('%Point(1){x:1}');
+      expect(encode(DXNStruct.keyed('Point', [['x', 1n]], 7), { registry: loaded(V1, V2) })).to.equal('%Point(2){x:1}');
     });
 
     it("is written in binary in the schema's field order, whatever order its keys came in", () => {
@@ -79,7 +83,14 @@ describe('versions in documents', () => {
     );
   });
 
-  it('a struct reference names no version: User(2) in a type expression is a syntax error', () => {
-    expect(() => decode('%{P: %schema{u: User(2)}}')).to.throw(DXNError).with.property('category', 'syntax');
+  // Until G11 (2026-11-17) a struct reference named no version and
+  // `User(2)` was a syntax error. Now `User(2)` reads as `{:at User 2}`, a
+  // reference pinned to version 2 (DXNS.md §5c, pin.spec.js).
+  it('a struct reference may name a version: User(2) pins version 2', () => {
+    const doc = /** @type {Map<unknown, any>} */ (decode('%{P: %schema{u: User(2)}}'));
+    const [schema] = doc.values();
+    const [[field, at]] = schema.fields.pairs;
+    expect(field).to.equal('u');
+    expect(DXNTuple.pinned(at)).to.deep.equal({ name: 'User', version: 2 });
   });
 });

@@ -58,4 +58,38 @@ describe('the version discipline check', () => {
   it('a new schema is not a problem', () => {
     expect(Schema.compat(loaded([V1]), loaded([V1, '%{Other: %schema{x: :integer}}'])).problems).to.deep.equal([]);
   });
+
+  describe('named types with versions (Way B, DXNS.md §5c)', () => {
+    const c1 = '%{Color: {:enum :red :green}}';
+    const c2 = '%{Color: %type(2)[{:enum :red :green :blue}]}';
+
+    it('a new version passes; a version whose definition changed is a problem', () => {
+      expect(Schema.compat(loaded([c1]), loaded([c1, c2])).problems).to.deep.equal([]);
+      expect(Schema.compat(loaded([c1]), loaded(['%{Color: {:enum :red}}'])).problems).to.deep.equal([
+        { type: 'Color', version: 1, problem: 'changed-without-new-version' },
+      ]);
+    });
+
+    it('a version that went down is a problem', () => {
+      expect(Schema.compat(loaded([c1, c2]), loaded([c1])).problems).to.deep.equal([
+        { type: 'Color', problem: 'version-went-down', from: 2, to: 1 },
+      ]);
+    });
+  });
+
+  it('annotations are no change: deprecating a version that shipped passes', () => {
+    const deprecated = '%{User: {:doc %schema{name: {:doc :string %{deprecated: "use full_name"}}} %{deprecated: true}}}';
+    expect(Schema.compat(loaded([V1]), loaded([deprecated])).problems).to.deep.equal([]);
+    const color = '%{Color: {:doc {:enum :red :green} %{deprecated: true}}}';
+    expect(Schema.compat(loaded(['%{Color: {:enum :red :green}}']), loaded([color])).problems).to.deep.equal([]);
+  });
+
+  it('closing a version, or typing its extras otherwise, is a change', () => {
+    const base = '%{User: %schema{name: :string}}';
+    for (const changed of ['%{User: %schema{name: :string - *}}', '%{User: %schema{name: :string * :string => :integer}}']) {
+      const { problems } = Schema.compat(loaded([base]), loaded([changed]));
+      expect(problems, changed).to.have.length(1);
+      expect(problems[0].problem).to.equal('changed-without-new-version');
+    }
+  });
 });

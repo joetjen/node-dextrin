@@ -71,7 +71,7 @@ class ParseError extends Error {
 class Parser {
   /**
    * @param {import('./lexer.cjs').Token[]} tokens
-   * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs'), recordTree?: boolean}} opts
+   * @param {Options & {recordTree?: boolean}} opts
    */
   constructor(tokens, opts) {
     this.tokens = tokens;
@@ -79,7 +79,7 @@ class Parser {
     // The option, else the registry's own (`putTrusted`), else untrusted:
     // a keyword is a global `Symbol.for` only when the caller says so.
     this.trusted = opts.trusted ?? opts.registry?.trusted ?? false;
-    this.registry = strictly(opts.registry ?? null, opts.strict);
+    this.registry = opts.registry ? opts.registry.withOptions(opts) : null;
     /**
      * The syntax tree being recorded, when one was asked for
      * (`parseTree`): a stack of open nodes, the document at its bottom.
@@ -242,8 +242,7 @@ class Parser {
         this.pos += 1;
         return this.parseKeywordToken(tok);
       case 'IDENTIFIER':
-        this.pos += 1;
-        return new DXNSymbol(tok.value);
+        return this.parseSymbol();
       case 'LBRACKET':
         return this.parseList();
       case 'LBRACE':
@@ -255,6 +254,21 @@ class Parser {
       default:
         throw new ParseError(`unexpected token ${tok.type}`, tok.start);
     }
+  }
+
+  /**
+   * A symbol, or `Name(N)`: a name pinned to a version (`DXNS.md` §5c),
+   * read as the tuple `{:at Name N}`. `(` begins nothing else in a value,
+   * as in `%Name(3)`, so it needs no lookahead.
+   * @returns {DXNSymbol | DXNTuple}
+   */
+  parseSymbol() {
+    if (this.tokens[this.pos + 1]?.type !== 'LPAREN') return new DXNSymbol(this.next('IDENTIFIER').value);
+    this.begin('pinned');
+    const name = this.next('IDENTIFIER').value;
+    const version = /** @type {number} */ (this.parseStructVersion());
+    this.end();
+    return new DXNTuple([this.keywordValue('at'), new DXNSymbol(name), BigInt(version)]);
   }
 
   /** @param {string} text */
@@ -379,7 +393,8 @@ class Parser {
    *
    * A schema or shape built from others -- one naming a base, or leaving
    * a field out -- stays a `DXNStruct` as it is written, whatever the
-   * registry holds: the schema compiler reads it.
+   * registry holds: the schema compiler reads it. So does one closed
+   * (`- *`) or with typed extras (`* K => V`, `DXNS.md` §4c).
    * @param {number} start where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
@@ -393,10 +408,18 @@ class Parser {
       // key (DXN.md §1.6) is an extra field's (§4.7).
       /** @type {string[]} */
       const drops = [];
-      const entries = this.parseEntries(true, drops);
+      /** @type {import('../values/struct.cjs').Rest[]} */
+      const rests = [];
+      const entries = this.parseEntries(true, drops, rests);
+      if (rests.length > 1) throw new ParseError('a body types its extras (* K => V) once at most', nameTok.start);
+      if (drops.filter((field) => field === '*').length > 1) throw new ParseError('a body is closed (- *) once at most', nameTok.start);
       if (drops.length > 0 && !BUILDABLE.has(name)) {
         throw new ParseError(`only a %schema or a %shape drops a field (- name); %${name} does not`, nameTok.start);
       }
+      if (rests.length > 0 && !BUILDABLE.has(name)) {
+        throw new ParseError(`only a %schema or a %shape types its extras (* K => V); %${name} does not`, nameTok.start);
+      }
+      const rest = rests.length > 0 ? rests[0] : null;
       checkPairs(entries);
       /** @type {Array<[string, unknown]>} */
       const pairs = [];
@@ -406,7 +429,7 @@ class Parser {
         if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
         else extra.push([key, value]);
       }
-      if (bases.length > 0 || drops.length > 0) return new DXNStruct(name, { type: 'keyed', pairs }, version, extra, bases, drops);
+      if (bases.length > 0 || drops.length > 0 || rest !== null) return new DXNStruct(name, { type: 'keyed', pairs }, version, extra, bases, drops, rest);
       return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra, start);
     }
     const { values, extra } = this.parsePositionalBody();
@@ -532,12 +555,15 @@ class Parser {
   /**
    * `{ map_entry* }`, ordered pairs — used by both `map_lit` and
    * `struct_keyed`. A struct's keyed body may also hold `- field`
-   * entries (`DXNS.md` §4b), whose names go to `drops`; a map's may not.
+   * entries (`DXNS.md` §4b), whose names go to `drops`, `- *` going there
+   * as `"*"`, and `* K => V` entries (§4c), which go to `rests`; a map's
+   * may not.
    * @param {boolean} ownNode whether the entries are a node of their own,
    *   a struct's keyed body, rather than the map's own contents.
    * @param {string[] | null} [drops] where a struct's `- field` names go.
+   * @param {import('../values/struct.cjs').Rest[] | null} [rests] where a struct's `* K => V`s go.
    */
-  parseEntries(ownNode, drops = null) {
+  parseEntries(ownNode, drops = null, rests = null) {
     if (ownNode) this.begin('keyed');
     this.next('LBRACE');
     this.mark('open');
@@ -547,7 +573,18 @@ class Parser {
       if (drops && this.at('MINUS')) {
         this.begin('drop');
         this.next('MINUS');
-        drops.push(this.next('IDENTIFIER').value);
+        drops.push(this.at('STAR') ? this.next('STAR').value : this.next('IDENTIFIER').value);
+        this.end();
+        continue;
+      }
+      if (rests && this.at('STAR')) {
+        // `* K => V`: the type every extra key matches, and its value's.
+        this.begin('rest');
+        this.next('STAR');
+        const key = this.parseValue();
+        this.next('ARROW');
+        this.mark('arrow');
+        rests.push({ key, value: this.parseValue() });
         this.end();
         continue;
       }
@@ -743,13 +780,13 @@ class Parser {
 
 /**
  * @param {string} text
- * @param {{trusted?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @param {Options} [opts]
  * @returns {unknown}
  */
 function parse(text, opts = {}) {
   const tokens = tokenize(text);
   const parser = new Parser(tokens, opts);
-  return Validated.strip(parser.parseDocument());
+  return Validated.unwrap(parser.parseDocument());
 }
 
 /**
@@ -765,13 +802,13 @@ function parse(text, opts = {}) {
  * nodes over them. The trivia between two tokens is the text between
  * them. What `Document.parse` reads with.
  * @param {string} text
- * @param {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs')}} [opts]
+ * @param {Options} [opts]
  * @returns {{value: unknown, tree: SyntaxNode, tokens: import('./lexer.cjs').Token[]}}
  */
 function parseTree(text, opts = {}) {
   const tokens = tokenize(text);
   const parser = new Parser(tokens, { ...opts, recordTree: true });
-  const value = Validated.strip(parser.parseDocument());
+  const value = Validated.unwrap(parser.parseDocument());
   return { value, tree: /** @type {SyntaxNode[]} */ (parser.recording)[0], tokens };
 }
 
@@ -827,14 +864,11 @@ function errorMessage(err) {
 }
 
 /**
- * `registry` marked strict when `strict` is given (`Registry#putStrict`).
- * @param {import('../registry.cjs') | null} registry
- * @param {boolean | undefined} strict
- * @returns {import('../registry.cjs') | null}
+ * What a decode takes: `trusted`, and `strict`, `deprecations` and
+ * `onDeprecated`, which a registry's own say is overridden by
+ * (`Registry#withOptions`).
+ * @typedef {{trusted?: boolean, strict?: boolean, registry?: import('../registry.cjs'), deprecations?: 'once' | 'every' | 'off' | 'error', onDeprecated?: ((warning: import('../schema/deprecations.cjs').Warning) => void) | null}} Options
  */
-function strictly(registry, strict) {
-  return registry && strict !== undefined ? registry.putStrict(strict) : registry;
-}
 
 
 /**

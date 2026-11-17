@@ -12,7 +12,8 @@ import { decode, Registry, Schema, DXNKeyword, DXNDate, DXNDateTime, DXNStruct }
 // - G8: a field computed when it is filled (`computed: :now`);
 // - G9: the sized sugar `:int8`, `:int16`, `:uint8` and `:uint16`.
 //
-// G1 (`:rest`, `:closed`) is still open, and G4 is a sentence in DXNS.md.
+// G1 (typed and closed extras) is in rest.spec.js, G10 (deprecation
+// warnings) in deprecation.spec.js, and G4 is a sentence in DXNS.md.
 describe('TypeSpec gaps', () => {
   /** @param {string} text @param {any} [registry] */
   const compiled = (text, registry = new Registry()) => Schema.compile(decode(text), registry);
@@ -179,6 +180,23 @@ describe('TypeSpec gaps', () => {
       expect(refusal(decode('%{meows: true}'), r, 'Pet')).to.equal(
         'value does not match "Pet": field "kind" is missing; it chooses the variant'
       );
+    });
+
+    it('a union of schemas explains by the schema its field chooses', () => {
+      const r = compiled(`
+        %{
+          Cat: %schema{kind: {:const "cat"}, meows: :boolean}
+          Dog: %schema{kind: {:const "dog"}, barks: :boolean}
+          Cow: %schema{kind: :string}
+          Home: %schema{pet: {:doc {:one-of Cat Dog} %{discriminator: :kind}}}
+        }`);
+      let why = '';
+      try {
+        decode('%Home{pet: %Cow{kind: "cat"}}', { registry: r });
+      } catch (err) {
+        why = /** @type {Error} */ (err).message;
+      }
+      expect(why).to.include('kind "cat" chooses Cat');
     });
 
     it("every variant has the field, written in a field's type too", () => {

@@ -28,8 +28,10 @@ const { dxnEquals, dxnCompare } = require('./equality.cjs');
  * `bases` and `drops` are what a `%schema` or `%shape` is built from
  * (`DXNS.md` §4b): `bases` the head's `extends` and `includes` names, as
  * `[kind, name, version]` in the order written (`version` `null` when the
- * head names none), and `drops` the body's `- field` names. Every other
- * struct has none; the schema compiler reads them.
+ * head names none), and `drops` the body's `- field` names, `"*"` for
+ * `- *` (closed, `DXNS.md` §4c). `rest` is the body's `* K => V`, as
+ * `{key, value}`, the type of its extras; `null` when it has none. Every
+ * other struct has none of these; the schema compiler reads them.
  */
 class DXNStruct {
   /**
@@ -39,8 +41,9 @@ class DXNStruct {
    * @param {Array<[unknown, unknown]>} [extra]
    * @param {Base[]} [bases]
    * @param {string[]} [drops]
+   * @param {Rest | null} [rest]
    */
-  constructor(name, fields, version = null, extra = [], bases = [], drops = []) {
+  constructor(name, fields, version = null, extra = [], bases = [], drops = [], rest = null) {
     if (typeof name !== 'string') throw new TypeError('DXNStruct name must be a string');
     this.name = name;
     this.fields = fields;
@@ -52,6 +55,8 @@ class DXNStruct {
     this.bases = bases;
     /** @type {string[]} */
     this.drops = drops;
+    /** @type {Rest | null} */
+    this.rest = rest;
   }
 
   /**
@@ -63,16 +68,28 @@ class DXNStruct {
    * @returns {DXNStruct}
    */
   withFields(fields) {
-    return new DXNStruct(this.name, fields, this.version, this.extra, this.bases, this.drops);
+    return new DXNStruct(this.name, fields, this.version, this.extra, this.bases, this.drops, this.rest);
   }
 
   /**
    * Whether this is a `%schema` or `%shape` built from others (`DXNS.md`
-   * §4b): one naming a base, or leaving a field out.
+   * §4b): one naming a base, or leaving a field out. `- *` closes a body
+   * and `* K => V` types its extras (§4c); neither makes it built.
    * @returns {boolean}
    */
   isBuilt() {
-    return this.bases.length > 0 || this.drops.length > 0;
+    return this.bases.length > 0 || this.drops.some((field) => field !== '*');
+  }
+
+  /**
+   * Whether this `%schema` or `%shape` says something only text can say:
+   * built from others (`DXNS.md` §4b), closed (`- *`) or with typed
+   * extras (`* K => V`, §4c). Such a struct has no `.dxnb` form, and a
+   * reader keeps it as written rather than reading it with a schema.
+   * @returns {boolean}
+   */
+  isSchemaSyntax() {
+    return this.bases.length > 0 || this.drops.length > 0 || this.rest !== null;
   }
 
   /**
@@ -204,6 +221,12 @@ class DXNStruct {
     return new DXNStruct(name, { type: 'positional', values }, version, extra);
   }
 }
+
+/**
+ * @typedef {{key: unknown, value: unknown}} Rest
+ *   A `%schema`'s or `%shape`'s `* K => V` (`DXNS.md` §4c): the type
+ *   every extra key matches, and the type of its value, as written.
+ */
 
 /**
  * @typedef {['extends' | 'includes', string, number | null]} Base

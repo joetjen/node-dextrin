@@ -56,7 +56,8 @@ describe('schema annotations, {:doc T %{...}}', () => {
     expect(takes(0n, 'Port')).to.equal(false);
     expect(() => decode('%Order(2){id: 1, email: "a@b"}', { registry: r })).not.to.throw();
     expect(() => decode('%Order(2){id: 1, email: 5}', { registry: r })).to.throw();
-    expect(() => decode('%Order(2){id: 1, email: "a@b", legacy: "x"}', { registry: r })).not.to.throw();
+    // A deprecated field warns (deprecation.spec.js); heard here, and let pass.
+    expect(() => decode('%Order(2){id: 1, email: "a@b", legacy: "x"}', { registry: r, onDeprecated: () => {} })).not.to.throw();
   });
 
   it("a schema's, a named type's and a generic's annotations are readable by name", () => {

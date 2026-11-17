@@ -17,9 +17,9 @@
 
 class Compiled {
   /**
-   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}, bases?: import('../values/struct.cjs').Base[]}} spec
+   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}, bases?: import('../values/struct.cjs').Base[], extras?: Extras}} spec
    */
-  constructor({ name = null, version = 1, fields = [], annotations = {}, bases = [] } = {}) {
+  constructor({ name = null, version = 1, fields = [], annotations = {}, bases = [], extras = 'open' } = {}) {
     this.name = name;
     this.version = version;
     this.fields = fields;
@@ -37,6 +37,13 @@ class Compiled {
      * @type {import('../values/struct.cjs').Base[]}
      */
     this.bases = bases;
+    /**
+     * What it takes beyond its fields (DXNS.md §4c): any extra
+     * (`'open'`), none (`'closed'`, `- *`), or those whose key and value
+     * match a type each (`{key, value}`, `* K => V`).
+     * @type {Extras}
+     */
+    this.extras = extras;
   }
 
   /** @returns {string[]} */
@@ -69,5 +76,10 @@ class Compiled {
     return DXNStruct.keyed(/** @type {string} */ (this.name), pairs, null, extra);
   }
 }
+
+/**
+ * @typedef {'open' | 'closed' | {key: import('./type-expr.cjs').TypeExpr, value: import('./type-expr.cjs').TypeExpr}} Extras
+ *   What a schema or shape takes beyond its fields (DXNS.md §4c).
+ */
 
 module.exports = Compiled;

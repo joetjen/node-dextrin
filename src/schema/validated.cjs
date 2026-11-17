@@ -30,13 +30,87 @@ class Validated {
    * @param {string[]} [also] the schemas the value passes as besides its
    *   own: those its schema extends, and that it is a valid one of
    *   (`DXNS.md` §4b).
+   * @param {{version?: number | null, asRead?: DXNStruct | null, refused?: Error | null}} [read]
+   *   what a pinned field needs (`DXNS.md` §5c): see the fields below.
    */
-  constructor(name, value, also = []) {
+  constructor(name, value, also = [], { version = null, asRead = null, refused = null } = {}) {
     this.name = name;
     this.value = value;
     /** @type {string[]} */
     this.also = also;
+    /**
+     * The version it was read or checked with (`null` when unknown).
+     * @type {number | null}
+     */
+    this.version = version;
+    /**
+     * The struct as that version reads it, before any materializer: what
+     * a field pinned to that version takes instead (`DXNS.md` §5c).
+     * @type {DXNStruct | null}
+     */
+    this.asRead = asRead;
+    /**
+     * Why it has no value -- an older version with no materializer to
+     * upgrade it -- which stands unless a pinned field takes `asRead`.
+     * @type {Error | null}
+     */
+    this.refused = refused;
   }
+
+  /**
+   * This wrapper holding `value` instead, and otherwise the same.
+   * @param {unknown} value
+   * @param {{refused?: Error | null}} [changes]
+   * @returns {Validated}
+   */
+  with(value, changes = {}) {
+    return new Validated(this.name, value, this.also, {
+      version: this.version,
+      asRead: this.asRead,
+      refused: changes.refused === undefined ? this.refused : changes.refused
+    });
+  }
+}
+
+/**
+ * `value` with every wrapper removed, as `strip` does -- or, thrown, the
+ * first refusal one still holds: a struct no field took as read, and that
+ * could not be upgraded (`DXNS.md` §5c).
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function unwrap(value) {
+  const error = refusal(value);
+  if (error) throw error;
+  return strip(value);
+}
+
+/**
+ * The first refusal a wrapper in `value` holds, however deep; `null` when
+ * none does.
+ * @param {unknown} value
+ * @returns {Error | null}
+ */
+function refusal(value) {
+  if (value instanceof Validated) return value.refused ?? refusal(value.value);
+  /** @param {Iterable<unknown>} items @returns {Error | null} */
+  const first = (items) => {
+    for (const item of items) {
+      const found = refusal(item);
+      if (found) return found;
+    }
+    return null;
+  };
+  if (Array.isArray(value)) return first(value);
+  if (value instanceof DXNList || value instanceof DXNTuple || value instanceof DXNSortedSet) return first(value.items);
+  if (value instanceof DXNOrderedMap) return first(value.pairs.flat());
+  if (value instanceof Map) return first(Array.from(value.entries()).flat());
+  if (value instanceof Set) return first(value);
+  if (value instanceof DXNStruct) {
+    return value.fields.type === 'keyed' ? first(value.fields.pairs.map(([, v]) => v)) : first(value.fields.values);
+  }
+  if (value instanceof DXNCustomTag) return refusal(value.value);
+  return null;
 }
 
 /**
@@ -65,3 +139,4 @@ function strip(value) {
 
 module.exports = Validated;
 module.exports.strip = strip;
+module.exports.unwrap = unwrap;
