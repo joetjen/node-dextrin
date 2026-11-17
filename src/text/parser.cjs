@@ -373,18 +373,30 @@ class Parser {
   }
 
   /**
-   * The rest of a struct after its `%`: its name, its version, and its
-   * keyed or positional body.
+   * The rest of a struct after its `%`: its name, its version, the
+   * `extends` and `includes` clauses a `%schema` or `%shape` may carry
+   * (`DXNS.md` §4b), and its keyed or positional body.
+   *
+   * A schema or shape built from others -- one naming a base, or leaving
+   * a field out -- stays a `DXNStruct` as it is written, whatever the
+   * registry holds: the schema compiler reads it.
    * @param {number} start where the struct's `%` is, for its errors
    * @returns {DXNStruct | Validated}
    */
   parseStructBody(start) {
-    const name = this.next('IDENTIFIER').value;
+    const nameTok = this.next('IDENTIFIER');
+    const name = nameTok.value;
     const version = this.parseStructVersion();
+    const bases = structBases(name, this.parseHeadWords(), nameTok.start);
     if (this.at('LBRACE')) {
       // Entries keyed by a name are the struct's fields; any other map
       // key (DXN.md §1.6) is an extra field's (§4.7).
-      const entries = this.parseEntries(true);
+      /** @type {string[]} */
+      const drops = [];
+      const entries = this.parseEntries(true, drops);
+      if (drops.length > 0 && !BUILDABLE.has(name)) {
+        throw new ParseError(`only a %schema or a %shape drops a field (- name); %${name} does not`, nameTok.start);
+      }
       checkPairs(entries);
       /** @type {Array<[string, unknown]>} */
       const pairs = [];
@@ -394,10 +406,31 @@ class Parser {
         if (DXNStruct.isName(key)) pairs.push([/** @type {string} */ (DXNStruct.extraKey(key)), value]);
         else extra.push([key, value]);
       }
+      if (bases.length > 0 || drops.length > 0) return new DXNStruct(name, { type: 'keyed', pairs }, version, extra, bases, drops);
       return this.materializeStruct(name, { type: 'keyed', pairs }, version, extra, start);
     }
     const { values, extra } = this.parsePositionalBody();
+    if (bases.length > 0) return new DXNStruct(name, { type: 'positional', values }, version, extra, bases);
     return this.materializeStruct(name, { type: 'positional', values }, version, extra, start);
+  }
+
+  /**
+   * The words between a struct's head and its body -- `extends User(3)
+   * Staff includes Audit` -- each with the version it may carry. Every
+   * one is a plain identifier here, so `extends` stays an ordinary
+   * symbol everywhere else; `structBases` reads them as clauses.
+   * @returns {Array<{word: string, version: number | null, offset: number}>}
+   */
+  parseHeadWords() {
+    /** @type {Array<{word: string, version: number | null, offset: number}>} */
+    const words = [];
+    while (this.at('IDENTIFIER')) {
+      this.begin('head-word');
+      const tok = this.next('IDENTIFIER');
+      words.push({ word: tok.value, version: this.parseStructVersion(), offset: tok.start });
+      this.end();
+    }
+    return words;
   }
 
   /**
@@ -496,18 +529,28 @@ class Parser {
     }
   }
 
-  /** `{ map_entry* }`, ordered pairs — used by both `map_lit` and `struct_keyed`. */
   /**
+   * `{ map_entry* }`, ordered pairs — used by both `map_lit` and
+   * `struct_keyed`. A struct's keyed body may also hold `- field`
+   * entries (`DXNS.md` §4b), whose names go to `drops`; a map's may not.
    * @param {boolean} ownNode whether the entries are a node of their own,
    *   a struct's keyed body, rather than the map's own contents.
+   * @param {string[] | null} [drops] where a struct's `- field` names go.
    */
-  parseEntries(ownNode) {
+  parseEntries(ownNode, drops = null) {
     if (ownNode) this.begin('keyed');
     this.next('LBRACE');
     this.mark('open');
     /** @type {Array<[unknown, unknown]>} */
     const pairs = [];
     while (!this.at('RBRACE')) {
+      if (drops && this.at('MINUS')) {
+        this.begin('drop');
+        this.next('MINUS');
+        drops.push(this.next('IDENTIFIER').value);
+        this.end();
+        continue;
+      }
       this.begin('entry');
       if (this.at('MAP_KEY')) {
         const key = this.keywordValue(this.next('MAP_KEY').value);
@@ -730,6 +773,52 @@ function parseTree(text, opts = {}) {
   const parser = new Parser(tokens, { ...opts, recordTree: true });
   const value = Validated.strip(parser.parseDocument());
   return { value, tree: /** @type {SyntaxNode[]} */ (parser.recording)[0], tokens };
+}
+
+/** The structs that may be built from others (`DXNS.md` §4b). */
+const BUILDABLE = new Set(['schema', 'shape']);
+
+/**
+ * The words of a struct's head read as `extends` and `includes` clauses
+ * (`DXNS.md` §4b): each at most once, each naming one base or more, only
+ * on a `%schema` or a `%shape`. Answers the bases as
+ * `[kind, name, version]`, in the order written.
+ * @param {string} name the struct's name.
+ * @param {Array<{word: string, version: number | null, offset: number}>} words
+ * @param {number} offset where the struct's name is, for its errors.
+ * @returns {import('../values/struct.cjs').Base[]}
+ */
+function structBases(name, words, offset) {
+  if (words.length === 0) return [];
+  if (!BUILDABLE.has(name)) {
+    throw new ParseError(`only a %schema or a %shape names bases in its head; %${name} does not`, offset);
+  }
+  if (!isClause(words[0].word)) {
+    throw new ParseError(`a head clause begins with extends or includes, got ${words[0].word}`, words[0].offset);
+  }
+  /** @type {import('../values/struct.cjs').Base[]} */
+  const bases = [];
+  /** @type {Array<{kind: 'extends' | 'includes', offset: number, count: number}>} */
+  const clauses = [];
+  for (const { word, version, offset: at } of words) {
+    if (isClause(word)) {
+      if (version !== null) throw new ParseError(`extends and includes each name one base or more: extends User(3)`, at);
+      if (clauses.some((c) => c.kind === word)) throw new ParseError('extends and includes stand at most once each in a head', at);
+      clauses.push({ kind: /** @type {'extends' | 'includes'} */ (word), offset: at, count: 0 });
+    } else {
+      const clause = clauses[clauses.length - 1];
+      clause.count += 1;
+      bases.push([clause.kind, word, version]);
+    }
+  }
+  const empty = clauses.find((c) => c.count === 0);
+  if (empty) throw new ParseError('extends and includes each name one base or more: extends User(3)', empty.offset);
+  return bases;
+}
+
+/** @param {string} word @returns {boolean} */
+function isClause(word) {
+  return word === 'extends' || word === 'includes';
 }
 
 /** @param {unknown} err @returns {string} */

@@ -89,9 +89,13 @@ map_entry    = ( identifier , ":" , value )          (* shorthand — plain-atom
              | ( value , "=>" , value ) ;             (* arrow — a key type of §1.6 *)
 
 struct_lit   = "%" , identifier , [ "(" , integer , ")" ] ,   (* version, DXNS.md §8 *)
-                 ( ( "{" , { map_entry } , "}" )      (* keyed *)
+                 { clause } ,                         (* %schema and %shape only, DXNS.md §4b *)
+                 ( ( "{" , { map_entry | drop } , "}" )   (* keyed; drop: %schema and %shape only *)
                  | ( "[" , { item } , { map_entry } , "]" ) ) ;   (* positional, then extra fields *)
 item         = value ;                                (* a value not followed by "=>" (DXNS.md §7) *)
+clause       = ( "extends" | "includes" ) , base , { base } ;
+drop         = "-" , identifier ;                     (* an inherited field left out, DXNS.md §4b *)
+base         = identifier , [ "(" , integer , ")" ] ;
 
 tag_form     = "@" , identifier , [ "(" , regex_flags , ")" ] , value ;
                                                       (* built-in tag name -> §1.3; else custom *)
@@ -440,7 +444,9 @@ register formally before any non-`dextrin` interop is expected.
 
 **Duration bitmask** (`T_DURATION` payload) — one byte, low bit first;
 each set bit is followed, in bit order, by that field's value as a signed
-integer:
+integer. A writer sets the bit of a field that is present and not zero,
+as text leaves a zero field out (§1.5); a duration that is zero
+throughout has no bit set:
 
 | Bit | Field | Unit |
 |---|---|---|

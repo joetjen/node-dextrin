@@ -17,9 +17,9 @@
 
 class Compiled {
   /**
-   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}}} spec
+   * @param {{name?: string | null, version?: number, fields?: import('./field.cjs')[], annotations?: {[k: string]: unknown}, bases?: import('../values/struct.cjs').Base[]}} spec
    */
-  constructor({ name = null, version = 1, fields = [], annotations = {} } = {}) {
+  constructor({ name = null, version = 1, fields = [], annotations = {}, bases = [] } = {}) {
     this.name = name;
     this.version = version;
     this.fields = fields;
@@ -29,6 +29,14 @@ class Compiled {
      * @type {{[k: string]: unknown}}
      */
     this.annotations = annotations;
+    /**
+     * What it was built from (DXNS.md §4b), as `[kind, name, version]`:
+     * each schema at the version it was built with, a shape with `null`.
+     * What an `extends` makes it acceptable as; empty for a schema
+     * written whole.
+     * @type {import('../values/struct.cjs').Base[]}
+     */
+    this.bases = bases;
   }
 
   /** @returns {string[]} */

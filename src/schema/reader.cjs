@@ -125,7 +125,7 @@ function materialized(registry, reading, latest, fields, given) {
   const value = materializer
     ? built(registry, materializer, reading, latest, pairs, separated.extra)
     : DXNStruct.keyed(name, pairs, latest.version, separated.extra);
-  return { value: new Validated(name, value), registry };
+  return { value: new Validated(name, value, Validator.alsoValidAs(reading, separated.fields, registry)), registry };
 }
 
 /**
