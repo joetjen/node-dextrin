@@ -37,7 +37,7 @@ const Field = require('./field.cjs');
 const Bases = require('./bases.cjs');
 const { canonical } = require('../canonical.cjs');
 const DXNRegex = require('../values/regex.cjs');
-const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS } = require('./type-expr.cjs');
+const { resolutions, comparable, nonzeroNumber, span, TYPE_KEYS, instantiate, paramName, matches } = require('./type-expr.cjs');
 const Format = require('./format.cjs');
 const { dxnEquals, dxnCompare } = require('../values/equality.cjs');
 
@@ -49,6 +49,10 @@ const PRIMITIVES = new Set([
 
 /** The sized integers' ranges (DXNS.md §1's sugar). */
 const SIZED = new Map([
+  ['int8', [-128n, 127n]],
+  ['int16', [-32_768n, 32_767n]],
+  ['uint8', [0n, 255n]],
+  ['uint16', [0n, 65_535n]],
   ['int32', [-2_147_483_648n, 2_147_483_647n]],
   ['int64', [-9_223_372_036_854_775_808n, 9_223_372_036_854_775_807n]],
   ['uint32', [0n, 4_294_967_295n]],
@@ -56,7 +60,13 @@ const SIZED = new Map([
 ]);
 
 /** What a doc may say about a type (DXNS.md §1b), in the order its refusal names them. */
-const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
+const ANNOTATION_KEYS = [
+  'title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values',
+  'discriminator', 'secret', 'key', 'visibility', 'messages'
+];
+
+/** The stages a field may be seen in, what `visibility` names (DXNS.md §1b). */
+const VISIBILITIES = ['create', 'read', 'update', 'delete', 'query'];
 
 class SchemaCompileError extends Error {
   /** @param {string} message */
@@ -110,17 +120,29 @@ function compile(schemaDoc, baseRegistry, names = new Map()) {
   }
 
   const aliased = compileAliases(aliasEntries, baseRegistry, names, schemaEntries);
+  const document = new Map([...aliasEntries, ...schemaEntries]);
   let registry = aliased.registry;
   for (const [name, entry] of schemaEntries) {
     let compiled;
     try {
       // A schema built from others (DXNS.md §4b) takes the fields built
       // for it, each now resolved; any other is compiled from its body.
+      // A generic's use in either asks which schema extends which, so the
+      // registry and the document go along.
       const built = aliased.built.get(name);
-      compiled = built ? builtEntry(entry, built, registry.typeAliases) : compileEntry(entry, scopeOf(registry.typeAliases, names));
+      const lookup = { registry, document };
+      compiled = built
+        ? builtEntry(entry, built, withLookup(new Map(registry.typeAliases), lookup))
+        : compileEntry(entry, scopeOf(registry.typeAliases, names, lookup));
     } catch (err) {
       throw new SchemaCompileError(`schema ${JSON.stringify(name)}: ${errorMessage(err)}`);
     }
+    // A discriminator in a field's type, its variants resolved.
+    discriminators(
+      new Map([[name, { form: 'shape', name, fields: compiled.fields }]]),
+      { document, compiled: registry.typeAliases, scope: scopeOf(registry.typeAliases, names, { registry, document }), registry },
+      aliased.built
+    );
     compiled.name = name;
     registry = registry.addStructSchema(name, compiled);
   }
@@ -169,7 +191,8 @@ function compileAliases(aliasEntries, registry, names, schemaEntries) {
   // the order of a map's entries, which DXN does not give, never matters.
   /** @type {Array<[string, unknown]>} */
   const siblings = aliasEntries.map(([n]) => [n, { form: 'named', name: n }]);
-  const scope = scopeOf(new Map([...registry.typeAliases, ...siblings]), names);
+  const document = new Map([...aliasEntries, ...schemaEntries]);
+  const scope = scopeOf(new Map([...registry.typeAliases, ...siblings]), names, { registry, document });
   const extending = aliasEntries.filter(([, v]) => isBuilt(v));
   /** @type {Map<string, any>} */
   const compiled = new Map();
@@ -182,25 +205,121 @@ function compileAliases(aliasEntries, registry, names, schemaEntries) {
     }
   }
   /** @type {Lookup} */
-  const lookup = { document: new Map([...aliasEntries, ...schemaEntries]), compiled, scope, registry };
+  const lookup = { document, compiled, scope, registry };
   /** @type {Map<string, Built>} */
   const built = new Map();
   for (const [name] of [...extending, ...schemaEntries.filter(([, v]) => isBuilt(v))]) build(name, [], lookup, built);
   withBuiltShapes(compiled, extending, built);
   guarded(compiled);
-  const known = new Map([...registry.typeAliases, ...compiled]);
+  discriminators(compiled, lookup, built);
+  const known = withLookup(new Map([...registry.typeAliases, ...compiled]), { registry, document });
   let result = registry;
   for (const [name] of aliasEntries) {
     let typeExpr;
     try {
       const own = compiled.get(name);
-      typeExpr = own.form === 'generic' ? { ...own, body: resolved(own.body, known, [name]) } : resolved(own, known, [name]);
+      typeExpr =
+        own.form === 'generic'
+          ? { ...own, body: resolved(own.body, withLookup(new Map([...known, ...paramBounds(own.params)]), /** @type {any} */ (known).lookup), [name]) }
+          : resolved(own, known, [name]);
     } catch (err) {
       throw new SchemaCompileError(`named type ${JSON.stringify(name)}: ${errorMessage(err)}`);
     }
     result = result.putTypeAlias(name, typeExpr);
   }
   return { registry: result, built };
+}
+
+// ---- discriminators (DXNS.md §1b) -------------------------------------------
+
+/**
+ * Every variant under a `discriminator` has that field: the field a
+ * value's variant is chosen by. Each named type is looked at in name
+ * order; the variants of a schema or a shape of the document, or of one
+ * loaded, are found by name.
+ * @param {Map<string, any>} compiled @param {Lookup} lookup @param {Map<string, Built>} built
+ */
+function discriminators(compiled, lookup, built) {
+  for (const name of Array.from(compiled.keys()).sort(byCodepoint)) {
+    for (const [field, variants] of discriminated(compiled.get(name))) {
+      for (const variant of variants) {
+        const names = variantFields(variant, lookup, built, []);
+        if (names === null) {
+          throw new SchemaCompileError(
+            `${JSON.stringify(name)}: its discriminator ${field} needs every variant to be a schema or a shape; ${variantLabel(variant)} is not`
+          );
+        }
+        if (!names.includes(field)) {
+          throw new SchemaCompileError(`${JSON.stringify(name)}: its discriminator ${field} is no field of ${variantLabel(variant)}`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Every `{:doc {:any-of ...} %{discriminator: f}}` in `type`, a field's
+ * type included, as `[f, variants]`.
+ * @param {unknown} type @returns {Array<[string, any[]]>}
+ */
+function discriminated(type) {
+  if (Array.isArray(type)) return type.flatMap(discriminated);
+  if (type instanceof Field) return discriminated(type.type);
+  if (type === null || typeof type !== 'object' || Object.getPrototypeOf(type) !== Object.prototype) return [];
+  const t = /** @type {any} */ (type);
+  if (t.form === 'doc') {
+    const own = typeof t.notes.discriminator === 'string' ? [/** @type {[string, any[]]} */ ([t.notes.discriminator, variantList(t.elem)])] : [];
+    return [...own, ...discriminated(t.elem)];
+  }
+  return Object.values(t).flatMap(discriminated);
+}
+
+/** An any-of's or one-of's variants, through annotations. @param {any} type @returns {any[]} */
+function variantList(type) {
+  return type.form === 'doc' ? variantList(type.elem) : type.variants;
+}
+
+/**
+ * The names of a variant's fields: a shape's, or a schema's of the
+ * document or one loaded; `null` for a variant that is neither.
+ * @param {any} variant @param {Lookup} lookup @param {Map<string, Built>} built @param {string[]} seen
+ * @returns {string[] | null}
+ */
+function variantFields(variant, lookup, built, seen) {
+  switch (variant.form) {
+    case 'doc':
+      return variantFields(variant.elem, lookup, built, seen);
+    case 'shape':
+      return variant.fields.map((/** @type {Field} */ f) => f.name);
+    case 'named': {
+      const known = new Map([...lookup.registry.typeAliases, ...lookup.compiled]);
+      const type = known.get(variant.name);
+      return type === undefined || seen.includes(variant.name) ? null : variantFields(type, lookup, built, [variant.name, ...seen]);
+    }
+    case 'reference': {
+      const own = built.get(variant.name);
+      if (own) return own.fields.map((f) => f.name);
+      const raw = undoc(lookup.document.get(variant.name));
+      if (raw instanceof DXNStruct && raw.name === 'schema' && raw.fields.type === 'keyed') {
+        try {
+          return raw.fields.pairs.map(([key, value]) => compileField(key, value, lookup.scope).name);
+        } catch {
+          return null;
+        }
+      }
+      const found = lookup.registry.fetchStructSchema(variant.name);
+      return found ? found.compiled.fields.map((f) => f.name) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** @param {any} variant @returns {string} */
+function variantLabel(variant) {
+  if (variant.form === 'doc') return variantLabel(variant.elem);
+  if (variant.form === 'named' || variant.form === 'reference') return variant.name;
+  return 'an inline variant';
 }
 
 // ---- built from others (DXNS.md §4b) ---------------------------------------
@@ -340,7 +459,8 @@ function caseNames(type) {
 function foundBases(name, bases, path, lookup, built) {
   return bases.map(([kind, base, version]) => {
     // A tree's full name for a sibling written bare (DXNS.md §6).
-    const full = /** @type {Map<string, string> | undefined} */ (/** @type {any} */ (lookup.scope).names)?.get(base) ?? base;
+    const written = /** @type {Map<string, string> | undefined} */ (/** @type {any} */ (lookup.scope).names)?.get(base) ?? base;
+    const full = baseTarget(written, lookup, []);
     try {
       const at = foundBase(full, version, path, lookup, built);
       return { kind, name: full, fields: at.fields, version: at.version };
@@ -360,6 +480,11 @@ function foundBases(name, bases, path, lookup, built) {
  * @returns {{fields: Field[], version: number | null}}
  */
 function foundBase(base, version, path, lookup, built) {
+  const used = genericUse(base, lookup);
+  if (used !== null) {
+    if (version !== null) throw new Error(`a shape has no versions, so ${base}(${version}) names none`);
+    return { fields: used, version: null };
+  }
   if (!lookup.document.has(base)) return loadedBase(base, version, lookup.registry);
   const raw = undoc(lookup.document.get(base));
   if (!(raw instanceof DXNStruct) || (raw.name !== 'schema' && raw.name !== 'shape')) throw new Error('a base is a %schema or a %shape');
@@ -370,6 +495,53 @@ function foundBase(base, version, path, lookup, built) {
   }
   if (raw.name === 'shape') return { fields: /** @type {Field[]} */ (shapeFields(lookup.compiled.get(base))), version: null };
   return atVersion(base, raw, version, compileEntry(raw, lookup.scope).fields, lookup);
+}
+
+/**
+ * A base named by a named type that stands for a schema or a shape
+ * (`Human: Person`) is that schema or shape: its name, followed through
+ * such names. Any other name is itself.
+ * @param {string} name @param {Lookup} lookup @param {string[]} seen @returns {string}
+ */
+function baseTarget(name, lookup, seen) {
+  const raw = undoc(lookup.document.get(name));
+  if (raw instanceof DXNStruct && (raw.name === 'schema' || raw.name === 'shape')) return name;
+  if (seen.includes(name)) return name;
+  const type = new Map([...lookup.registry.typeAliases, ...lookup.compiled]).get(name);
+  if (type === undefined) return name;
+  const target = undocType(type);
+  return target.form === 'reference' || target.form === 'named' ? baseTarget(target.name, lookup, [name, ...seen]) : name;
+}
+
+/**
+ * A named type that is one use of a generic standing for a shape
+ * (`PageOfInt: {:of Page :integer}`): that shape's fields; `null` for any
+ * other name.
+ * @param {string} name @param {Lookup} lookup @returns {Field[] | null}
+ */
+function genericUse(name, lookup) {
+  const known = new Map([...lookup.registry.typeAliases, ...lookup.compiled]);
+  const type = known.get(name);
+  if (type === undefined) return null;
+  const use = undocType(type);
+  if (use.form !== 'apply') return null;
+  const definition = known.get(use.name);
+  if (definition === undefined) return null;
+  const generic = undocType(definition);
+  if (generic.form !== 'generic') return null;
+  // Its defaults filled: a use may leave them out.
+  let args;
+  try {
+    args = filledArgs(use.name, use.args, known);
+  } catch {
+    return null;
+  }
+  return shapeFields(instantiate(generic.params, generic.body, args));
+}
+
+/** A compiled type without the annotations around it. @param {any} type @returns {any} */
+function undocType(type) {
+  return type && type.form === 'doc' ? undocType(type.elem) : type;
 }
 
 /**
@@ -432,11 +604,30 @@ function withBuiltShapes(compiled, extending, built) {
   }
 }
 
-/** The scope names compile in: the named types, and the document's `names`. @param {Map<string, unknown>} aliases @param {Map<string, string>} names */
-function scopeOf(aliases, names) {
+/**
+ * The scope names compile in: the named types, the document's `names`,
+ * and where a generic's bound looks for which schema extends which.
+ * @param {Map<string, unknown>} aliases @param {Map<string, string>} names @param {Lookup0 | null} [lookup]
+ */
+function scopeOf(aliases, names, lookup = null) {
   const scope = new Map(aliases);
   /** @type {any} */ (scope).names = names;
-  return scope;
+  return lookup ? withLookup(scope, lookup) : scope;
+}
+
+/**
+ * The registry and the document a generic's bound looks in, for a schema
+ * that extends another.
+ * @typedef {{registry: import('../registry.cjs'), document: Map<string, unknown>}} Lookup0
+ */
+
+/**
+ * `known`, carrying `lookup`: what more than the named types a bound check
+ * needs. @template {Map<string, any>} M @param {M} known @param {Lookup0 | null} lookup @returns {M}
+ */
+function withLookup(known, lookup) {
+  /** @type {any} */ (known).lookup = lookup;
+  return known;
 }
 
 /**
@@ -467,13 +658,13 @@ function compileNamed(name, raw, scope) {
     return { form: 'doc', elem: compiled, notes: annotations(notes, compiled) };
   }
   if (raw instanceof DXNTuple && raw.items[0] instanceof DXNKeyword && raw.items[0].name === 'generic') {
-    const [, params, body] = raw.items;
-    const list = params instanceof DXNList ? params.items : Array.isArray(params) ? params : null;
-    if (raw.items.length !== 3 || !list || list.length === 0 || !list.every((p) => p instanceof DXNSymbol)) {
+    const [, written, body] = raw.items;
+    const list = written instanceof DXNList ? written.items : Array.isArray(written) ? written : null;
+    if (raw.items.length !== 3 || !list) {
       throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
     }
-    const names = list.map((p) => /** @type {DXNSymbol} */ (p).name);
-    if (new Set(names).size !== names.length) throw new SchemaCompileError('a generic names a parameter twice');
+    const params = parameters(list, scope);
+    const names = params.map(paramName);
     if (body instanceof DXNStruct && body.name === 'schema') {
       throw new SchemaCompileError(
         'a struct schema cannot be generic: a struct goes on the wire under its one name; make the generic a %shape, or give each use a schema of its own'
@@ -481,11 +672,222 @@ function compileNamed(name, raw, scope) {
     }
     /** @type {Array<[string, unknown]>} */
     const bound = names.map((n) => [n, { form: 'param', name: n }]);
-    const inner = scopeOf(new Map([...scope, ...bound]), /** @type {any} */ (scope).names);
-    return { form: 'generic', params: names, body: compileNamed(name, body, inner) };
+    const inner = scopeOf(new Map([...scope, ...bound, ...paramBounds(params)]), /** @type {any} */ (scope).names, /** @type {any} */ (scope).lookup ?? null);
+    return { form: 'generic', params, body: compileNamed(name, body, inner) };
   }
   const type = compileTypeExpr(raw, scope);
   return type.form === 'shape' && type.name === null ? { ...type, name } : type;
+}
+
+/**
+ * `{:generic [t ...] body}`'s parameters, distinct: a bare symbol, or
+ * `{t bound}` or `{t bound default}`, the bound and default compiled in
+ * the scope around the generic. A bare parameter stays its name; one with
+ * a bound or a default is `{name, bound, default}`, `default` `null` for
+ * none. A parameter without a default follows none with one, and a
+ * default is within its own bound.
+ * @param {unknown[]} list @param {Map<string, unknown>} scope
+ * @returns {import('./type-expr.cjs').Param[]}
+ */
+function parameters(list, scope) {
+  const params = list.map((p) => parameter(p, scope));
+  const names = params.map(paramName);
+  if (params.length === 0) throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
+  if (new Set(names).size !== names.length) throw new SchemaCompileError('a generic names a parameter twice');
+  const defaulted = params.map((p) => paramDefault(p) !== null);
+  if (defaulted.some((d, i) => d && defaulted[i + 1] === false)) {
+    throw new SchemaCompileError("a generic's parameter without a default cannot follow one with a default");
+  }
+  const bad = params.find((p) => {
+    const given = paramDefault(p);
+    return given !== null && !withinBound(given, paramBound(p), scope);
+  });
+  if (bad !== undefined) throw new SchemaCompileError(`${paramName(bad)}'s default is outside its own bound`);
+  return params;
+}
+
+/** @param {unknown} written @param {Map<string, unknown>} scope @returns {import('./type-expr.cjs').Param} */
+function parameter(written, scope) {
+  if (written instanceof DXNSymbol) return written.name;
+  if (written instanceof DXNTuple && written.items[0] instanceof DXNSymbol && (written.items.length === 2 || written.items.length === 3)) {
+    const [name, bound, given] = written.items;
+    return {
+      name: /** @type {DXNSymbol} */ (name).name,
+      bound: compileTypeExpr(bound, scope),
+      default: written.items.length === 3 ? compileTypeExpr(given, scope) : null
+    };
+  }
+  throw new SchemaCompileError(`a generic's parameter is a symbol, {t bound} or {t bound default}, not ${shown(written)}`);
+}
+
+/**
+ * The key a generic parameter's bound travels under in the scope of its
+ * generic's body: no name can be written so.
+ * @param {string} name @returns {string}
+ */
+function boundKey(name) {
+  return `\0bound\0${name}`;
+}
+
+/**
+ * A generic's parameters' bounds, under the keys a use inside its body
+ * finds them by; a bare parameter's is `:any`.
+ * @param {import('./type-expr.cjs').Param[]} params @returns {Array<[string, any]>}
+ */
+function paramBounds(params) {
+  return params.map((p) => [boundKey(paramName(p)), paramBound(p) ?? { form: 'any' }]);
+}
+
+/** A parameter's bound; `null` for a bare one, which takes anything. @param {import('./type-expr.cjs').Param} param @returns {any} */
+function paramBound(param) {
+  return typeof param === 'string' ? null : param.bound;
+}
+
+/** A parameter's default; `null` when it has none. @param {import('./type-expr.cjs').Param} param @returns {any} */
+function paramDefault(param) {
+  return typeof param === 'string' ? null : param.default;
+}
+
+/**
+ * `args` for the generic `name`: every parameter given or defaulted, the
+ * defaults filled in, each argument within its parameter's bound. A
+ * sibling not yet compiled takes them as they are; they are filled once
+ * it is.
+ * @param {string} name @param {any[]} args @param {Map<string, any>} known @returns {any[]}
+ */
+function filledArgs(name, args, known) {
+  const target = known.get(name);
+  if (target && target.form === 'named') return args;
+  if (!target || target.form !== 'generic') throw new SchemaCompileError(`{:of ${name} ...} names no generic`);
+  /** @type {import('./type-expr.cjs').Param[]} */
+  const params = target.params;
+  const required = params.filter((p) => paramDefault(p) === null).length;
+  if (args.length < required || args.length > params.length) {
+    const arity = required === params.length ? `${required}` : `${required} to ${params.length}`;
+    throw new SchemaCompileError(`${name} takes ${arity} type argument(s), {:of ${name} ...} gives ${args.length}`);
+  }
+  const filled = [...args, ...params.slice(args.length).map(paramDefault)];
+  const outside = params.findIndex((p, i) => !withinBound(filled[i], paramBound(p), known));
+  if (outside >= 0) {
+    throw new SchemaCompileError(
+      `{:of ${name} ...}'s ${paramName(params[outside])} takes what its bound takes; ${inspectArg(filled[outside])} is outside it`
+    );
+  }
+  return filled;
+}
+
+/** An argument as a refusal names it. @param {any} arg @returns {string} */
+function inspectArg(arg) {
+  if (arg.form === 'named' || arg.form === 'reference' || arg.form === 'param') return arg.name;
+  if (arg.form === 'primitive') return `:${arg.name}`;
+  return arg.form;
+}
+
+/**
+ * Whether `arg` is `bound`, or narrower (see `within`). A sibling not yet
+ * compiled, as argument or bound, passes for now: `resolved` checks again,
+ * through `filledArgs`, with every definition in hand.
+ * @param {any} arg @param {any} bound @param {Map<string, any>} known @returns {boolean}
+ */
+function withinBound(arg, bound, known) {
+  return pending(arg, known) || pending(bound, known) || within(arg, bound, known);
+}
+
+/** Whether `type` names a sibling not yet compiled. @param {any} type @param {Map<string, any>} known @returns {boolean} */
+function pending(type, known) {
+  if (type === null || type.form !== 'named') return false;
+  const target = known.get(type.name);
+  return target !== undefined && target.form === 'named' && target.name === type.name;
+}
+
+/**
+ * Whether `arg` is `bound`, or narrower: a refine or annotation of it, a
+ * name standing for it, a const or enum whose values it takes, a
+ * parameter whose own bound is within it, or a schema that extends it; a
+ * bound naming a type is that type. Nothing broader is worked out: DXNS
+ * has no general subtyping, so anything else is outside. A `null` or
+ * `:any` bound takes everything.
+ * @param {any} arg @param {any} bound @param {Map<string, any>} known @returns {boolean}
+ */
+function within(arg, bound, known) {
+  if (bound === null || bound.form === 'any') return true;
+  if (sameType(arg, bound)) return true;
+  if (arg.form === 'doc') return withinBound(arg.elem, bound, known);
+  if (bound.form === 'doc') return withinBound(arg, bound.elem, known);
+  if (arg.form === 'refine') return withinBound(arg.base, bound, known);
+  if (arg.form === 'enum') {
+    const resolvedBound = boundResolved(bound, known);
+    return arg.literals.every((/** @type {unknown} */ literal) => matches(resolvedBound, literal));
+  }
+  // A parameter passed on is within a bound when its own bound is.
+  if (arg.form === 'param') {
+    const own = known.get(boundKey(arg.name));
+    return own !== undefined && withinBound(own, bound, known);
+  }
+  if (arg.form === 'named') {
+    const type = known.get(arg.name);
+    if (type === undefined || (type.form === 'named' && type.name === arg.name)) return false;
+    return withinBound(type, bound, known);
+  }
+  if (arg.form === 'reference' && bound.form === 'reference') return extendsBase(arg.name, bound.name, known, []);
+  if (bound.form === 'named') {
+    const type = known.get(bound.name);
+    if (type === undefined || (type.form === 'named' && type.name === bound.name)) return false;
+    return withinBound(arg, type, known);
+  }
+  return false;
+}
+
+/** A bound that is a name, as the type it stands for. @param {any} bound @param {Map<string, any>} known @returns {any} */
+function boundResolved(bound, known) {
+  if (bound.form !== 'named') return bound;
+  const type = known.get(bound.name);
+  if (type === undefined || (type.form === 'named' && type.name === bound.name)) return bound;
+  return boundResolved(type, known);
+}
+
+/**
+ * Whether two compiled types are the same, part for part.
+ * @param {unknown} a @param {unknown} b @returns {boolean}
+ */
+function sameType(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameType(x, b[i]));
+  }
+  const structural = (/** @type {unknown} */ x) =>
+    x !== null && typeof x === 'object' && (Object.getPrototypeOf(x) === Object.prototype || x instanceof Field);
+  if (structural(a) || structural(b)) {
+    if (!structural(a) || !structural(b) || Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+    const ka = Object.keys(/** @type {object} */ (a));
+    const kb = Object.keys(/** @type {object} */ (b));
+    return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameType(/** @type {any} */ (a)[k], /** @type {any} */ (b)[k]));
+  }
+  return dxnEquals(a, b);
+}
+
+/**
+ * Whether the schema `name` extends `base`, directly or through others,
+ * in this document or as loaded.
+ * @param {string} name @param {string} base @param {Map<string, any>} known @param {string[]} seen @returns {boolean}
+ */
+function extendsBase(name, base, known, seen) {
+  if (name === base) return true;
+  if (seen.includes(name)) return false;
+  return extendedBases(name, known).some((b) => extendsBase(b, base, known, [name, ...seen]));
+}
+
+/** The bases the schema `name` extends. @param {string} name @param {Map<string, any>} known @returns {string[]} */
+function extendedBases(name, known) {
+  /** @type {Lookup0 | null} */
+  const lookup = /** @type {any} */ (known).lookup ?? null;
+  if (lookup === null) return [];
+  const raw = undoc(lookup.document.get(name));
+  /** @type {import('../values/struct.cjs').Base[]} */
+  let bases = [];
+  if (raw instanceof DXNStruct && raw.name === 'schema') bases = raw.bases;
+  else bases = lookup.registry.fetchStructSchema(name)?.compiled.bases ?? [];
+  return bases.filter(([kind]) => kind === 'extends').map(([, b]) => b);
 }
 
 /**
@@ -503,8 +905,7 @@ function resolved(type, known, path) {
       return resolved(target, known, [type.name, ...path]);
     }
     case 'apply':
-      applies(type.name, type.args.length, known);
-      return { ...type, args: type.args.map((/** @type {any} */ a) => resolved(a, known, path)) };
+      return { ...type, args: filledArgs(type.name, type.args.map((/** @type {any} */ a) => resolved(a, known, path)), known) };
     case 'generic':
       throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
     case 'shape':
@@ -631,19 +1032,9 @@ function unguardedNames(type) {
   }
 }
 
-/** Whether `name` is a generic taking `count` arguments. @param {string} name @param {number} count @param {Map<string, any>} known */
-function applies(name, count, known) {
-  const target = known.get(name);
-  if (target && target.form === 'named') return;
-  if (!target || target.form !== 'generic') throw new SchemaCompileError(`{:of ${name} ...} names no generic`);
-  if (target.params.length !== count) {
-    throw new SchemaCompileError(`${name} takes ${target.params.length} type argument(s), {:of ${name} ...} gives ${count}`);
-  }
-}
-
 /** @param {string} name @param {any} generic */
 function takesArguments(name, generic) {
-  return `${name} is generic: write {:of ${name} ${generic.params.join(' ')}}, with a type for each`;
+  return `${name} is generic: write {:of ${name} ${generic.params.map(paramName).join(' ')}}, with a type for each`;
 }
 
 /** @param {unknown} key @returns {string} */
@@ -773,12 +1164,59 @@ function compileField(key, value, aliases) {
       name,
       required: !optional,
       type,
-      default: hasField(fieldPairs, 'default') ? getField(fieldPairs, 'default') : Field.NO_DEFAULT,
+      default: fieldDefault(fieldPairs, type, aliases),
       description: /** @type {string | null} */ (getField(fieldPairs, 'description', null))
     });
   }
 
   return new Field({ name, required: !optional, type: compileTypeExpr(value, aliases) });
+}
+
+/**
+ * A field's default: the value written, or one computed when the field is
+ * filled. `computed: :now` takes a date, time, datetime or local
+ * date-time, possibly refined, annotated or nilable, and never stands
+ * beside a `default`.
+ * @param {Array<[string, unknown]>} pairs @param {any} type @param {Map<string, unknown>} aliases @returns {unknown}
+ */
+function fieldDefault(pairs, type, aliases) {
+  const written = hasField(pairs, 'default') ? getField(pairs, 'default') : Field.NO_DEFAULT;
+  if (!hasField(pairs, 'computed')) return written;
+  if (written !== Field.NO_DEFAULT) throw new SchemaCompileError('a %field has a default or is computed, not both');
+  const computed = getField(pairs, 'computed');
+  if (nameOf(computed) !== 'now') throw new SchemaCompileError(`a %field is computed: :now, the one value there is; not ${shown(computed)}`);
+  const kind = temporalKind(type, aliases);
+  if (kind === null) {
+    throw new SchemaCompileError(`a %field computed: :now is a date, time, datetime or local-datetime, not ${inspectType(type)}`);
+  }
+  return Field.computedNow(kind);
+}
+
+/** The temporal type `type` is, through refines, annotations, nil and names; `null` for any other. @param {any} type @param {Map<string, unknown>} aliases @returns {string | null} */
+function temporalKind(type, aliases) {
+  switch (type.form) {
+    case 'primitive':
+      return ['date', 'time', 'datetime', 'local-datetime'].includes(type.name) ? type.name : null;
+    case 'refine':
+      return temporalKind(type.base, aliases);
+    case 'doc':
+    case 'nilable':
+      return temporalKind(type.elem, aliases);
+    case 'named': {
+      const named = /** @type {any} */ (aliases.get(type.name));
+      if (named === undefined || (named.form === 'named' && named.name === type.name)) return null;
+      return temporalKind(named, aliases);
+    }
+    default:
+      return null;
+  }
+}
+
+/** A type's form, as a refusal names it. @param {unknown} type @returns {string} */
+function inspectType(type) {
+  if (typeof type === 'string') return `:${type}`;
+  if (type !== null && typeof type === 'object' && 'form' in type) return String(/** @type {any} */ (type).form);
+  return describe(type);
 }
 
 // ---- type expressions -------------------------------------------------------
@@ -884,8 +1322,8 @@ function compileTypeExpr(value, aliases) {
     if (tag === 'of') {
       if (!(rest[0] instanceof DXNSymbol) || rest.length < 2) throw new SchemaCompileError('a use of a generic is {:of Name type ...}');
       const name = fullName(rest[0].name, aliases);
-      applies(name, rest.length - 1, /** @type {any} */ (aliases));
-      return { form: 'apply', name, args: rest.slice(1).map((v) => compileTypeExpr(v, aliases)) };
+      const args = rest.slice(1).map((v) => compileTypeExpr(v, aliases));
+      return { form: 'apply', name, args: filledArgs(name, args, /** @type {Map<string, any>} */ (aliases)) };
     }
     if (tag === 'generic') throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
     if (tag === 'refine' && rest.length === 2 && rest[1] instanceof Map) {
@@ -1175,9 +1613,31 @@ function annotations(raw, type) {
     const what = annotation(key, named[key], type);
     if (what !== null) throw new SchemaCompileError(`a doc's ${key} is ${what}, not ${shown(named[key])}`);
   }
+  // `read-only` says `visibility: [:read]`; the two together would say it
+  // twice, perhaps differently.
+  if ('visibility' in named && 'read-only' in named) {
+    throw new SchemaCompileError("a doc's read-only and visibility say the same thing; give visibility alone");
+  }
   if ('values' in named) {
     const values = /** @type {Map<unknown, unknown>} */ (named.values);
     named.values = new Map(Array.from(values, ([literal, notes]) => [literal, annotations(notes, 'value')]));
+  }
+  return plainNames(named);
+}
+
+/**
+ * The annotations whose values are names, as strings -- what a reader
+ * compares, whatever spelling the document gave: `discriminator` a
+ * string, `visibility` a list of strings, `messages` an object from each
+ * refine key to its message.
+ * @param {{[k: string]: unknown}} named @returns {{[k: string]: unknown}}
+ */
+function plainNames(named) {
+  if ('discriminator' in named) named.discriminator = nameOf(named.discriminator);
+  if ('visibility' in named) named.visibility = /** @type {unknown[]} */ (listItems(named.visibility)).map(nameOf);
+  if ('messages' in named) {
+    const messages = /** @type {Map<unknown, unknown>} */ (named.messages);
+    named.messages = Object.fromEntries(Array.from(messages, ([key, message]) => [nameOf(key), message]));
   }
   return named;
 }
@@ -1208,9 +1668,40 @@ function annotation(key, value, type) {
       }
       enumValues(value, type.literals);
       return null;
+    case 'secret':
+      return typeof value === 'boolean' ? null : 'true or false';
+    case 'key':
+      return typeof value === 'boolean' || typeof value === 'string' ? null : 'true, false or a name';
+    case 'visibility': {
+      const items = listItems(value);
+      if (items === null) return `a list of ${VISIBILITIES.join(', ')}`;
+      const other = items.find((item) => !VISIBILITIES.includes(/** @type {string} */ (nameOf(item))));
+      if (other !== undefined) {
+        throw new SchemaCompileError(`a doc's visibility names ${shown(other)}, which is none of ${VISIBILITIES.join(', ')}`);
+      }
+      return null;
+    }
+    case 'messages':
+      if (!(value instanceof Map) || value instanceof DXNOrderedMap) return 'a map of refine keys to messages';
+      for (const [key, message] of Array.from(value).sort(([a], [b]) => dxnCompare(a, b))) {
+        if (!REFINE_KEYS.has(/** @type {string} */ (nameOf(key)))) throw new SchemaCompileError(`a doc's messages are for refine keys; ${shown(key)} is none`);
+        if (typeof message !== 'string') throw new SchemaCompileError(`a doc's messages are strings, not ${shown(message)}`);
+      }
+      return null;
+    case 'discriminator':
+      if (!(value instanceof DXNKeyword || value instanceof DXNSymbol || typeof value === 'string')) return "a field's name";
+      if (!variantsType(type)) throw new SchemaCompileError(`a doc's discriminator stands on an any-of or a one-of, not ${inspectType(type)}`);
+      return null;
     default:
       throw new SchemaCompileError(`${key} is no annotation; a doc holds ${ANNOTATION_KEYS.join(', ')}`);
   }
+}
+
+/** Whether `type` is an any-of or a one-of, through annotations. @param {any} type @returns {boolean} */
+function variantsType(type) {
+  if (type === null || typeof type !== 'object') return false;
+  if (type.form === 'doc') return variantsType(type.elem);
+  return type.form === 'any-of' || type.form === 'one-of';
 }
 
 /**

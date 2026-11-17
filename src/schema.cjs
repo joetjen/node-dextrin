@@ -119,9 +119,13 @@ function conform(value, registry, name) {
     validate(value, registry, name);
     return value;
   }
-  const conformed = TypeExpr.conform(/** @type {any} */ (type), value, TypeExpr.context(registry));
+  const ctx = TypeExpr.context(registry);
+  const conformed = TypeExpr.conform(/** @type {any} */ (type), value, ctx);
   if (conformed === TypeExpr.NO) {
-    throw new Validator.SchemaValidationError(`value does not match ${JSON.stringify(name)}`, 'schema/type-mismatch');
+    // Why, where the type can say more than that it does not match.
+    const why = TypeExpr.explain(/** @type {any} */ (type), value, ctx);
+    const message = why === null ? `value does not match ${JSON.stringify(name)}` : `value does not match ${JSON.stringify(name)}: ${why}`;
+    throw new Validator.SchemaValidationError(message, 'schema/type-mismatch');
   }
   return conformed;
 }

@@ -167,7 +167,7 @@ function resolveField(field, given, registry, opts) {
   if (Object.prototype.hasOwnProperty.call(given, field.name)) {
     return checkType(field.name, given[field.name], field.type, TypeExpr.context(registry, new Map(Object.entries(given))), opts);
   }
-  if (field.default !== Field.NO_DEFAULT) return field.default;
+  if (field.default !== Field.NO_DEFAULT) return Field.filled(field.default);
   if (field.required) throw new SchemaValidationError(`missing required field ${JSON.stringify(field.name)}`, 'schema/missing-field');
   return ABSENT;
 }
@@ -193,7 +193,10 @@ function checkType(name, value, type, ctx, opts) {
     return Validated.strip(conformed);
   }
 
-  throw new SchemaValidationError(`field ${JSON.stringify(name)} does not match its declared type`, 'schema/type-mismatch');
+  // Why, where the type can say more than that it does not match.
+  const why = TypeExpr.explain(type, value, ctx);
+  const message = `field ${JSON.stringify(name)} does not match its declared type`;
+  throw new SchemaValidationError(why === null ? message : `${message}: ${why}`, 'schema/type-mismatch');
 }
 
 // ---- encode-time validation -------------------------------------------------

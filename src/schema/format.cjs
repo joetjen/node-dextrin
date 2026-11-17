@@ -13,6 +13,7 @@
 const temporal = require('../text/temporal.cjs');
 const DXNUUID = require('../values/uuid.cjs');
 const DXNIp = require('../values/ip.cjs');
+const { daysFromCivil, civilFromDays } = require('../values/calendar.cjs');
 
 // ---- the grammars' parts, RFC 3986 and RFC 3987 ---------------------------
 
@@ -76,6 +77,13 @@ const PORT = '^(?:0|[1-9][0-9]{0,4})$';
 const BRACKETED_HOST = '//[^/?#]*?\\[([^\\]]*)\\]';
 const IP_FUTURE = "^v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+$";
 
+// RFC 7231 §7.1.1.1's IMF-fixdate; the date, the time and the weekday
+// are checked after it matches.
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const HTTP_DATE =
+  `^(${DAYS.join('|')}), ([0-9]{2}) (${MONTHS.join('|')}) ([0-9]{4}) ` + '([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$';
+
 /** @type {{[name: string]: string}} */
 const GRAMMARS = {
   hostname: HOSTNAME,
@@ -90,7 +98,7 @@ const GRAMMARS = {
 const NAMES = [
   'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'ipv4', 'ipv6', 'hostname', 'idn-hostname',
   'email', 'idn-email', 'uri', 'uri-reference', 'iri', 'iri-reference', 'uri-template', 'json-pointer',
-  'relative-json-pointer', 'semver', 'mac', 'host-port'
+  'relative-json-pointer', 'semver', 'mac', 'host-port', 'http-date'
 ];
 
 /** Every format's name, sorted. @returns {string[]} */
@@ -182,9 +190,29 @@ function check(name, text) {
       const port = text.slice(at + 1);
       return hostPortHost(host) && regex(PORT).test(port) && Number(port) <= 65_535;
     }
+    case 'http-date':
+      return httpDate(text);
     default:
       return matches(name, text);
   }
+}
+
+/**
+ * An IMF-fixdate (RFC 7231 §7.1.1.1) naming a date there is, on the
+ * weekday it names, at a time of day; a second may be 60, a leap second.
+ * @param {string} text @returns {boolean}
+ */
+function httpDate(text) {
+  const found = regex(HTTP_DATE).exec(text);
+  if (found === null) return false;
+  const [, day, dd, month, yyyy, hh, mm, ss] = found;
+  const [year, monthNumber, dayNumber] = [Number(yyyy), MONTHS.indexOf(month) + 1, Number(dd)];
+  const days = daysFromCivil(year, monthNumber, dayNumber);
+  const [y, m, d] = civilFromDays(days);
+  if (y !== year || m !== monthNumber || d !== dayNumber) return false;
+  // 1970-01-01, day 0, was a Thursday: index 3 of DAYS.
+  const weekday = (((days + 3) % 7) + 7) % 7;
+  return DAYS[weekday] === day && Number(hh) <= 23 && Number(mm) <= 59 && Number(ss) <= 60;
 }
 
 /** @param {string} name @param {string} text @returns {boolean} */

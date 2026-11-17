@@ -249,7 +249,7 @@ function positionalValues(value, registry) {
   const named = new Map(value.fields.pairs);
   return found.compiled.fields.map((field) => {
     if (named.has(field.name)) return named.get(field.name);
-    if (field.default !== Field.NO_DEFAULT) return field.default;
+    if (field.default !== Field.NO_DEFAULT) return Field.filled(field.default);
     throw new SchemaValidationError(
       `struct ${JSON.stringify(value.name)} has no ${JSON.stringify(field.name)}, and .dxnb fills every position: ` +
         'give it a value or a default, or declare it nilable',

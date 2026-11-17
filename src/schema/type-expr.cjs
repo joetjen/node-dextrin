@@ -44,9 +44,16 @@
  *   | {form: 'shape', name: string | null, fields: import('./field.cjs')[]}
  *   | {form: 'case', field: string, branches: Array<[unknown, TypeExpr]>, otherwise: TypeExpr | null}
  *   | {form: 'named', name: string}
- *   | {form: 'generic', params: string[], body: TypeExpr}
+ *   | {form: 'generic', params: Param[], body: TypeExpr}
  *   | {form: 'apply', name: string, args: TypeExpr[]}
  *   | {form: 'param', name: string}} TypeExpr
+ */
+
+/**
+ * A generic's parameter: a bare one is its name; one with a bound, and
+ * perhaps a default, is `{name, bound, default}`, `default` `null` when it
+ * has none (DXNS.md §5).
+ * @typedef {string | {name: string, bound: TypeExpr, default: TypeExpr | null}} Param
  */
 
 /**
@@ -176,8 +183,7 @@ function conform(type, value, ctx) {
       // parameters stand.
       const generic = /** @type {any} */ (ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined);
       if (!generic || generic.form !== 'generic' || generic.params.length !== type.args.length) return NO;
-      const bound = new Map(generic.params.map((/** @type {string} */ p, /** @type {number} */ i) => [p, type.args[i]]));
-      return conform(substitute(generic.body, bound), value, ctx);
+      return conform(instantiate(generic.params, generic.body, type.args), value, ctx);
     }
     case 'param':
     case 'generic':
@@ -454,7 +460,7 @@ function shape(fields, map, ctx) {
       if (c === NO) return NO;
       out.set(given[0], c);
     } else if (field.default !== Field.NO_DEFAULT) {
-      out.set(defaultKey(field.name, ctx), field.default);
+      out.set(defaultKey(field.name, ctx), Field.defaultValue(field));
     } else if (field.required) {
       return NO;
     }
@@ -483,6 +489,24 @@ function defaultKey(name, ctx) {
 }
 
 // ---- generics -----------------------------------------------------------------
+
+/**
+ * A generic's body with `args` standing where its parameters stand: the
+ * type one `{:of Name ...}` of it means.
+ * @param {Param[]} params @param {any} body @param {TypeExpr[]} args @returns {any}
+ */
+function instantiate(params, body, args) {
+  return substitute(body, new Map(params.slice(0, args.length).map((p, i) => [paramName(p), args[i]])));
+}
+
+/**
+ * A generic parameter's name: a bare parameter is its name, one with a
+ * bound or a default carries it.
+ * @param {Param} param @returns {string}
+ */
+function paramName(param) {
+  return typeof param === 'string' ? param : param.name;
+}
 
 /**
  * `type` with each parameter `bound` names replaced by its argument.
@@ -1257,4 +1281,195 @@ function toNumber(value) {
   return o !== null && o.kind === 'number' ? Number(o.at) : null;
 }
 
-module.exports = { matches, conform, context, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };
+// ---- why a value is refused ------------------------------------------------
+
+/**
+ * Why `type` refuses `value`, in words, or `null` when there is nothing
+ * more to say than that it does not match. Asked only after `conform`
+ * refused, so a check that passes never pays for it.
+ *
+ * It follows a refusal to where a document said something about it: a
+ * `messages` annotation's message for the constraint that refused, and a
+ * `discriminator` annotation's choice of variant -- the variant the field
+ * names, and why that one refuses, instead of every variant's refusal.
+ * As the reference's `Dextrin.Schema.TypeExpr.explain/3`.
+ * @param {TypeExpr} type @param {unknown} value @param {Context} ctx
+ * @returns {string | null}
+ */
+function explain(type, value, ctx) {
+  switch (type.form) {
+    case 'doc': {
+      const notes = type.notes;
+      if (typeof notes.discriminator === 'string') {
+        const types = variants(type.elem);
+        if (types !== null) return discriminated(notes.discriminator, types, value, ctx);
+      }
+      if (notes.messages && typeof notes.messages === 'object') {
+        const message = constraintMessage(type.elem, /** @type {{[k: string]: string}} */ (notes.messages), value, ctx);
+        if (message !== null) return message;
+      }
+      return explain(type.elem, value, ctx);
+    }
+    case 'named': {
+      const named = ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined;
+      return named ? explain(/** @type {TypeExpr} */ (named), value, ctx) : null;
+    }
+    case 'apply': {
+      // One use of a generic: its body, the arguments standing in it.
+      const generic = /** @type {any} */ (ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined);
+      return generic && generic.form === 'generic' ? explain(instantiate(generic.params, generic.body, type.args), value, ctx) : null;
+    }
+    case 'shape': {
+      // A struct's value comes wrapped once it is checked; the map is inside.
+      const map = value instanceof Validated ? value.value : value;
+      return map instanceof Map ? shapeRefused(type.fields, map, ctx) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * The message `messages` gives the first constraint of a refine that
+ * `value` fails, or `null`: when the type is no refine, its base already
+ * refuses the value, or there is no message for that constraint.
+ * @param {TypeExpr} type @param {{[k: string]: string}} messages @param {unknown} value @param {Context} ctx
+ * @returns {string | null}
+ */
+function constraintMessage(type, messages, value, ctx) {
+  const refine = undoc(type);
+  if (refine.form !== 'refine') return null;
+  const conformed = conform(refine.base, value, ctx);
+  if (conformed === NO) return null;
+  const key = failingKey(conformed, refine.constraints, refine.base, ctx);
+  return key !== null && Object.prototype.hasOwnProperty.call(messages, key) ? messages[key] : null;
+}
+
+/**
+ * The first field of a shape that refuses its value, or is missing, and
+ * why; `null` when none does.
+ * @param {import('./field.cjs')[]} fields @param {Map<unknown, unknown>} map @param {Context} ctx
+ * @returns {string | null}
+ */
+function shapeRefused(fields, map, ctx) {
+  /** @type {Map<string, unknown>} */
+  const siblings = new Map();
+  for (const [key, v] of map.entries()) {
+    const name = keyName(key);
+    if (name !== null) siblings.set(name, v);
+  }
+  const inner = { registry: ctx.registry, siblings };
+  for (const field of fields) {
+    const found = fieldOf(map, field.name);
+    if (found !== null) {
+      if (conform(field.type, found.value, inner) === NO) return fieldRefused(field.name, explain(field.type, found.value, inner));
+    } else if (field.required && field.default === Field.NO_DEFAULT) {
+      return `field ${JSON.stringify(field.name)} is missing`;
+    }
+  }
+  return null;
+}
+
+/** @param {string} name @param {string | null} why @returns {string} */
+function fieldRefused(name, why) {
+  return why === null ? `field ${JSON.stringify(name)} does not match its type` : `field ${JSON.stringify(name)}: ${why}`;
+}
+
+/** A type without the annotations around it. @param {TypeExpr} type @returns {TypeExpr} */
+function undoc(type) {
+  return type.form === 'doc' ? undoc(type.elem) : type;
+}
+
+/** An any-of's or one-of's variants, through annotations; `null` for any other type. @param {TypeExpr} type @returns {TypeExpr[] | null} */
+function variants(type) {
+  const inner = undoc(type);
+  return inner.form === 'any-of' || inner.form === 'one-of' ? inner.variants : null;
+}
+
+/**
+ * The variant whose discriminating field takes the value's, and why that
+ * variant refuses it.
+ * @param {string} field @param {TypeExpr[]} types @param {unknown} value @param {Context} ctx
+ * @returns {string}
+ */
+function discriminated(field, types, value, ctx) {
+  const found = fieldOf(value, field);
+  if (found === null) return `field ${JSON.stringify(field)} is missing; it chooses the variant`;
+  const chosen = found.value;
+  const type = types.find((t) => {
+    const fieldType = variantField(t, field, ctx);
+    return fieldType !== null && conform(fieldType, chosen, ctx) !== NO;
+  });
+  if (type === undefined) return `${field} ${shown(chosen)} names no variant`;
+  const why = explain(type, value, ctx) ?? 'it does not match';
+  return `${field} ${shown(chosen)} chooses ${variantName(type)}: ${why}`;
+}
+
+/**
+ * The type a variant gives its field `name`, looked up through names;
+ * `null` when it has none.
+ * @param {TypeExpr} type @param {string} name @param {Context} ctx @returns {TypeExpr | null}
+ */
+function variantField(type, name, ctx) {
+  switch (type.form) {
+    case 'doc':
+      return variantField(type.elem, name, ctx);
+    case 'named': {
+      const named = ctx.registry ? ctx.registry.typeAliases.get(type.name) : undefined;
+      return named ? variantField(/** @type {TypeExpr} */ (named), name, ctx) : null;
+    }
+    case 'shape': {
+      const field = type.fields.find((f) => f.name === name);
+      return field ? field.type : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** @param {TypeExpr} type @returns {string} */
+function variantName(type) {
+  if (type.form === 'doc') return variantName(type.elem);
+  if (type.form === 'named' || type.form === 'reference') return type.name;
+  if (type.form === 'shape' && typeof type.name === 'string') return type.name;
+  return 'a variant';
+}
+
+/**
+ * The first constraint, in a fixed order, that `value` fails; `null` when
+ * none does.
+ * @param {unknown} value @param {{[k: string]: unknown}} constraints @param {TypeExpr} base @param {Context} ctx
+ * @returns {string | null}
+ */
+function failingKey(value, constraints, base, ctx) {
+  const keys = Object.keys(constraints).sort((a, b) => Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8')));
+  for (const key of keys) {
+    /** @type {{[k: string]: unknown}} */
+    const alone = {};
+    for (const k of [key, ...companions(key)]) if (k in constraints) alone[k] = constraints[k];
+    if (!satisfiesConstraints(value, alone, base, ctx)) return key;
+  }
+  return null;
+}
+
+/** The keys a constraint reads beside its own. @param {string} key @returns {string[]} */
+function companions(key) {
+  if (key === 'contains') return ['min-contains', 'max-contains'];
+  if (key === 'content') return ['encoding', 'media-type'];
+  return [];
+}
+
+/**
+ * A value as a refusal shows it: in its canonical DXN form when it has
+ * one.
+ * @param {unknown} value @returns {string}
+ */
+function shown(value) {
+  try {
+    return canonical(value);
+  } catch {
+    return String(value);
+  }
+}
+
+module.exports = { matches, conform, context, explain, instantiate, paramName, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };
