@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`dextrin gen-js SCHEMAS... --out DIR [--check]`**: JavaScript code
+  from DXNS (design/codegen-node.md), the counterpart of dextrin's `mix
+  dextrin.gen.elixir` and php-dextrin's `gen-php`. Per schema, the user's
+  `Order.js` (written once; may be renamed `.ts`) extending a generated
+  `AbstractOrder.js` with its `AbstractOrder.d.ts`: plain ES-module
+  JavaScript, no compile step, typed exactly for TypeScript. Generated
+  code reads and checks every known version with code of its own --
+  no schema at run time -- upgrading added, dropped, made-optional and
+  renamed fields by itself and anything else through a hand-written
+  `static upgradeVN(fields)`, whose absence fails where the class is
+  defined (`static { this.verify(); }`) and, in TypeScript, at compile
+  time. Frozen values with `with...()` copies, `validate()`, `toDxn()`;
+  refusals throw `InvalidData` naming the field; deprecation warnings as
+  `decode` gives them (`deprecations`, `onDeprecated`); a generated
+  `Decoder.js`; `// dextrin:keep` regions kept across runs, class names
+  and paths kept as the user spells them.
+- **`@joetjen/dextrin/codegen-runtime`**, the module generated code
+  imports: `InvalidData` and the `Runtime` helpers.
+- Internally, `schema/type-expr.cjs` exports `isPrimitive()`,
+  `isEnumMember()` and `meetsConstraints()`, and
+  `schema/deprecations.cjs` exports `tell()` and `MODES`: the narrow
+  entry points the codegen runtime calls.
+
 - **`@joetjen/dextrin-typespec`**, a second package in this repository
   (packages/dextrin-typespec): a TypeSpec emitter writing DXNS, one file
   per namespace and, in a versioned namespace, per schema version
@@ -105,6 +128,11 @@ reference:
 
 ### Fixed
 
+- **The ES module's declarations compile for a strict TypeScript user**:
+  `types/dextrin.d.ts` typed `Document` with the document module's
+  typedef names out of scope (`Doc`, `Path`, `Options`, `Change`), an
+  error wherever libraries are checked (`skipLibCheck: false`). It is now
+  typed as the CommonJS export is.
 - `dextrin docs` no longer writes a viewer-specific `viewport-fit-sides` meta tag into
   every page: a hint a documentation site does not need.
 - **A hot swap keeps what it replaces with**: `replaceStructSchema` kept

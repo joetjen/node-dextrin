@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * @fileoverview `dextrin` CLI — one executable, ten subcommands
+ * @fileoverview `dextrin` CLI — one executable, eleven subcommands
  * (`decode`, `encode`, `format`, `validate`, `compat`, `check`, `docs`,
- * `from-json-schema`, `from-typespec`, `conformance`), the JS analog of
+ * `from-json-schema`, `from-typespec`, `gen-js`, `conformance`), the JS analog of
  * `dextrin`'s `mix dextrin.*` tasks. One bin with subcommands rather
  * than a separate script per task, matching how Node CLIs are
  * conventionally shaped (`git <subcommand>`), not a mechanical
@@ -30,6 +30,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document, SchemaDocs, SchemaTree, JsonSchema } from '../src/dextrin.js';
+import Codegen from '../src/codegen/javascript.cjs';
 
 const USAGE = `usage: dextrin <command> [options]
 
@@ -48,6 +49,7 @@ Commands:
                    [--mongo] [--structs] [--assert-formats] [--strict]
                                                 Convert JSON Schema (and MongoDB's $jsonSchema) to DXNS
   from-typespec MAIN.tsp [--out DIR]           Convert TypeSpec to DXNS with @joetjen/dextrin-typespec (Node 22)
+  gen-js SCHEMAS... --out DIR [--check]        Generate JavaScript classes (with .d.ts) that read and check every version of the schemas
   conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
@@ -74,6 +76,8 @@ function main(argv) {
       return run(() => cmdFromJsonSchema(rest));
     case 'from-typespec':
       return run(() => cmdFromTypespec(rest));
+    case 'gen-js':
+      return run(() => cmdGenJs(rest));
     case 'conformance':
       return run(() => cmdConformance(rest));
     default:
@@ -240,6 +244,31 @@ function cmdCheck(argv) {
   }
   for (const p of result.problems) console.error(`${p.file}:${p.line}: ${p.message}`);
   throw new Error(`${result.problems.length} problem(s)`);
+}
+
+/**
+ * `dextrin gen-js SCHEMAS... --out DIR [--check]`: JavaScript classes from
+ * DXNS (design/codegen-node.md), as `mix dextrin.gen.elixir` and php-dextrin's
+ * `gen-php` write Elixir and PHP. For each schema, `Order.js` -- the user's,
+ * written once -- and `AbstractOrder.js` with its `AbstractOrder.d.ts`,
+ * rewritten; and one `Decoder.js`. Each file written is printed, and each
+ * orphaned region warned about. `--check` writes nothing and fails when a
+ * generated file is missing, out of date, left from a renamed class, or
+ * holds an orphaned region: for CI.
+ * @param {string[]} argv
+ */
+function cmdGenJs(argv) {
+  const { positional, flags, options } = parseArgs(argv, { flags: ['check'], options: ['out'] });
+  if (positional.length === 0 || !options.out) throw new Error('usage: dextrin gen-js SCHEMAS... --out DIR [--check]');
+  if (flags.check) {
+    const problems = Codegen.check(positional, options.out);
+    if (problems.length > 0) throw new Error(problems.join('\n'));
+    console.log('OK: the generated classes are up to date');
+    return;
+  }
+  const written = Codegen.write(positional, options.out);
+  for (const file of written) console.log(`wrote ${file}`);
+  for (const orphan of Codegen.orphansIn(written)) console.error(`warning: kept the orphaned region ${orphan}: move its code or delete it`);
 }
 
 /**

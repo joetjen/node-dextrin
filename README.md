@@ -476,6 +476,7 @@ npx dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 npx dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] \
   [--mongo] [--structs] [--assert-formats] [--strict]               # JSON Schema to DXNS
 npx dextrin from-typespec main.tsp [--out schemas/]                 # TypeSpec to DXNS (Node 22)
+npx dextrin gen-js schemas/ --out src/schemas/ [--check]            # JavaScript classes (+ .d.ts) from DXNS
 ```
 
 `from-json-schema` converts JSON Schema -- drafts 04, 06, 07, 2019-09
@@ -493,6 +494,28 @@ second package, [`@joetjen/dextrin-typespec`](packages/dextrin-typespec),
 a TypeSpec emitter that writes one `.dxns` file per namespace -- per
 schema version in a versioned namespace -- into `--out`. It needs Node 22
 and the emitter installed where the TypeSpec project is.
+
+`gen-js` writes, for each `%schema` of a tree of `.dxns` files, a class
+that reads and checks every version of it with code of its own -- no
+schema is loaded when it runs -- as dextrin's `mix dextrin.gen.elixir`
+and php-dextrin's `gen-php` do for Elixir and PHP. `acme.shop/Order`
+becomes `Acme/Shop/Order.js`, yours, written once (`export class Order
+extends AbstractOrder { static { this.verify(); } }`, which you may
+rename to `.ts`), and `Acme/Shop/AbstractOrder.js` with its
+`AbstractOrder.d.ts`, rewritten on every run: plain ES-module JavaScript
+(Node 18+, no compile step) that TypeScript reads exactly. Its values
+are frozen, with `with...()` copies; `Order.read(struct, {deprecations,
+onDeprecated})` reads any known version and upgrades it to the latest --
+added, dropped, made-optional and renamed (`typespec.renamed-from`)
+fields by itself, anything else by a `static upgradeV1(fields)` you
+write in `Order.js`, whose absence fails where the class is defined (and
+in TypeScript, at compile time). Refused data throws `InvalidData`, a
+`DXNError` naming the field. `Decoder.js` decodes DXN text into the
+generated classes. What you write between `// dextrin:keep NAME` and
+`// dextrin:end NAME` in a generated file is kept; `--check` fails when
+a generated file is stale or holds an orphaned region. The generated
+code imports `@joetjen/dextrin` and `@joetjen/dextrin/codegen-runtime`.
+See [design/codegen-node.md](design/codegen-node.md).
 
 ## Guides
 

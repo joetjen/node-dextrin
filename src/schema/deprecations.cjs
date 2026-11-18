@@ -206,8 +206,20 @@ function firstUse(registry, key) {
  * @param {import('../registry.cjs')} registry @param {Warning} w
  */
 function report(registry, w) {
-  if (typeof registry.onDeprecated === 'function') {
-    registry.onDeprecated(w);
+  tell(w, registry.onDeprecated);
+}
+
+/**
+ * `w` told to `onDeprecated`, or else to the platform's warnings:
+ * `process.emitWarning(text, {type: 'DeprecationWarning', code:
+ * 'DXN_DEPRECATED'})`, or `console.warn` where there is no `process`.
+ * What a registry does, and what code generated from a schema
+ * (`codegen/`) does without one.
+ * @param {Warning} w @param {((warning: Warning) => void) | null | undefined} onDeprecated
+ */
+function tell(w, onDeprecated) {
+  if (typeof onDeprecated === 'function') {
+    onDeprecated(w);
     return;
   }
   if (typeof process !== 'undefined' && process && typeof process.emitWarning === 'function') {
@@ -425,4 +437,7 @@ function shown(value) {
   }
 }
 
-module.exports = { CATEGORY, reason, warning, text, structUsed, nodeUsed, keys, compileWarnings };
+/** How often data going through something deprecated may warn. @type {How[]} */
+const MODES = ['once', 'every', 'off', 'error'];
+
+module.exports = { CATEGORY, MODES, reason, warning, text, tell, structUsed, nodeUsed, keys, compileWarnings };

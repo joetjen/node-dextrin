@@ -19,6 +19,17 @@
         "default": "./src/dextrin.cjs"
       },
       "default": "./src/dextrin.cjs"
+    },
+    "./codegen-runtime": {
+      "import": {
+        "types": "./types/codegen-runtime.d.ts",
+        "default": "./src/codegen-runtime.js"
+      },
+      "require": {
+        "types": "./types/codegen-runtime.d.cts",
+        "default": "./src/codegen-runtime.cjs"
+      },
+      "default": "./src/codegen-runtime.cjs"
     }
   },
   "bin": {
@@ -55,7 +66,7 @@
     "autotest": "npx mocha --recursive --watch test/ --ignore 'test/fixtures/**'",
     "typecheck": "npx tsc --checkJs --noEmit",
     "types": "rm -rf types && tsc -p tsconfig.types.json",
-    "typecheck:consumer": "npm run types && tsc -p test/types/tsconfig.json",
+    "typecheck:consumer": "npm run types && tsc -p test/types/tsconfig.json && tsc -p test/fixtures/codegen/tsconfig.json && tsc -p test/fixtures/codegen/tsconfig.js.json",
     "prepack": "npm run types",
     "precommit": "npm run typecheck && npm run typecheck:consumer && npm test",
     "docs": "npx typedoc",

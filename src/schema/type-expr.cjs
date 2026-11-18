@@ -1616,4 +1616,49 @@ function shown(value) {
   }
 }
 
-module.exports = { matches, conform, context, explain, extrasRefusal, instantiate, paramName, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS };
+// ---- narrow entry points for generated code ------------------------------------
+
+/**
+ * Whether `value` is a value of the primitive type `name` (`:string`,
+ * `:uuid`, ...): what code generated from a schema (`codegen/`) calls for
+ * a primitive it does not check inline, as the reference made
+ * `primitive?/2` public.
+ * @example
+ * isPrimitive('integer', 1n)
+ * // => true
+ * @param {string} name @param {unknown} value @returns {boolean}
+ */
+function isPrimitive(name, value) {
+  return primitiveMatches(name, value);
+}
+
+/**
+ * Whether `value` is one of an enum's `literals`, a keyword literal
+ * matching a `DXNKeyword` or a global symbol of its name alike.
+ * @example
+ * isEnumMember([new DXNKeyword('open')], Symbol.for('open'))
+ * // => true
+ * @param {unknown[]} literals @param {unknown} value @returns {boolean}
+ */
+function isEnumMember(literals, value) {
+  return literals.some((literal) => keywordAwareEq(literal, value));
+}
+
+/**
+ * Whether `value` meets a refine's `constraints`, by name, `primitive`
+ * being the primitive the refine stands on (`null` when it is none), which
+ * decides what a length counts. The keys whose argument is a type
+ * (`TYPE_KEYS`) need a registry and are not checked here: generated code
+ * does not take them.
+ * @example
+ * meetsConstraints('ab', {'min-length': 2n}, 'string')
+ * // => true
+ * @param {unknown} value @param {{[k: string]: unknown}} constraints @param {string | null} primitive @returns {boolean}
+ */
+function meetsConstraints(value, constraints, primitive) {
+  /** @type {TypeExpr} */
+  const base = primitive === null ? { form: 'any' } : { form: 'primitive', name: primitive };
+  return satisfiesConstraints(value, constraints, base, context(null));
+}
+
+module.exports = { matches, conform, context, explain, extrasRefusal, instantiate, paramName, NO, resolutions, comparable, nonzeroNumber, span, TYPE_KEYS, isPrimitive, isEnumMember, meetsConstraints };

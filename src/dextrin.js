@@ -22,12 +22,16 @@ export const {
   Schema,
   Std,
   FileResolver,
-  Document,
   Format,
   SchemaDocs,
   SchemaTree,
   SchemaLayout,
   JsonSchema,
 } = dextrin;
+// Typed as the CommonJS one's: inferred, its declaration would name the
+// document module's typedefs where they are not in scope, and fail to
+// compile for a TypeScript user who checks libraries.
+/** @type {typeof dextrin.Document} */
+export const Document = dextrin.Document;
 export * from './values/index.js';
 export default dextrin;

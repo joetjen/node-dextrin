@@ -218,7 +218,29 @@ dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps c
 dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
+dextrin gen-js schemas/ --out src/schemas/ [--check]   # JS classes + .d.ts that read every version
 ```
+
+## Generated classes (`dextrin gen-js`)
+
+```js
+// src/schemas/Acme/Shop/Order.js -- yours, written once (may be renamed .ts)
+import { AbstractOrder } from './AbstractOrder.js';
+export class Order extends AbstractOrder {
+  static { this.verify(); }               // a missing upgradeVN() fails here
+  static upgradeV1(fields) { return { ...fields, born: String(fields.born) }; }
+}
+
+import { Order } from './src/schemas/Acme/Shop/Order.js';
+import * as Decoder from './src/schemas/Decoder.js';
+const order = Order.read(decode(text), { deprecations: 'once', onDeprecated: (w) => log(w) });
+order.withNote('x');                      // a frozen copy; order.validate(); order.toDxn()
+Decoder.decode(text);                     // every known struct read into its class
+// refused data throws InvalidData (a DXNError): err.path ['customer', 'code']
+```
+
+Regions in `AbstractOrder.js` survive regenerating: `// dextrin:keep top|bottom|upgrade_vN`
+... `// dextrin:end NAME`. `--check` fails on stale files and orphaned regions.
 
 No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.unicode`: the
 former reflects an existing Elixir struct's fields via
