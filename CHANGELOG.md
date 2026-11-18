@@ -105,6 +105,8 @@ reference:
 
 ### Fixed
 
+- `dextrin docs` no longer writes a viewer-specific `viewport-fit-sides` meta tag into
+  every page: a hint a documentation site does not need.
 - **A hot swap keeps what it replaces with**: `replaceStructSchema` kept
   only the new version's fields, dropping its annotations and bases, as
   the reference does not.

@@ -34,6 +34,11 @@ function site(files) {
 }
 
 describe('SchemaDocs', () => {
+  it('a page names no tool in its markup', () => {
+    const pages = site({ 'a.dxns': '%{T: :string}' });
+    for (const html of pages.values()) expect(html).not.to.match(/claude/i);
+  });
+
   it('writes the example exactly as the reference does', () => {
     const expected = filesUnder('example/doc');
     const made = new Map(SchemaDocs.site('example/schemas', { title: 'Acme schemas' }));
