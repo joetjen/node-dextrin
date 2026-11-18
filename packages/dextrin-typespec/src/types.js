@@ -38,6 +38,21 @@ import {
 // DXNS version each versioned declaration has at it (`pins`).
 let at = null;
 
+// The namespace whose file is being written: a declaration of another one
+// is named in full there, as nothing else resolves it (DXNS.md §6).
+let home = null;
+
+/** `fn()` with `ns` as the namespace being written. */
+function writingIn(ns, fn) {
+  const before = home;
+  home = ns;
+  try {
+    return fn();
+  } finally {
+    home = before;
+  }
+}
+
 /** Runs `fn` with types read as they are at `version` (`index` in the timeline). */
 export function atVersion(context, fn) {
   const before = at;
@@ -92,9 +107,13 @@ function optionalAt(prop) {
 
 // A declaration by name, pinned to its DXNS version when it has several.
 // In a versioned namespace every declaration has a file of its own, where
-// only a full name resolves (DXNS.md §6), so the name is written in full.
+// only a full name resolves (DXNS.md §6), so the name is written in full;
+// elsewhere a declaration of another namespace than the one being written
+// is (T699).
 function ref(decl) {
-  const name = at ? `${namespacePath(decl.namespace)}/${decl.name}` : decl.name;
+  const path = namespacePath(decl.namespace);
+  const full = path !== "" && (at || (home && decl.namespace !== home));
+  const name = full ? `${path}/${decl.name}` : decl.name;
   const pin = at?.pins.get(decl);
   return pin ? `${name}(${pin})` : name;
 }
@@ -124,7 +143,8 @@ function addEntry(program, ns, name, text) {
 // `<Name>Base`, its own name being the union of what extends it.
 function baseRef(program, model) {
   if (model.templateMapper) return instance(program, model);
-  return getDiscriminator(program, model) ? `${model.name}Base` : model.name;
+  const name = getDiscriminator(program, model) ? `${model.name}Base` : model.name;
+  return ref({ name, namespace: model.namespace });
 }
 
 /** A namespace's dotted path, `Acme.Shop`. */
@@ -136,6 +156,11 @@ export function namespacePath(ns) {
 
 /** A named declaration's DXNS, or `undefined` for one with none (an operation). */
 export function declarationText(program, decl) {
+  return writingIn(decl.namespace, () => declarationBody(program, decl));
+}
+
+// A named declaration's DXNS, written in the file of its own namespace.
+function declarationBody(program, decl) {
   switch (decl.kind) {
     case "Scalar":
       return scalarDeclaration(program, decl);
@@ -245,7 +270,9 @@ function modelUse(program, model) {
 // its arguments' (`PageDog`), written where the template is declared.
 function instance(program, model) {
   const name = getFriendlyName(program, model) ?? instanceName(program, model);
-  addEntry(program, model.namespace, name, doc(shape(program, model, "schema"), notes(program, model)));
+  // Written beside its template, so named from there.
+  const text = writingIn(model.namespace, () => doc(shape(program, model, "schema"), notes(program, model)));
+  addEntry(program, model.namespace, name, text);
   return ref({ name, namespace: model.namespace });
 }
 
