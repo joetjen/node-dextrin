@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`%schema(N)`, `%type(N)`, pinned references). Needs Node 22, as
   TypeSpec does; tested on its own CI job.
 - **`dextrin from-typespec MAIN.tsp [--out DIR]`** runs it through npx.
+- **A renamed property says so**: in the version where `@renamedFrom`
+  takes effect, the field's notes carry `meta: %{"typespec.renamed-from"
+  => old}`, so generated code can move it on upgrade.
 - **A versioned file may hold a named type's version** (DXNS.md §6):
   `Color-v2.dxns` with `%type(2)[T]`, and a `{:doc}` around a versioned
   schema or type, are no longer refused by `dextrin check`.

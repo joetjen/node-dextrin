@@ -73,6 +73,14 @@ function typeAt(prop) {
   return changes.length ? changes[0][1] : prop.type;
 }
 
+// The name a property had before the version being written, when that
+// version renames it (`@renamedFrom`): what an upgrade from the version
+// before moves (T684 Q4).
+function renamedHere(prop) {
+  if (!at) return undefined;
+  return (getRenamedFrom(at.program, prop) ?? []).find((r) => versionIndex(r.version) === at.index)?.oldName;
+}
+
 function optionalAt(prop) {
   if (!at) return prop.optional;
   const madeOptional = getMadeOptionalOn(at.program, prop);
@@ -326,9 +334,14 @@ function field(program, prop) {
   const key = optionalAt(prop) ? `${name}?` : name;
   let type = refine(typeText(program, typeAt(prop)), constraints(program, prop));
   const format = unknownFormat(program, prop);
+  const renamed = renamedHere(prop);
+  const meta = [
+    format && `"typespec.format" => ${str(format)}`,
+    renamed && `"typespec.renamed-from" => ${str(renamed)}`,
+  ].filter(Boolean);
   type = doc(type, {
     ...propertyNotes(program, prop),
-    meta: format ? `%{"typespec.format" => ${str(format)}}` : undefined,
+    meta: meta.length ? `%{${meta.join(" ")}}` : undefined,
   });
 
   // `= utcDateTime.now()`: a default computed when the field is filled (G8).

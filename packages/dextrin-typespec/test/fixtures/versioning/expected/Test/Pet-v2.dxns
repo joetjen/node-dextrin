@@ -1,1 +1,1 @@
-%{Pet: {:doc %schema(2){name: :string color: Test/Color(2) age?: :int32} %{meta: %{"typespec.version" => "2024-06-01"}}}}
+%{Pet: {:doc %schema(2){name: :string color: {:doc Test/Color(2) %{meta: %{"typespec.renamed-from" => "colour"}}} age?: :int32} %{meta: %{"typespec.version" => "2024-06-01"}}}}
