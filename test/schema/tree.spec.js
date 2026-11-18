@@ -118,6 +118,21 @@ describe('schema tree', () => {
     expect(messages(cycle)[0]).to.include('a.dxns').and.include('b.dxns');
   });
 
+  it('loads versions of a named type, and a documented schema, each in a versioned file (Way B)', () => {
+    const root = tree({
+      'a/Color.dxns': '%{Color: {:enum :red}}',
+      'a/Color-v2.dxns': '%{Color: {:doc %type(2)[{:enum :red :blue}] %{description: "v2"}}}',
+      'a/Pet-v2.dxns': '%{Pet: {:doc %schema(2){c: a/Color(1)} %{description: "v2"}}}',
+    });
+    const result = SchemaTree.load([root]);
+    expect(result.ok, JSON.stringify(result.problems)).to.equal(true);
+  });
+
+  it('reports a versioned file whose %type says another version', () => {
+    const result = SchemaTree.load([tree({ 'a/Color-v2.dxns': '%{Color: %type(3)[{:enum :red}]}' })]);
+    expect(messages(result).join('\n')).to.contain('version 3');
+  });
+
   it("reports a name that resolves to nothing in a schema's * K => V too", () => {
     const result = SchemaTree.load([tree({ 'a.dxns': '%{A: %schema{n: :integer, * :string => Nowhere}}' })]);
     expect(result.ok).to.equal(false);

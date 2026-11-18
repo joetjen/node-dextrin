@@ -1,0 +1,37 @@
+%{
+  Code: :string
+  Tag: {:refine :string %{min-length: 2 max-length: 8}}
+  Opaque: {:doc :any %{title: "Opaque"}}
+  Scalars: %schema{
+    n: :number
+    i: :integer
+    f: :float
+    d: :decimal
+    i8: :int8
+    i16: :int16
+    i32: :int32
+    i64: :int64
+    u8: :uint8
+    u16: :uint16
+    u32: :uint32
+    u64: :uint64
+    s: {:refine :integer %{min: -9007199254740991 max: 9007199254740991}}
+    f32: :float32
+    f64: :float
+    d128: {:refine :decimal %{max-precision: 34 min-exponent: -6176 max-exponent: 6111}}
+    str: :string
+    b: :boolean
+    by: :bytes
+    u: :uri
+    date: :date
+    time: :time
+    utc: :timestamp
+    off: :datetime
+    dur: :duration
+    nothing: :nil
+    any: :any
+    code: Code
+    tag: Tag
+    opaque: Opaque
+  }
+}

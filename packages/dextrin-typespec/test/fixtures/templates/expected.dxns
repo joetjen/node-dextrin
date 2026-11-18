@@ -1,0 +1,12 @@
+%{
+  Dog: %schema{name: :string}
+  DogList: %schema{entries: {:list-of Dog}}
+  PageDog: %schema{items: {:list-of Dog} size?: :int32}
+  Dogs: %schema includes PageDog {}
+  Stamped: %schema{at?: %field{type: :timestamp computed: :now}}
+  Uses: %schema{
+    dogs: PageDog
+    pair: {:list-items :string :string}
+    list: DogList
+  }
+}

@@ -143,26 +143,40 @@ function held(file, key) {
 function versionProblem(file) {
   const { holder, version } = file.layout;
   if (holder === null || version === null) return null;
-  const value = held(file, holder);
-  if (value instanceof DXNStruct && value.name === 'schema') {
+  const value = undoc(held(file, holder));
+  if (value instanceof DXNStruct && (value.name === 'schema' || value.name === 'type')) {
     const v = value.version ?? 1;
     return v === version
       ? null
       : problem(file.file, entryLine(file, holder), `holds ${holder} as version ${v}, but its name says version ${version} (DXNS.md §6)`);
   }
-  return problem(file.file, entryLine(file, holder), `a versioned file holds a %schema(N), not ${holder}'s kind`);
+  return problem(file.file, entryLine(file, holder), `a versioned file holds a %schema(N) or a %type(N), not ${holder}'s kind`);
+}
+
+/** The value a `{:doc}` annotates, or `value` itself. @param {unknown} value */
+function undoc(value) {
+  return value instanceof DXNTuple && value.items[0] instanceof DXNKeyword && value.items[0].name === 'doc'
+    ? value.items[1]
+    : value;
 }
 
 // ---- names across files ------------------------------------------------------
 
-/** @param {unknown} value @returns {number | 'type'} */
+/**
+ * A schema's version, or a named type's (Way B, DXNS.md §5c): a plain
+ * definition is its version 1, `%type(N)[T]` version N, labelled `type:N`.
+ * @param {unknown} value @returns {number | string}
+ */
 function versionOf(value) {
-  return value instanceof DXNStruct && value.name === 'schema' ? value.version ?? 1 : 'type';
+  const inner = undoc(value);
+  if (inner instanceof DXNStruct && inner.name === 'schema') return inner.version ?? 1;
+  if (inner instanceof DXNStruct && inner.name === 'type') return `type:${inner.version ?? 1}`;
+  return 'type:1';
 }
 
 /** Every full name the tree defines, with the files and versions defining it. @param {TreeFile[]} files */
 function indexOf(files) {
-  /** @type {Map<string, Array<[string, number | 'type']>>} */
+  /** @type {Map<string, Array<[string, number | string]>>} */
   const index = new Map();
   for (const file of files) {
     for (const [key, name] of file.layout.names) {
@@ -174,18 +188,19 @@ function indexOf(files) {
   return index;
 }
 
-/** One version of a name in two files (§4.6): found once, or refused naming both. @param {Map<string, Array<[string, number | 'type']>>} index */
+/** One version of a name in two files (§4.6): found once, or refused naming both. @param {Map<string, Array<[string, number | string]>>} index */
 function twice(index) {
   /** @type {Problem[]} */
   const found = [];
   for (const [name, holders] of index) {
-    /** @type {Map<number | 'type', string[]>} */
+    /** @type {Map<number | string, string[]>} */
     const byVersion = new Map();
     for (const [file, version] of holders) byVersion.set(version, [...(byVersion.get(version) ?? []), file]);
     for (const [version, files] of byVersion) {
       if (files.length < 2) continue;
       files.sort();
-      const what = version === 'type' ? name : `${name} version ${version}`;
+      const what =
+        version === 'type:1' ? name : typeof version === 'string' ? `${name} version ${version.slice(5)}` : `${name} version ${version}`;
       found.push(problem(/** @type {string} */ (files[0]), 1, `${what} is in two files, ${files.join(' and ')}; it is found once (DXNS.md §6)`));
     }
   }
@@ -195,7 +210,7 @@ function twice(index) {
 /**
  * The files in an order that compiles each after every file it refers
  * to; files that need each other are a problem, and are left out.
- * @param {TreeFile[]} files @param {Map<string, Array<[string, number | 'type']>>} index @param {Problem[]} problems
+ * @param {TreeFile[]} files @param {Map<string, Array<[string, number | string]>>} index @param {Problem[]} problems
  */
 function order(files, index, problems) {
   const needs = new Map(files.map((f) => [f.file, needsOf(f, index)]));
@@ -216,7 +231,7 @@ function order(files, index, problems) {
   return done.map((f) => /** @type {TreeFile} */ (byFile.get(f)));
 }
 
-/** The other files `file` refers to. @param {TreeFile} file @param {Map<string, Array<[string, number | 'type']>>} index */
+/** The other files `file` refers to. @param {TreeFile} file @param {Map<string, Array<[string, number | string]>>} index */
 function needsOf(file, index) {
   const out = new Set();
   for (const value of file.doc.values()) {

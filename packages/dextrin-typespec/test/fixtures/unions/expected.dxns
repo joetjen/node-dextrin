@@ -1,0 +1,22 @@
+%{
+  Cat: %schema{meows: :boolean}
+  Dog: %schema{barks: :boolean}
+  Pet: {:any-of {:doc Cat %{title: "cat"}} {:doc Dog %{title: "dog"}}}
+  Color: {:doc {:enum "red" "green" "lime"} %{values: %{
+    "red" => %{title: "Red"}
+    "green" => %{title: "Green"}
+    "lime" => %{title: "Lime" deprecated: "use Green"}
+  }}}
+  Size: {:enum "Small" "Large"}
+  Unions: %schema{
+    either: {:any-of Cat Dog}
+    maybe: {:nilable :string}
+    pet: Pet
+    color: Color
+    size: Size
+    mode: {:enum "fast" "slow"}
+    exactly: {:const "yes"}
+    one: {:const 1}
+    t: {:const true}
+  }
+}

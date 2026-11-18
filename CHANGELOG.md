@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@joetjen/dextrin-typespec`**, a second package in this repository
+  (packages/dextrin-typespec): a TypeSpec emitter writing DXNS, one file
+  per namespace and, in a versioned namespace, per schema version
+  (`%schema(N)`, `%type(N)`, pinned references). Needs Node 22, as
+  TypeSpec does; tested on its own CI job.
+- **`dextrin from-typespec MAIN.tsp [--out DIR]`** runs it through npx.
+- **A versioned file may hold a named type's version** (DXNS.md §6):
+  `Color-v2.dxns` with `%type(2)[T]`, and a `{:doc}` around a versioned
+  schema or type, are no longer refused by `dextrin check`.
+
 What DXNS lacked to say every TypeSpec type exactly, as in the
 reference:
 

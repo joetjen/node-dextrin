@@ -1,0 +1,1 @@
+%{Color: {:doc {:enum "red" "green"} %{meta: %{"typespec.version" => "2024-01-01"}}}}

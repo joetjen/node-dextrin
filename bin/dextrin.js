@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * @fileoverview `dextrin` CLI — one executable, nine subcommands
+ * @fileoverview `dextrin` CLI — one executable, ten subcommands
  * (`decode`, `encode`, `format`, `validate`, `compat`, `check`, `docs`,
- * `from-json-schema`, `conformance`), the JS analog of
+ * `from-json-schema`, `from-typespec`, `conformance`), the JS analog of
  * `dextrin`'s `mix dextrin.*` tasks. One bin with subcommands rather
  * than a separate script per task, matching how Node CLIs are
  * conventionally shaped (`git <subcommand>`), not a mechanical
@@ -26,7 +26,8 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { decode, encode, decodeBinary, encodeBinary, answer, DXNError, Schema, Registry, Document, SchemaDocs, SchemaTree, JsonSchema } from '../src/dextrin.js';
 
@@ -46,6 +47,7 @@ Commands:
   from-json-schema SCHEMA... [--out FILE] [--name N] [--schemas DIR] [--draft D]
                    [--mongo] [--structs] [--assert-formats] [--strict]
                                                 Convert JSON Schema (and MongoDB's $jsonSchema) to DXNS
+  from-typespec MAIN.tsp [--out DIR]           Convert TypeSpec to DXNS with @joetjen/dextrin-typespec (Node 22)
   conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
 Run with no PATH, or an unrecognized command, to see this message.`;
@@ -70,6 +72,8 @@ function main(argv) {
       return run(() => cmdCheck(rest));
     case 'from-json-schema':
       return run(() => cmdFromJsonSchema(rest));
+    case 'from-typespec':
+      return run(() => cmdFromTypespec(rest));
     case 'conformance':
       return run(() => cmdConformance(rest));
     default:
@@ -236,6 +240,27 @@ function cmdCheck(argv) {
   }
   for (const p of result.problems) console.error(`${p.file}:${p.line}: ${p.message}`);
   throw new Error(`${result.problems.length} problem(s)`);
+}
+
+/**
+ * `dextrin from-typespec MAIN.tsp [--out DIR]`: TypeSpec to DXNS, by running
+ * TypeSpec's own compiler with the `@joetjen/dextrin-typespec` emitter
+ * through npx, as `mix dextrin.from_typespec` does (dextrin's
+ * design/typespec-emitter.md). The files go straight into `--out`
+ * (default `schemas/`), one per namespace and schema version. Needs Node 22
+ * and the emitter installed where the TypeSpec project is.
+ * @param {string[]} argv
+ * @param {(cmd: string, args: string[]) => {status: number | null, error?: Error}} [runner]
+ */
+function cmdFromTypespec(argv, runner = (cmd, args) => spawnSync(cmd, args, { stdio: 'inherit' })) {
+  const { positional, options } = parseArgs(argv, { options: ['out'] });
+  if (positional.length !== 1) throw new Error('usage: dextrin from-typespec MAIN.tsp [--out DIR]');
+  const out = resolvePath(options.out ?? 'schemas');
+  const emitter = '@joetjen/dextrin-typespec';
+  const result = runner('npx', ['--no-install', 'tsp', 'compile', positional[0], '--emit', emitter, '--option', `${emitter}.emitter-output-dir=${out}`]);
+  if (result.error) throw new Error('npx was not found: TypeSpec needs Node 22 or later, with npx on the PATH');
+  if (result.status !== 0) throw new Error(`tsp compile failed (exit ${result.status})`);
+  process.stdout.write(`wrote ${out}\n`);
 }
 
 /**

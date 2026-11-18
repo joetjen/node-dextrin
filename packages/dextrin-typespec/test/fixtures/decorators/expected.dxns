@@ -1,0 +1,16 @@
+%{
+  User: {:doc %schema{
+    id: {:doc :string %{key: true}}
+    name: {:refine :string %{min-length: 1 max-length: 40}}
+    age: {:refine :int32 %{min: 0 exclusive-max: 150}}
+    since: {:refine :timestamp %{min: @datetime "2000-01-01T00:00:00Z"}}
+    handle: {:doc {:refine :string %{pattern: @regex "^[a-z]+$"}} %{messages: %{pattern: "lower case only"}}}
+    ref: {:refine :string %{format: :uuid}}
+    zip: {:doc :string %{meta: %{"typespec.format" => "postal-code"}}}
+    password: {:doc :string %{secret: true}}
+    created: {:doc :timestamp %{visibility: [:read]}}
+    secretAnswer: {:doc :string %{visibility: [:create :update]}}
+    legacy?: {:doc :string %{deprecated: "use name"}}
+    nick?: {:doc :string %{examples: ["x"]}}
+  } %{title: "User" description: "A user of the shop."}}
+}

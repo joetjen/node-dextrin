@@ -1,0 +1,45 @@
+{
+  "name": "@joetjen/dextrin-typespec",
+  "version": "0.1.0",
+  "description": "A TypeSpec emitter that writes DXNS, Dextrin's schema language",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "peerDependencies": {
+    "@typespec/compiler": "^1.18.0",
+    "@typespec/versioning": "^0.88.0"
+  },
+  "dependencies": {
+    "@joetjen/dextrin": "file:../.."
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@typespec/compiler": "1.18.0",
+    "@typespec/versioning": "0.88.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "typespec",
+    "emitter",
+    "dxns",
+    "dextrin",
+    "schema"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joetjen/node-dextrin.git",
+    "directory": "packages/dextrin-typespec"
+  }
+}

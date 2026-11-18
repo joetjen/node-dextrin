@@ -1,0 +1,16 @@
+%{
+  Base: %schema{id: :string note?: :string}
+  Pet: %schema extends Base {
+    name: :string
+    age?: %field{type: :int32 default: 0}
+    tags?: %field{type: {:list-of :string} default: ["new"]}
+  }
+  Copy: %schema includes Base {extra: :boolean}
+  Spread: %schema includes Base {own: :string}
+  Labels: %schema{name: :string * :string => :string - *}
+  Bag: {:map-of :string :int32}
+  Holder: %schema{
+    inline: %shape{a: :string b?: :int32}
+    maybe?: :never
+  }
+}

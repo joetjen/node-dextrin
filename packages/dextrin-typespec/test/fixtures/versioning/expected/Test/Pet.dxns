@@ -1,0 +1,1 @@
+%{Pet: {:doc %schema(1){name: :string colour: Test/Color(1)} %{meta: %{"typespec.version" => "2024-01-01"}}}}

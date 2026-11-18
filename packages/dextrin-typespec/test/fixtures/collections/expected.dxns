@@ -1,0 +1,13 @@
+%{
+  A: %schema{a: :string}
+  B: %schema{b: :int32}
+  AB: %schema includes A B {}
+  Collections: %schema{
+    list: {:list-of :string}
+    some: {:refine {:list-of :int32} %{min-count: 1 max-count: 3}}
+    tuple: {:list-items :string :int32}
+    both: {:all-of A B}
+    map: {:map-of :string :boolean}
+    defaulted?: %field{type: {:map-of :string :int32} default: %{"x" => 1}}
+  }
+}

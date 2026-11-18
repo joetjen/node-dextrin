@@ -1,0 +1,9 @@
+%{
+  AnimalBase: %schema{name: :string}
+  Cat: %schema extends AnimalBase {kind: {:const "cat"} meows: :boolean}
+  Dog: %schema extends AnimalBase {kind: {:const "dog"} barks: :boolean}
+  Animal: {:doc {:one-of Cat Dog} %{discriminator: :kind}}
+  Shape: %shape{type: {:enum "circle" "square"} data: {:case type %{"circle" => Circle "square" => Square}}}
+  Circle: %schema{r: :float}
+  Square: %schema{side: :float}
+}

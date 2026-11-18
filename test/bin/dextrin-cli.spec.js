@@ -225,4 +225,42 @@ describe('bin/dextrin.js CLI', () => {
       expect(result.stderr).to.include('1 warning(s), and --warnings-as-errors');
     });
   });
+
+  // dextrin's T682: TypeSpec to DXNS through TypeSpec's own compiler. A fake
+  // npx first on the PATH records what the command runs.
+  describe('from-typespec', function () {
+    // Two processes each, the CLI and the fake npx: more than mocha's 2 s
+    // default on a busy machine.
+    this.timeout(10000);
+
+    const fakeNpx = (status) => {
+      const dir = mkdtempSync(join(tmpdir(), 'dextrin-npx-'));
+      const log = join(dir, 'args.txt');
+      writeFileSync(join(dir, 'npx'), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(log)}\nexit ${status}\n`, { mode: 0o755 });
+      return { dir, log };
+    };
+
+    it('runs tsp compile with the emitter, writing into --out', () => {
+      const { dir, log } = fakeNpx(0);
+      const out = execFileSync(process.execPath, [CLI, 'from-typespec', 'main.tsp', '--out', '/tmp/x'], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      });
+      expect(out).to.contain('wrote /tmp/x');
+      expect(readFileSync(log, 'utf8').trim().split('\n')).to.deep.equal([
+        '--no-install', 'tsp', 'compile', 'main.tsp', '--emit', '@joetjen/dextrin-typespec',
+        '--option', '@joetjen/dextrin-typespec.emitter-output-dir=/tmp/x',
+      ]);
+    });
+
+    it('fails when the compile fails', () => {
+      const { dir } = fakeNpx(2);
+      expect(() =>
+        execFileSync(process.execPath, [CLI, 'from-typespec', 'main.tsp'], {
+          stdio: 'pipe',
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        }),
+      ).to.throw(/tsp compile failed/);
+    });
+  });
 });

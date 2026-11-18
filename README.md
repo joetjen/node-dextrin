@@ -475,6 +475,7 @@ npx dextrin compat old-schemas/ schemas/                            # changed sc
 npx dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 npx dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] \
   [--mongo] [--structs] [--assert-formats] [--strict]               # JSON Schema to DXNS
+npx dextrin from-typespec main.tsp [--out schemas/]                 # TypeSpec to DXNS (Node 22)
 ```
 
 `from-json-schema` converts JSON Schema -- drafts 04, 06, 07, 2019-09
@@ -486,6 +487,12 @@ place it can't say exactly is printed to standard error as
 `inexact: PATH: why`; `--strict` fails on any. The JSON is read with its
 keys in the order written (`JSON.parse` would move integer-like keys
 first), so properties become fields in that order.
+
+`from-typespec` runs TypeSpec's own compiler with this repository's
+second package, [`@joetjen/dextrin-typespec`](packages/dextrin-typespec),
+a TypeSpec emitter that writes one `.dxns` file per namespace -- per
+schema version in a versioned namespace -- into `--out`. It needs Node 22
+and the emitter installed where the TypeSpec project is.
 
 ## Guides
 
