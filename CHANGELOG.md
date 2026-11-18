@@ -49,6 +49,18 @@ reference:
   strict decode or not. Both are inherited from bases.
 - **`min-count` and `max-count` on maps, shapes and structs** (DXNS.md
   §2): the entries present.
+- **`dextrin docs` shows everything DXNS gained since it was written**
+  (T696): a head's bases as links and the fields it leaves out; typed
+  extras (`* K => V`) and `- *` as rows of the body; a named type's
+  versions (`%type(N)`) beside a schema's; a pinned reference
+  (`Tier(1)`, `{:at Tier 1}`) linking to the version it pins; a
+  deprecated version, field or definition struck through, with its
+  reason; a generic's parameters with their bounds and defaults; chips
+  for `key`, `secret`, `visibility` and `discriminator`, and a list of
+  `messages`; a computed default; and, for a file a converter or emitter
+  wrote, what generated it from what, instead of its header as prose.
+  The example gains `acme.billing` and versions of `Customer` and
+  `Tier` that use them.
 - **`dextrin from-json-schema`** and `JsonSchema.toDxns`: JSON Schema to
   DXNS, drafts 04, 06, 07, 2019-09 and 2020-12, and MongoDB's
   `$jsonSchema` with `bsonType`, as in the reference. It passes the

@@ -13,6 +13,7 @@ const Docs = require('../docs.cjs');
 const { escape, toHtml } = require('./markdown.cjs');
 const { STYLESHEET, THEME_EARLY, THEME_SWITCH } = require('./assets.cjs');
 const DXNList = require('../../values/list.cjs');
+const DXNKeyword = require('../../values/keyword.cjs');
 
 /**
  * @typedef {import('../docs.cjs').Definition} Definition
@@ -133,6 +134,11 @@ function anchor(d) {
   return d.internalTo === null ? d.short : `${shortOf(d.internalTo)}.${d.short}`;
 }
 
+/** Where version `n` of a definition is: its own anchor and the version. @param {Definition} d @param {number} n */
+function versionAnchor(d, n) {
+  return `${anchor(d)}-v${n}`;
+}
+
 /** @param {string} name */
 function shortOf(name) {
   const parts = name.split('/');
@@ -156,7 +162,8 @@ function usedBy(definitions) {
   const out = new Map();
   const seen = new Set();
   for (const d of definitions) {
-    const refs = [...new Set(typesOf(d).flatMap((t) => Docs.references(t, d.scope)))].filter((r) => r !== d.name);
+    const bases = d.versions.flatMap((v) => v.bases.flatMap((group) => group.names.map(([name]) => Docs.resolve(name, d.scope))));
+    const refs = [...new Set([...typesOf(d).flatMap((t) => Docs.references(t, d.scope)), ...bases])].filter((r) => r !== d.name);
     for (const r of refs) {
       const key = `${r}\u0000${d.name}`;
       if (seen.has(key)) continue;
@@ -167,10 +174,22 @@ function usedBy(definitions) {
   return out;
 }
 
-/** @param {Definition} d @returns {Array<At | null>} */
+/**
+ * Every type a definition's versions write: a named type's definition and
+ * its parameters' bounds and defaults, a body's field types and its
+ * extras' keys and values.
+ * @param {Definition} d
+ * @returns {Array<At | null>}
+ */
 function typesOf(d) {
-  if (d.kind === 'type') return d.versions.map((v) => v.value);
-  return d.versions.flatMap((v) => v.fields.map((f) => f.type));
+  if (d.kind === 'type') return d.versions.flatMap((v) => [v.value, ...v.params.flatMap((p) => [p.bound, p.default])]);
+  return d.versions.flatMap((v) =>
+    v.fields.flatMap((row) => {
+      if (row.kind === 'field') return [row.type];
+      if (row.kind === 'extra') return [row.key, row.type];
+      return [];
+    })
+  );
 }
 
 // ---- the frame: the sidebar, then the page ------------------------------------
@@ -364,7 +383,7 @@ function definition(d, ctx) {
     .join(', ');
   return `<article class="def kind-${d.kind}" id="${escape(anchor(d))}">
   <header class="def-head">
-    <h2><a class="self" href="#${escape(anchor(d))}"><code>${escape(d.short)}</code></a></h2>
+    <h2><a class="self" href="#${escape(anchor(d))}"><code>${struck(escape(d.short), latest.annotations)}</code></a></h2>
     <div class="chips">${kindChip(d)}${internalChip(d, ctx)}${versionChips(d)}${annotationChips(latest.annotations)}</div>
     ${title(latest.annotations)}<p class="full-name"><code>${escape(d.name)}</code></p>
   </header>
@@ -385,7 +404,7 @@ function definition(d, ctx) {
  * @param {Definition} d @param {import('../docs.cjs').Notes} notes @param {Ctx} ctx
  */
 function about(d, notes, ctx) {
-  return [prose(described(notes), d, ctx), prose(d.doc, d, ctx), values(notes, d, ctx), examples(notes), meta(notes)]
+  return [prose(described(notes), d, ctx), prose(d.doc, d, ctx), values(notes, d, ctx), examples(notes), messages(notes), meta(notes)]
     .filter((part) => part !== '')
     .join('\n  ');
 }
@@ -395,17 +414,63 @@ function described(notes) {
   return typeof notes.description === 'string' ? notes.description : null;
 }
 
-/** Deprecated (with its reason), read-only and write-only, as chips. @param {import('../docs.cjs').Notes} notes */
+/**
+ * Deprecated (with its reason), read-only, write-only, key, secret,
+ * visibility and discriminator, as chips.
+ * @param {import('../docs.cjs').Notes} notes
+ */
 function annotationChips(notes) {
-  const reason = notes.deprecated;
-  let deprecated = '';
-  if (reason === true) deprecated = '<span class="chip chip-deprecated">deprecated</span>';
-  else if (typeof reason === 'string') deprecated = `<span class="chip chip-deprecated" title="${escape(reason)}">deprecated: ${escape(reason)}</span>`;
   const flags = ['read-only', 'write-only']
     .filter((key) => notes[key] === true)
     .map((key) => `<span class="chip chip-${key}">${key}</span>`)
     .join('');
-  return deprecated + flags;
+  return (
+    deprecatedChip(notes) +
+    flags +
+    keyChip(notes.key) +
+    (notes.secret === true ? '<span class="chip chip-secret">secret</span>' : '') +
+    visibilityChip(notes.visibility) +
+    discriminatorChip(notes.discriminator)
+  );
+}
+
+/** @param {unknown} key */
+function keyChip(key) {
+  if (key === true) return '<span class="chip chip-key">key</span>';
+  if (typeof key === 'string') return `<span class="chip chip-key">key: ${escape(key)}</span>`;
+  return '';
+}
+
+/** The stages that see a field (DXNS.md §1b); `[]` is none. @param {unknown} visibility */
+function visibilityChip(visibility) {
+  const stages = visibility instanceof DXNList ? visibility.items : Array.isArray(visibility) ? visibility : null;
+  if (stages === null) return '';
+  if (stages.length === 0) return '<span class="chip chip-visibility">visible on no stage</span>';
+  return `<span class="chip chip-visibility">visible on ${escape(stages.map(stageName).join(', '))}</span>`;
+}
+
+/** A stage's name: a keyword's, or anything else as written. @param {unknown} stage */
+function stageName(stage) {
+  return stage instanceof DXNKeyword ? stage.name : Docs.written(stage);
+}
+
+/** @param {unknown} field */
+function discriminatorChip(field) {
+  if (field === undefined || field === null) return '';
+  return `<span class="chip chip-discriminator">discriminator: ${escape(stageName(field))}</span>`;
+}
+
+/** Deprecated, with its reason when it gives one. @param {import('../docs.cjs').Notes} notes */
+function deprecatedChip(notes) {
+  const reason = notes.deprecated;
+  if (reason === true) return '<span class="chip chip-deprecated">deprecated</span>';
+  if (typeof reason === 'string') return `<span class="chip chip-deprecated" title="${escape(reason)}">deprecated: ${escape(reason)}</span>`;
+  return '';
+}
+
+/** `html` struck through when `notes` deprecate what it names. @param {string} html @param {import('../docs.cjs').Notes} notes */
+function struck(html, notes) {
+  return notes.deprecated === true || typeof notes.deprecated === 'string' ? `<s>${html}</s>` : html;
 }
 
 /** An enum's values, each with what its own annotations say. @param {import('../docs.cjs').Notes} notes @param {Definition} d @param {Ctx} ctx */
@@ -446,6 +511,17 @@ function meta(notes) {
   return `<dl class="meta"><p class="label">Meta</p>${rows}</dl>`;
 }
 
+/** A refusal's own words, by the refine key that refuses. @param {import('../docs.cjs').Notes} notes */
+function messages(notes) {
+  const all = notes.messages;
+  if (!(all instanceof Map) || all.size === 0) return '';
+  const rows = Array.from(all, ([key, message]) => [Docs.written(key), typeof message === 'string' ? message : String(message)])
+    .sort(([k1, m1], [k2, m2]) => byCodepoint(k1, k2) || byCodepoint(m1, m2))
+    .map(([key, message]) => `<dt><code>${escape(key)}</code></dt><dd>${escape(message)}</dd>`)
+    .join('');
+  return `<dl class="messages"><p class="label">Messages</p>${rows}</dl>`;
+}
+
 /** Strings in code point order, as Elixir sorts them. @param {string} a @param {string} b */
 function byCodepoint(a, b) {
   return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
@@ -466,6 +542,7 @@ function prose(text, d, ctx) {
 function kindChip(d) {
   if (d.kind === 'schema') return '<span class="chip chip-schema">struct schema</span>';
   if (d.kind === 'shape') return '<span class="chip chip-shape">shape</span>';
+  if (d.versions[0].params.length > 0) return '<span class="chip chip-type">generic type</span>';
   return '<span class="chip chip-type">type</span>';
 }
 
@@ -480,15 +557,18 @@ function internalChip(d, ctx) {
 
 /** @param {Definition} d */
 function versionChips(d) {
-  if (d.kind !== 'schema') return '';
   const [latest, ...older] = d.versions;
-  return `<span class="chip chip-version">v${latest.version}</span>` + (older.length === 0 ? '' : `<span class="chip chip-quiet">${older.length + 1} versions</span>`);
+  if (latest.version === null) return '';
+  return (
+    `<span class="chip chip-version" id="${escape(versionAnchor(d, latest.version))}">v${latest.version}</span>` +
+    (older.length === 0 ? '' : `<span class="chip chip-quiet">${older.length + 1} versions</span>`)
+  );
 }
 
 /** @param {Definition} d @param {import('../docs.cjs').Version} version @param {Ctx} ctx */
 function olderVersion(d, version, ctx) {
-  return `<details class="older">
-  <summary>Version ${version.version} <span class="file">${escape(version.file)}</span></summary>
+  return `<details class="older" id="${escape(versionAnchor(d, /** @type {number} */ (version.version)))}">
+  <summary>${struck(`Version ${version.version}`, version.annotations)} ${deprecatedChip(version.annotations)}<span class="file">${escape(version.file)}</span></summary>
   ${versionBody(d, version, ctx)}
 </details>
 `;
@@ -498,43 +578,119 @@ function olderVersion(d, version, ctx) {
 function versionBody(d, version, ctx) {
   if (d.kind === 'type') {
     return `<div class="type-def">
-  <p class="label">Definition</p>
+  ${paramsHtml(version.params, d, ctx)}<p class="label">Definition</p>
   <pre class="expr"><code>${typeHtml(version.value, d, ctx)}</code></pre>
-  <p class="file">${escape(version.file)}</p>
+  ${fileLine(version)}
 </div>
 `;
   }
   const note = version.note && version.note !== '' ? `<div class="prose version-note">${toHtml(version.note, linker(d.scope, ctx))}</div>` : '';
   const positionHead = d.kind === 'schema' ? '<th scope="col" class="pos" title="Position in the binary form">#</th>' : '';
-  const rows = version.fields
-    .map((f) => {
-      const notesHtml =
-        annotationChips(f.annotations) +
-        [described(f.annotations), f.description, f.doc]
-          .filter((t) => t !== null && t !== '')
-          .map((t) => toHtml(/** @type {string} */ (t), linker(d.scope, ctx)))
-          .join('') +
-        values(f.annotations, d, ctx) +
-        examples(f.annotations) +
-        meta(f.annotations);
-      const def = f.default ? `<div class="default"><span class="label">default</span> <code>${typeHtml(f.default, d, ctx)}</code></div>` : '';
-      return `<tr>
-  ${d.kind === 'schema' ? `<td class="pos">${f.position}</td>` : ''}
-  <th scope="row" class="field"><code>${escape(f.name)}</code>${f.optional ? '<span class="opt">optional</span>' : ''}</th>
-  <td class="type"><code>${typeHtml(f.type, d, ctx)}</code>${def}</td>
-  <td class="notes">${notesHtml}</td>
-</tr>
-`;
-    })
-    .join('');
+  const rows = version.fields.map((row) => fieldRow(row, d, ctx)).join('');
   return `${note}
-<div class="table-wrap">
+${basesHtml(version.bases, d, ctx)}<div class="table-wrap">
   <table class="fields">
     <thead><tr>${positionHead}<th scope="col">Field</th><th scope="col">Type</th><th scope="col">Notes</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>
-<p class="file">${escape(version.file)}</p>
+${fileLine(version)}
+`;
+}
+
+/** The file a version is in, and what generated it when a tool did. @param {import('../docs.cjs').Version} version */
+function fileLine(version) {
+  const from = version.provenance;
+  if (!from) return `<p class="file">${escape(version.file)}</p>`;
+  return `<p class="file">${escape(version.file)} <span class="provenance">generated by <code>${escape(from.tool)}</code> from <code>${escape(from.source)}</code></span></p>`;
+}
+
+/** The bases a head names, each a link (DXNS.md §4b). @param {import('../docs.cjs').Bases[]} groups @param {Definition} d @param {Ctx} ctx */
+function basesHtml(groups, d, ctx) {
+  if (groups.length === 0) return '';
+  const words = groups.map((group) => `${group.relation} ${group.names.map(([name, pin]) => nameLink(name, pin, d, ctx)).join(', ')}`).join(' ');
+  return `<p class="bases">${words}</p>\n`;
+}
+
+/** A generic's parameters, each with its bound and default (DXNS.md §5). @param {import('../docs.cjs').Param[]} params @param {Definition} d @param {Ctx} ctx */
+function paramsHtml(params, d, ctx) {
+  if (params.length === 0) return '';
+  const rows = params
+    .map((p) => {
+      let about = 'any type';
+      if (p.bound !== null && p.default === null) about = `within <code>${typeHtml(p.bound, d, ctx)}</code>`;
+      else if (p.bound !== null) about = `within <code>${typeHtml(p.bound, d, ctx)}</code>, default <code>${typeHtml(p.default, d, ctx)}</code>`;
+      return `<dt><code>${escape(p.name)}</code></dt><dd>${about}</dd>`;
+    })
+    .join('');
+  return `<dl class="params"><p class="label">Parameters</p>${rows}</dl>\n`;
+}
+
+/**
+ * The comments on a row that is not a field.
+ * @param {{doc: string}} row
+ * @param {Definition} d
+ * @param {Ctx} ctx
+ */
+function rowDoc(row, d, ctx) {
+  return row.doc ? toHtml(row.doc, linker(d.scope, ctx)) : '';
+}
+
+/**
+ * One row of a body: a field, a field left out of the bases, the extras,
+ * or the closing.
+ * @param {import('../docs.cjs').Row} row
+ * @param {Definition} d
+ * @param {Ctx} ctx
+ */
+function fieldRow(row, d, ctx) {
+  const pos = (/** @type {string | number} */ n) => (d.kind === 'schema' ? `<td class="pos">${n}</td>` : '');
+  if (row.kind === 'drop') {
+    return `<tr class="dropped">
+  ${pos('')}
+  <th scope="row" class="field"><code><s>${escape(row.name)}</s></code></th>
+  <td class="type"></td>
+  <td class="notes">left out of the bases${rowDoc(row, d, ctx)}</td>
+</tr>
+`;
+  }
+  if (row.kind === 'closed') {
+    return `<tr class="closed">
+  ${pos('')}
+  <th scope="row" class="field"><code>- *</code></th>
+  <td class="type"></td>
+  <td class="notes">no entries beyond these${rowDoc(row, d, ctx)}</td>
+</tr>
+`;
+  }
+  if (row.kind === 'extra') {
+    return `<tr class="extras">
+  ${pos('')}
+  <th scope="row" class="field"><code>* ${typeHtml(row.key, d, ctx)}</code></th>
+  <td class="type"><code>${typeHtml(row.type, d, ctx)}</code></td>
+  <td class="notes">any other entry with such a key${rowDoc(row, d, ctx)}</td>
+</tr>
+`;
+  }
+  const f = row;
+  const notesHtml =
+    annotationChips(f.annotations) +
+    [described(f.annotations), f.description, f.doc]
+      .filter((t) => t !== null && t !== '')
+      .map((t) => toHtml(/** @type {string} */ (t), linker(d.scope, ctx)))
+      .join('') +
+    values(f.annotations, d, ctx) +
+    examples(f.annotations) +
+    messages(f.annotations) +
+    meta(f.annotations);
+  const def = f.default ? `<div class="default"><span class="label">default</span> <code>${typeHtml(f.default, d, ctx)}</code></div>` : '';
+  const computed = f.computed ? `<div class="default"><span class="label">computed</span> <code>${typeHtml(f.computed, d, ctx)}</code></div>` : '';
+  return `<tr>
+  ${pos(f.position)}
+  <th scope="row" class="field"><code>${struck(escape(f.name), f.annotations)}</code>${f.optional ? '<span class="opt">optional</span>' : ''}</th>
+  <td class="type"><code>${typeHtml(f.type, d, ctx)}</code>${def}${computed}</td>
+  <td class="notes">${notesHtml}</td>
+</tr>
 `;
 }
 
@@ -570,10 +726,9 @@ function typeHtml(at, d, ctx) {
  * @returns {string}
  */
 function render(src, node, d, ctx) {
-  if (Docs.isSymbol(src, node)) {
-    const written = Docs.text(src, node);
-    const target = ctx.known.get(Docs.resolve(written, d.scope));
-    return target ? `<a class="ref" href="${href(target)}">${escape(written)}</a>` : `<span class="sym">${escape(written)}</span>`;
+  if (Docs.isSymbol(src, node) || node.kind === 'pinned') {
+    const [name, pin] = Docs.pinned(src, node);
+    return link(Docs.text(src, node), name, pin, d, ctx);
   }
   if (node.kind === 'body' && node.children.length === 0 && node.first === node.last) {
     const type = src.tokens[node.first].type;
@@ -583,19 +738,71 @@ function render(src, node, d, ctx) {
   if (node.kind === 'tuple') {
     const values = node.children.filter((c) => c.kind === 'value');
     if (values.length === 3 && Docs.text(src, values[0]) === ':case') return caseHtml(src, values[1], values[2], d, ctx);
+    if (values.length === 3 && Docs.text(src, values[0]) === ':at') return plain(src, node, d, ctx, atLink(src, values[1], values[2], d, ctx));
   }
-  // Its tokens and its children in order, each piece the tokens it
-  // covers, joined by a space wherever the source has a gap.
+  return plain(src, node, d, ctx, null);
+}
+
+/**
+ * A node's tokens and its children in order, each piece the tokens it
+ * covers, joined by a space wherever the source has a gap; `instead`, when
+ * given, writes one of its children in place of `render`.
+ * @param {import('../docs.cjs').Src} src
+ * @param {SyntaxNode} node
+ * @param {Definition} d
+ * @param {Ctx} ctx
+ * @param {{child: SyntaxNode, html: string} | null} instead
+ * @returns {string}
+ */
+function plain(src, node, d, ctx, instead) {
   /** @type {Array<{last: number, html: string}>} */
   const pieces = [];
   let i = node.first;
   for (const child of node.children) {
     for (; i < child.first; i += 1) pieces.push({ last: i, html: escape(Docs.tokenText(src, i)) });
-    pieces.push({ last: child.last, html: render(src, child, d, ctx) });
+    pieces.push({ last: child.last, html: instead && instead.child === child ? instead.html : render(src, child, d, ctx) });
     i = child.last + 1;
   }
   for (; i <= node.last; i += 1) pieces.push({ last: i, html: escape(Docs.tokenText(src, i)) });
   return pieces.map((p, k) => (k > 0 && gap(src, pieces[k - 1].last) ? ' ' : '') + p.html).join('');
+}
+
+/**
+ * `{:at Name N}`, what `Name(N)` writes (DXNS.md §5c): the name, linking to
+ * version N.
+ * @param {import('../docs.cjs').Src} src
+ * @param {SyntaxNode} nameValue
+ * @param {SyntaxNode} versionValue
+ * @param {Definition} d
+ * @param {Ctx} ctx
+ */
+function atLink(src, nameValue, versionValue, d, ctx) {
+  const body = Docs.bodyOf(nameValue);
+  const [name] = body ? Docs.pinned(src, body) : [null];
+  const written = Docs.text(src, versionValue);
+  const pin = /^[+-]?[0-9]+$/.test(written) ? Number(written) : null;
+  return { child: nameValue, html: link(Docs.text(src, nameValue), name, pin, d, ctx) };
+}
+
+/**
+ * `written`, naming `name` pinned to `pin` (or null), as a link to that
+ * definition -- to that version of it when it has one -- or as a name.
+ * @param {string} written
+ * @param {string | null} name
+ * @param {number | null} pin
+ * @param {Definition} d
+ * @param {Ctx} ctx
+ */
+function link(written, name, pin, d, ctx) {
+  const target = name === null ? undefined : ctx.known.get(Docs.resolve(name, d.scope));
+  if (!target) return `<span class="sym">${escape(written)}</span>`;
+  const at = pin !== null && target.versions.some((v) => v.version === pin) ? `${pageOf(target.namespace)}#${versionAnchor(target, pin)}` : href(target);
+  return `<a class="ref" href="${at}">${escape(written)}</a>`;
+}
+
+/** A head's base, written with the version it pins. @param {string} name @param {number | null} pin @param {Definition} d @param {Ctx} ctx */
+function nameLink(name, pin, d, ctx) {
+  return link(pin === null ? name : `${name}(${pin})`, name, pin, d, ctx);
 }
 
 /** Whether there is trivia between the token at `i` and the next. @param {import('../docs.cjs').Src} src @param {number} i */
